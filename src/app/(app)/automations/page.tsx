@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { db } from "@/lib/db";
 import { PageChrome } from "@/components/PageChrome";
 import { IconBolt } from "@/components/icons";
@@ -28,9 +29,10 @@ export default async function AutomationsPage() {
             const graph = (a.graph as { nodes?: unknown[] } | null) ?? {};
             const nodeCount = Array.isArray(graph.nodes) ? graph.nodes.length : 0;
             return (
-              <div
+              <Link
                 key={a.id}
-                className="animate-rise flex flex-col rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4"
+                href={`/automations/${a.id}`}
+                className="animate-rise flex flex-col rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4 transition-colors hover:border-[var(--color-border-strong)] hover:bg-[var(--color-surface-2)]"
               >
                 <div className="flex items-start justify-between">
                   <div className="grid h-9 w-9 place-items-center rounded-lg bg-[var(--color-accent-soft)] text-[var(--color-accent)]">
@@ -61,7 +63,7 @@ export default async function AutomationsPage() {
                 <div className="mt-3 border-t border-[var(--color-border)] pt-2 font-mono text-[11px] text-[var(--color-faint)]">
                   {nodeCount} nodes · v{a.version}
                 </div>
-              </div>
+              </Link>
             );
           })}
 
