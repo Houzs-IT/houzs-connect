@@ -78,17 +78,18 @@ export default async function ConversationPage({
 
       {/* Right: contact + order attributes */}
       <ContactPanel
+        conversationId={convo.id}
         contactName={name}
         phone={convo.contact.phone}
         status={convo.status}
-        assignedAgent={convo.assignedAgent?.name ?? null}
-        assignedDepartment={convo.assignedDepartment?.name ?? null}
-        tags={convo.tagLinks.map((t) => ({ name: t.tag.name, color: t.tag.color }))}
+        agentId={convo.assignedAgentId}
+        departmentId={convo.assignedDepartmentId}
+        tags={convo.tagLinks.map((t) => ({ id: t.tag.id, name: t.tag.name, color: t.tag.color }))}
         fields={fields.map((f) => ({ key: f.key, name: f.name }))}
         values={contactAttrs}
         members={members.map((m) => ({ id: m.id, name: m.name }))}
         departments={departments.map((d) => ({ id: d.id, name: d.name }))}
-        allTags={tags.map((t) => ({ name: t.name, color: t.color }))}
+        allTags={tags.map((t) => ({ id: t.id, name: t.name, color: t.color }))}
         marketingOptIn={convo.contact.marketingOptIn}
       />
     </div>

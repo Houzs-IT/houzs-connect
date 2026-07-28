@@ -220,6 +220,81 @@ async function main() {
     },
   });
 
+  // Driver / TMS automation: fired when a driver marks en-route / arrived / delivered.
+  // Branches on driver_event; on DELIVERED it asks the customer to confirm, then bumps
+  // the TMS status and writes it back to the ERP/TMS.
+  const supportDeptId = deptByName.get("Support") ?? null;
+  await db.automation.create({
+    data: {
+      companyId: company.id,
+      channelId: channel.id,
+      name: "Driver Dispatch Update",
+      description:
+        "Driver event → notify the customer; on delivery confirmation bump TMS status + write back to ERP.",
+      triggerType: "DRIVER_EVENT",
+      status: "PUBLISHED",
+      enabled: true,
+      triggerConfig: { source: "driver-app" },
+      graph: {
+        nodes: [
+          { id: "d_trigger", type: "trigger", data: {}, x: 40, y: 220 },
+          {
+            id: "d_router",
+            type: "criteria_router",
+            x: 240,
+            y: 220,
+            data: {
+              rules: [
+                { branch: "enroute", field: "driver_event", op: "eq", value: "EN_ROUTE" },
+                { branch: "arrived", field: "driver_event", op: "eq", value: "ARRIVED" },
+                { branch: "delivered", field: "driver_event", op: "eq", value: "DELIVERED" },
+              ],
+            },
+          },
+          { id: "d_enroute", type: "send_text", x: 480, y: 40, data: { message: "🚚 Your order {ref_1} is on the way! Driver {drivers_name} ({car_plate}), ETA {delivery_time}." } },
+          { id: "d_arrived", type: "send_text", x: 480, y: 160, data: { message: "📍 Our driver {drivers_name} has arrived for order {ref_1}. Please be ready to receive it." } },
+          {
+            id: "d_ask",
+            type: "ask_buttons",
+            x: 480,
+            y: 300,
+            data: {
+              message: "Has your order {ref_1} been delivered successfully?",
+              buttons: [
+                { id: "received", label: "Received ✅" },
+                { id: "issue", label: "Report an issue" },
+              ],
+            },
+          },
+          // received branch → TMS jumps to Delivered
+          { id: "d_set_delivered", type: "set_attribute", x: 720, y: 220, data: { key: "tms_status", value: "Delivered" } },
+          { id: "d_tms_sync", type: "call_rest_api", x: 940, y: 220, data: { method: "POST", url: "{{TMS_STATUS_WEBHOOK_URL}}" } },
+          { id: "d_tag_done", type: "add_tag", x: 1160, y: 220, data: { tag: "delivered" } },
+          { id: "d_thanks", type: "send_text", x: 1380, y: 220, data: { message: "Thank you, {full_name}! Your delivery is complete. 🎉 We hope you love your new furniture." } },
+          // issue branch → assign to Support
+          { id: "d_issue_attr", type: "set_attribute", x: 720, y: 420, data: { key: "delivery_confirmation", value: "Issue reported" } },
+          { id: "d_issue_assign", type: "assign", x: 940, y: 420, data: { departmentId: supportDeptId } },
+          { id: "d_issue_tag", type: "add_tag", x: 1160, y: 420, data: { tag: "delivery issue" } },
+          { id: "d_issue_msg", type: "send_text", x: 1380, y: 420, data: { message: "Sorry to hear that 🙏 An agent will assist you with order {ref_1} shortly." } },
+        ],
+        edges: [
+          { from: "d_trigger", to: "d_router" },
+          { from: "d_router", to: "d_enroute", branch: "enroute" },
+          { from: "d_router", to: "d_arrived", branch: "arrived" },
+          { from: "d_router", to: "d_ask", branch: "delivered" },
+          { from: "d_ask", to: "d_set_delivered", branch: "received" },
+          { from: "d_set_delivered", to: "d_tms_sync" },
+          { from: "d_tms_sync", to: "d_tag_done" },
+          { from: "d_tag_done", to: "d_thanks" },
+          { from: "d_ask", to: "d_issue_attr", branch: "issue" },
+          { from: "d_issue_attr", to: "d_issue_assign" },
+          { from: "d_issue_assign", to: "d_issue_tag" },
+          { from: "d_issue_tag", to: "d_issue_msg" },
+        ],
+      },
+    },
+  });
+
   const counts = {
     members: await db.member.count(),
     departments: await db.department.count(),

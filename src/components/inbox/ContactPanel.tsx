@@ -1,35 +1,39 @@
 import { initials, tint } from "@/lib/format";
+import { ConversationActions } from "./ConversationActions";
 
 type Field = { key: string; name: string };
-type NamedColor = { name: string; color: string };
+type NamedColor = { id: string; name: string; color: string };
+type Named = { id: string; name: string };
 
 export function ContactPanel({
+  conversationId,
   contactName,
   phone,
   status,
-  assignedAgent,
-  assignedDepartment,
+  agentId,
+  departmentId,
   tags,
   fields,
   values,
   members,
   departments,
+  allTags,
   marketingOptIn,
 }: {
+  conversationId: string;
   contactName: string;
   phone: string;
   status: string;
-  assignedAgent: string | null;
-  assignedDepartment: string | null;
+  agentId: string | null;
+  departmentId: string | null;
   tags: NamedColor[];
   fields: Field[];
   values: Record<string, string>;
-  members: { id: string; name: string }[];
-  departments: { id: string; name: string }[];
+  members: Named[];
+  departments: Named[];
   allTags: NamedColor[];
   marketingOptIn: boolean;
 }) {
-  // Only show fields that have a value (the customer's live order detail).
   const populated = fields.filter((f) => values[f.key] != null && values[f.key] !== "");
 
   return (
@@ -52,10 +56,17 @@ export function ContactPanel({
       </div>
 
       <Section title="Conversation">
-        <Row label="Status" value={status} />
-        <Row label="Assigned agent" value={assignedAgent ?? "Unassigned"} />
-        <Row label="Department" value={assignedDepartment ?? "—"} />
-        <div className="mt-2 flex items-center justify-between">
+        <ConversationActions
+          conversationId={conversationId}
+          members={members}
+          departments={departments}
+          allTags={allTags}
+          agentId={agentId}
+          departmentId={departmentId}
+          status={status}
+          activeTagNames={tags.map((t) => t.name)}
+        />
+        <div className="mt-3 flex items-center justify-between">
           <span className="text-[12px] text-[var(--color-muted)]">Marketing opt-in</span>
           <span
             className={`h-4 w-7 rounded-full p-0.5 transition-colors ${
@@ -68,23 +79,6 @@ export function ContactPanel({
               }`}
             />
           </span>
-        </div>
-      </Section>
-
-      <Section title="Tags">
-        <div className="flex flex-wrap gap-1.5">
-          {tags.length === 0 && (
-            <span className="text-[12px] text-[var(--color-faint)]">No tags</span>
-          )}
-          {tags.map((t) => (
-            <span
-              key={t.name}
-              className="rounded-md px-2 py-0.5 text-[11px] font-medium"
-              style={{ background: `${t.color}1f`, color: t.color }}
-            >
-              {t.name}
-            </span>
-          ))}
         </div>
       </Section>
 
@@ -128,17 +122,6 @@ function Section({
         {title}
       </h3>
       {children}
-    </div>
-  );
-}
-
-function Row({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="flex items-center justify-between py-0.5">
-      <span className="text-[12px] text-[var(--color-muted)]">{label}</span>
-      <span className="text-[12.5px] font-medium text-[var(--color-ink)]">
-        {value}
-      </span>
     </div>
   );
 }

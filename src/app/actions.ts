@@ -48,6 +48,71 @@ export async function sendMessage(formData: FormData) {
   revalidatePath("/inbox");
 }
 
+/** Assign a conversation to an agent and/or department. */
+export async function assignConversation(formData: FormData) {
+  const conversationId = String(formData.get("conversationId") ?? "");
+  const agentId = String(formData.get("assignedAgentId") ?? "");
+  const departmentId = String(formData.get("assignedDepartmentId") ?? "");
+  if (!conversationId) return;
+  await db.conversation.update({
+    where: { id: conversationId },
+    data: {
+      ...(formData.has("assignedAgentId")
+        ? { assignedAgentId: agentId || null }
+        : {}),
+      ...(formData.has("assignedDepartmentId")
+        ? { assignedDepartmentId: departmentId || null }
+        : {}),
+    },
+  });
+  revalidatePath(`/inbox/${conversationId}`);
+  revalidatePath("/inbox");
+}
+
+/** Change conversation status (OPEN / CLOSED / QUEUE / PENDING). */
+export async function setConversationStatus(formData: FormData) {
+  const conversationId = String(formData.get("conversationId") ?? "");
+  const status = String(formData.get("status") ?? "OPEN").toUpperCase();
+  if (!conversationId || !["OPEN", "CLOSED", "QUEUE", "PENDING"].includes(status)) return;
+  await db.conversation.update({
+    where: { id: conversationId },
+    data: {
+      status: status as "OPEN" | "CLOSED" | "QUEUE" | "PENDING",
+      ...(status === "CLOSED" ? { unreadCount: 0 } : {}),
+    },
+  });
+  revalidatePath(`/inbox/${conversationId}`);
+  revalidatePath("/inbox");
+}
+
+/** Add or remove a tag on a conversation + its contact. */
+export async function toggleConversationTag(formData: FormData) {
+  const conversationId = String(formData.get("conversationId") ?? "");
+  const tagId = String(formData.get("tagId") ?? "");
+  const remove = formData.get("remove") === "1";
+  if (!conversationId || !tagId) return;
+  const convo = await db.conversation.findUnique({ where: { id: conversationId } });
+  if (!convo) return;
+
+  if (remove) {
+    await db.conversationTag.deleteMany({ where: { conversationId, tagId } });
+    await db.contactTag.deleteMany({ where: { contactId: convo.contactId, tagId } });
+  } else {
+    await db.conversationTag.upsert({
+      where: { conversationId_tagId: { conversationId, tagId } },
+      update: {},
+      create: { conversationId, tagId },
+    });
+    await db.contactTag.upsert({
+      where: { contactId_tagId: { contactId: convo.contactId, tagId } },
+      update: {},
+      create: { contactId: convo.contactId, tagId },
+    });
+  }
+  revalidatePath(`/inbox/${conversationId}`);
+  revalidatePath("/inbox");
+}
+
 /** DEMO: simulate the customer tapping an interactive button, driving the automation. */
 export async function demoTap(formData: FormData) {
   const conversationId = String(formData.get("conversationId") ?? "");
