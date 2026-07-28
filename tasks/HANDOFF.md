@@ -2,7 +2,30 @@
 
 _Last updated: 2026-07-28_
 
-## Where we are: Phase 1 (Shell + Inbox + RBAC) — DONE ✅
+## Where we are: Phase 2a (Automation engine + ERP trigger) — DONE ✅
+
+The owner's #1 ask: ERP triggers a flow that sends the first WhatsApp message, and the
+customer's tap drives the next content. Working end-to-end in DEMO.
+
+- Engine `src/lib/automation/engine.ts` — node-graph runtime (trigger, send_text,
+  ask_buttons, collect_input, criteria_router, set_attribute, add/remove_tag, assign,
+  set_status, call_rest_api, delay). AutomationRun persists a cursor → pause on
+  interactive/collect nodes, resume on reply. Merge vars ({full_name}{ref_1}…).
+- `src/lib/whatsapp/transport.ts` (DEMO send/record + buttons + 24h window).
+- `src/lib/automation/dispatch.ts` — `handleErpWebhook` (upsert contact + fire WEBHOOK
+  automation) + `handleCustomerReply` (resume waiting runs).
+- Routes: `POST /api/webhooks/erp` (ERP entry), `POST /api/demo/reply` (simulator).
+- Inbox: interactive buttons render + tappable; "reply as customer" demo bar.
+- Verified: webhook → interpolated first msg + buttons → Confirm → attr+tag+ERP-sync+reply
+  (completed); Change → collect reason (saved) → tag + reply. Typecheck clean.
+
+### Next in Phase 2: visual builder + inbox write-actions
+- react-flow builder canvas (view + edit graph), trigger catalog, node palette/inspector.
+- Wire inbox actions to server: assign agent/department, add/remove tag, set status, close.
+- Trigger types beyond WEBHOOK: NEW_INCOMING_MESSAGE, TAG_ADDED (start automations on
+  inbound, not just resume).
+
+## Earlier: Phase 1 (Shell + Inbox + RBAC) — DONE ✅
 
 - Design system (Tailwind v4 + self-hosted Geist): warm-charcoal rail, light workspace,
   Houzs amber accent. `src/app/globals.css`.
