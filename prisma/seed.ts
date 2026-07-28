@@ -164,30 +164,57 @@ async function main() {
     }
   }
 
-  // A sample automation (delivery follow-up) — graph is a trimmed version of the real flow.
+  // Sample automation: delivery follow-up. Fired by an ERP webhook; sends the first
+  // interactive message, then branches on the customer's button tap (confirm / amend).
   await db.automation.create({
     data: {
       companyId: company.id,
       channelId: channel.id,
       name: "New Delivery Follow-up",
-      description: "Ask the customer for a delivery date, collect details, sync to ERP.",
+      description:
+        "ERP order-ready → ask the customer to confirm the delivery date; confirm syncs to ERP + tags, amend collects a reason.",
       triggerType: "WEBHOOK",
       status: "PUBLISHED",
       enabled: true,
       triggerConfig: { source: "erp", event: "order_ready" },
       graph: {
         nodes: [
-          { id: "trigger", type: "trigger", data: { event: "WEBHOOK" } },
-          { id: "ask_date", type: "ask_buttons", data: { message: "Please choose your delivery date.", buttons: ["Confirm Date", "Change Date"] } },
-          { id: "set_status", type: "set_attribute", data: { key: "delivery_message_status_1", value: "Done Scheduling" } },
-          { id: "sync_erp", type: "call_rest_api", data: { method: "POST", url: "{{ERP_WEBHOOK_URL}}" } },
-          { id: "tag", type: "add_tag", data: { tag: "scheduling" } },
+          { id: "n_trigger", type: "trigger", data: {}, x: 40, y: 200 },
+          {
+            id: "n_ask",
+            type: "ask_buttons",
+            x: 260,
+            y: 200,
+            data: {
+              message:
+                "Hi {full_name}! 👋 Your order {ref_1} is ready. Is {delivery_date_1} a good delivery date?",
+              buttons: [
+                { id: "confirm", label: "Confirm Date" },
+                { id: "amend", label: "Change Date" },
+              ],
+            },
+          },
+          // confirm branch
+          { id: "n_set_confirm", type: "set_attribute", x: 520, y: 90, data: { key: "delivery_message_status_1", value: "Done Scheduling" } },
+          { id: "n_tag_sched", type: "add_tag", x: 740, y: 90, data: { tag: "scheduling" } },
+          { id: "n_sync", type: "call_rest_api", x: 960, y: 90, data: { method: "POST", url: "{{ERP_WEBHOOK_URL}}" } },
+          { id: "n_confirm_msg", type: "send_text", x: 1180, y: 90, data: { message: "Thank you for confirming! ✅ We'll contact you a few days before {delivery_date_1} to confirm the exact time." } },
+          // amend branch
+          { id: "n_collect_reason", type: "collect_input", x: 520, y: 320, data: { message: "No problem! 🙏 May we know the reason for changing the date?", saveTo: "amend_date_reason" } },
+          { id: "n_set_amend", type: "set_attribute", x: 740, y: 320, data: { key: "delivery_message_status_1", value: "Pending Reschedule" } },
+          { id: "n_tag_resched", type: "add_tag", x: 960, y: 320, data: { tag: "pending reschedule" } },
+          { id: "n_amend_msg", type: "send_text", x: 1180, y: 320, data: { message: "Got it — we'll reschedule and follow up shortly. Thank you, {full_name}." } },
         ],
         edges: [
-          { from: "trigger", to: "ask_date" },
-          { from: "ask_date", to: "set_status" },
-          { from: "set_status", to: "sync_erp" },
-          { from: "sync_erp", to: "tag" },
+          { from: "n_trigger", to: "n_ask" },
+          { from: "n_ask", to: "n_set_confirm", branch: "confirm" },
+          { from: "n_set_confirm", to: "n_tag_sched" },
+          { from: "n_tag_sched", to: "n_sync" },
+          { from: "n_sync", to: "n_confirm_msg" },
+          { from: "n_ask", to: "n_collect_reason", branch: "amend" },
+          { from: "n_collect_reason", to: "n_set_amend" },
+          { from: "n_set_amend", to: "n_tag_resched" },
+          { from: "n_tag_resched", to: "n_amend_msg" },
         ],
       },
     },

@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { Thread } from "@/components/inbox/Thread";
 import { Composer } from "@/components/inbox/Composer";
 import { ContactPanel } from "@/components/inbox/ContactPanel";
+import { DemoReplyBar } from "@/components/inbox/DemoReplyBar";
 import { attrs, initials, tint } from "@/lib/format";
 
 export default async function ConversationPage({
@@ -66,7 +67,12 @@ export default async function ConversationPage({
           </div>
         </div>
 
-        <Thread messages={convo.messages} contactName={name} />
+        <Thread
+          messages={convo.messages}
+          contactName={name}
+          conversationId={convo.id}
+        />
+        <DemoReplyBar conversationId={convo.id} />
         <Composer conversationId={convo.id} />
       </div>
 
