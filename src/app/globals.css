@@ -1,26 +1,101 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
+/*
+  Houzs Connect — "refined operations console"
+  Deep warm-charcoal rail + calm light workspace + amber (Houzs gold) accent.
+*/
+
+@theme {
+  --color-canvas: #f4f3f0; /* app background, warm neutral */
+  --color-surface: #ffffff; /* cards, panels */
+  --color-surface-2: #faf9f7; /* subtle raised */
+  --color-ink: #1b1a17; /* primary text, warm near-black */
+  --color-muted: #6d6a63; /* secondary text */
+  --color-faint: #9a968d; /* tertiary / placeholders */
+  --color-border: #e7e4de; /* hairlines */
+  --color-border-strong: #d8d4cc;
+
+  --color-accent: #e2900a; /* Houzs amber (accessible on light) */
+  --color-accent-hi: #f5b301; /* bright highlight */
+  --color-accent-soft: #fbeecb; /* tinted fill */
+  --color-accent-ink: #5a3d05; /* text on soft */
+
+  --color-rail: #1c1a17; /* sidebar */
+  --color-rail-2: #262320; /* sidebar hover */
+  --color-rail-ink: #d9d5cd; /* sidebar text */
+  --color-rail-faint: #8f897d;
+
+  --color-in: #ffffff; /* inbound bubble */
+  --color-out: #fbeaca; /* outbound bubble (brand tint, not WA green) */
+
+  --color-success: #2f8f5b;
+  --color-danger: #d5493f;
+  --color-info: #0d7490;
+
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
+
+  --radius: 0.625rem;
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+@layer base {
+  html {
+    background: var(--color-canvas);
+  }
+  body {
+    background: var(--color-canvas);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    font-feature-settings: "cv01", "cv03", "ss01";
+    -webkit-font-smoothing: antialiased;
+  }
+  * {
+    border-color: var(--color-border);
+  }
+  ::selection {
+    background: var(--color-accent-hi);
+    color: #2a1c02;
   }
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+@layer utilities {
+  .scroll-thin {
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-border-strong) transparent;
+  }
+  .scroll-thin::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  .scroll-thin::-webkit-scrollbar-thumb {
+    background: var(--color-border-strong);
+    border-radius: 999px;
+    border: 2px solid transparent;
+    background-clip: content-box;
+  }
+  .scroll-thin::-webkit-scrollbar-thumb:hover {
+    background: var(--color-faint);
+    background-clip: content-box;
+  }
+  .dot-grid {
+    background-image: radial-gradient(
+      var(--color-border-strong) 1px,
+      transparent 1px
+    );
+    background-size: 18px 18px;
+  }
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.animate-rise {
+  animation: rise 0.4s cubic-bezier(0.2, 0.7, 0.2, 1) both;
 }
