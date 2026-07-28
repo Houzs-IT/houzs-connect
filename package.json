@@ -1,0 +1,35 @@
+{
+  "name": "houzs-connect",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint",
+    "db:push": "node node_modules/prisma/build/index.js db push",
+    "db:studio": "node node_modules/prisma/build/index.js studio",
+    "db:generate": "node node_modules/prisma/build/index.js generate",
+    "db:seed": "node node_modules/tsx/dist/cli.mjs prisma/seed.ts",
+    "db:reset": "node node_modules/prisma/build/index.js db push --force-reset --accept-data-loss && pnpm db:seed"
+  },
+  "dependencies": {
+    "@prisma/client": "^6.2.1",
+    "next": "16.2.12",
+    "react": "19.2.4",
+    "react-dom": "19.2.4",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "eslint": "^9",
+    "eslint-config-next": "16.2.12",
+    "prisma": "^6.2.1",
+    "tailwindcss": "^4",
+    "tsx": "^4.19.2",
+    "typescript": "^5"
+  }
+}

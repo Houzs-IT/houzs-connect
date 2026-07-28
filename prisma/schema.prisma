@@ -1,0 +1,455 @@
+// Houzs Connect — data model
+// Dev: SQLite (zero infra). Prod: switch `provider` to "postgresql" + point DATABASE_URL
+// at the ERP's Supabase Postgres so this app reads/writes ERP order data directly
+// (replacing the legacy webhook + Google Apps Script bridge).
+//
+// Design notes:
+// - Multi-company (tenant = Company). Houzs Century, 2990s, etc.
+// - Org-chart RBAC: Member.managerId self-relation + Department/Team + Role. Visibility
+//   is derived (see src/lib/access.ts): you see conversations in your department/teams,
+//   assigned to you, or belonging to anyone who reports up to you.
+// - Contacts hold dynamic custom attributes as JSON; ContactField is the schema registry
+//   (mirrors Seampify's 63 fields). `_1/_2/_3` fields = up to 3 orders per contact.
+// - Automations store their node graph as JSON; the runtime interprets it.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────── Org & people ───────────────────────────
+
+model Company {
+  id        String   @id @default(cuid())
+  name      String
+  slug      String   @unique
+  createdAt DateTime @default(now())
+
+  members      Member[]
+  departments  Department[]
+  teams        Team[]
+  channels     Channel[]
+  contacts     Contact[]
+  contactFields ContactField[]
+  tags         Tag[]
+  automations  Automation[]
+  campaigns    Campaign[]
+  quickReplies QuickReply[]
+}
+
+enum Role {
+  OWNER      // full access, billing
+  ADMIN      // manage settings/automations/members
+  MANAGER    // sees own department + reports
+  AGENT      // support inbox
+  SALES      // sales staff
+  DRIVER     // triggers delivery events, limited view
+  VIEWER     // read-only dashboards
+}
+
+model Member {
+  id        String   @id @default(cuid())
+  companyId String
+  company   Company  @relation(fields: [companyId], references: [id])
+
+  name    String
+  email   String  @unique
+  phone   String?
+  title   String? // org-chart job title
+  role    Role    @default(AGENT)
+  status  String  @default("active") // active | disabled
+  concurrencyLimit Int @default(0)   // 0 = unlimited (Seampify parity)
+
+  // Org chart: who this person reports to
+  managerId String?
+  manager   Member?  @relation("OrgChart", fields: [managerId], references: [id])
+  reports   Member[] @relation("OrgChart")
+
+  departmentId String?
+  department   Department? @relation(fields: [departmentId], references: [id])
+  teamLinks    TeamMember[]
+
+  assignedConversations Conversation[] @relation("AssignedAgent")
+  sentMessages          Message[]      @relation("SentByMember")
+  notes                 Note[]
+  driverEvents          DriverEvent[]
+  createdAt             DateTime       @default(now())
+
+  @@index([companyId])
+  @@index([managerId])
+}
+
+model Department {
+  id        String   @id @default(cuid())
+  companyId String
+  company   Company  @relation(fields: [companyId], references: [id])
+  name      String
+
+  members       Member[]
+  conversations Conversation[] @relation("AssignedDepartment")
+
+  @@index([companyId])
+}
+
+model Team {
+  id        String   @id @default(cuid())
+  companyId String
+  company   Company  @relation(fields: [companyId], references: [id])
+  name      String
+  members   TeamMember[]
+
+  @@index([companyId])
+}
+
+model TeamMember {
+  teamId   String
+  team     Team   @relation(fields: [teamId], references: [id])
+  memberId String
+  member   Member @relation(fields: [memberId], references: [id])
+
+  @@id([teamId, memberId])
+}
+
+// ─────────────────────────── Channels ───────────────────────────
+
+model Channel {
+  id          String  @id @default(cuid())
+  companyId   String
+  company     Company @relation(fields: [companyId], references: [id])
+  displayName String
+  phone       String // WABA phone number
+  provider    String @default("whatsapp")
+  mode        String @default("DEMO") // DEMO | LIVE
+  isDefault   Boolean @default(false)
+
+  conversations Conversation[]
+  automations   Automation[]
+  campaigns     Campaign[]
+
+  @@index([companyId])
+}
+
+// ─────────────────────────── Contacts / CRM ───────────────────────────
+
+model Contact {
+  id        String   @id @default(cuid())
+  companyId String
+  company   Company  @relation(fields: [companyId], references: [id])
+
+  name      String?
+  phone     String
+  email     String?
+  source    String?
+  sourceId  String?
+  sourceUrl String?
+
+  // Dynamic custom attributes keyed by ContactField.key (Seampify's 63 fields).
+  // Nullable for SQLite portability; treated as {} in code.
+  attributes Json?
+
+  marketingOptIn Boolean @default(true)
+
+  conversations Conversation[]
+  payments      Payment[]
+  tagLinks      ContactTag[]
+  driverEvents  DriverEvent[]
+  createdAt     DateTime @default(now())
+
+  @@unique([companyId, phone])
+  @@index([companyId])
+}
+
+enum FieldType {
+  TEXT
+  NUMBER
+  DATE
+  BOOLEAN
+  SELECT
+}
+
+model ContactField {
+  id        String    @id @default(cuid())
+  companyId String
+  company   Company   @relation(fields: [companyId], references: [id])
+  key       String // e.g. delivery_date_1
+  name      String // e.g. Delivery Date 1
+  type      FieldType @default(TEXT)
+  options   Json? // for SELECT
+  createdAt DateTime  @default(now())
+
+  @@unique([companyId, key])
+  @@index([companyId])
+}
+
+// ─────────────────────────── Conversations / inbox ───────────────────────────
+
+enum ConversationStatus {
+  OPEN
+  CLOSED
+  QUEUE
+  PENDING
+}
+
+model Conversation {
+  id        String   @id @default(cuid())
+  channelId String
+  channel   Channel  @relation(fields: [channelId], references: [id])
+  contactId String
+  contact   Contact  @relation(fields: [contactId], references: [id])
+
+  status          ConversationStatus @default(OPEN)
+  assignedAgentId String?
+  assignedAgent   Member?            @relation("AssignedAgent", fields: [assignedAgentId], references: [id])
+  assignedDepartmentId String?
+  assignedDepartment   Department?   @relation("AssignedDepartment", fields: [assignedDepartmentId], references: [id])
+
+  lastMessageAt  DateTime?
+  windowExpiresAt DateTime? // WhatsApp 24h customer-service window
+  unreadCount    Int       @default(0)
+  createdAt      DateTime  @default(now())
+
+  messages Message[]
+  notes    Note[]
+  tagLinks ConversationTag[]
+  payments Payment[]
+
+  @@index([channelId])
+  @@index([contactId])
+  @@index([status])
+}
+
+enum Direction {
+  IN
+  OUT
+}
+
+enum MessageType {
+  TEXT
+  INTERACTIVE // buttons / list / flow
+  TEMPLATE
+  IMAGE
+  DOCUMENT
+  AUDIO
+  VIDEO
+}
+
+enum MessageStatus {
+  QUEUED
+  SENT
+  DELIVERED
+  READ
+  FAILED
+}
+
+model Message {
+  id             String        @id @default(cuid())
+  conversationId String
+  conversation   Conversation  @relation(fields: [conversationId], references: [id])
+
+  direction Direction
+  type      MessageType   @default(TEXT)
+  body      String?
+  mediaUrl  String?
+  status    MessageStatus @default(SENT)
+
+  // sender: a human agent (sentByMemberId) or the bot/automation (isBot)
+  sentByMemberId String?
+  sentByMember   Member? @relation("SentByMember", fields: [sentByMemberId], references: [id])
+  isBot          Boolean @default(false)
+
+  waMessageId       String? // Meta message id (LIVE mode)
+  interactivePayload Json?  // buttons/list definition or the callback the user tapped
+  createdAt         DateTime @default(now())
+
+  @@index([conversationId])
+}
+
+model Note {
+  id             String       @id @default(cuid())
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id])
+  memberId       String
+  member         Member       @relation(fields: [memberId], references: [id])
+  body           String
+  createdAt      DateTime     @default(now())
+
+  @@index([conversationId])
+}
+
+// ─────────────────────────── Tags ───────────────────────────
+
+model Tag {
+  id        String  @id @default(cuid())
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id])
+  name      String
+  color     String  @default("#f5b301")
+
+  conversationLinks ConversationTag[]
+  contactLinks      ContactTag[]
+
+  @@unique([companyId, name])
+}
+
+model ConversationTag {
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id])
+  tagId          String
+  tag            Tag          @relation(fields: [tagId], references: [id])
+
+  @@id([conversationId, tagId])
+}
+
+model ContactTag {
+  contactId String
+  contact   Contact @relation(fields: [contactId], references: [id])
+  tagId     String
+  tag       Tag     @relation(fields: [tagId], references: [id])
+
+  @@id([contactId, tagId])
+}
+
+// ─────────────────────────── Automations ───────────────────────────
+
+enum AutomationStatus {
+  DRAFT
+  PUBLISHED
+}
+
+model Automation {
+  id        String  @id @default(cuid())
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id])
+  channelId String
+  channel   Channel @relation(fields: [channelId], references: [id])
+
+  name        String
+  description String?
+  triggerType String // NEW_INCOMING_MESSAGE | TAG_ADDED | WEBHOOK | CONTACT_FIELD_UPDATED | PAYMENT_RECEIVED | DRIVER_EVENT | ...
+  triggerConfig Json?
+  status      AutomationStatus @default(DRAFT)
+  enabled     Boolean @default(false)
+
+  // Node graph: { nodes: [...], edges: [...] } interpreted by the runtime.
+  graph   Json?
+  version Int  @default(1)
+
+  runs      AutomationRun[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([companyId])
+}
+
+model AutomationRun {
+  id           String     @id @default(cuid())
+  automationId String
+  automation   Automation @relation(fields: [automationId], references: [id])
+  contactId    String?
+  status       String     @default("running") // running | completed | failed | waiting
+  cursorNodeId String? // where execution is paused (delays / awaiting reply)
+  context      Json?
+  log          Json?
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  @@index([automationId])
+}
+
+// ─────────────────────────── Payments (receipt OCR) ───────────────────────────
+
+enum PaymentStatus {
+  PENDING
+  VERIFIED
+  REJECTED
+}
+
+model Payment {
+  id             String        @id @default(cuid())
+  contactId      String
+  contact        Contact       @relation(fields: [contactId], references: [id])
+  conversationId String?
+  conversation   Conversation? @relation(fields: [conversationId], references: [id])
+
+  amount      Float?
+  currency    String  @default("MYR")
+  method      String? // bank transfer / card / ...
+  referenceNo String?
+  orderRef    String? // links to ERP order (ref_1 etc.)
+
+  receiptMediaUrl String?
+  ocrRawText      String?
+  status          PaymentStatus @default(PENDING)
+
+  createdAt DateTime @default(now())
+
+  @@index([contactId])
+}
+
+// ─────────────────────────── Campaigns ───────────────────────────
+
+model Campaign {
+  id        String  @id @default(cuid())
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id])
+  channelId String
+  channel   Channel @relation(fields: [channelId], references: [id])
+
+  name         String
+  templateName String?
+  audience     Json? // tag/filter/csv selection
+  scheduleAt   DateTime?
+  status       String  @default("draft") // draft | scheduled | running | completed
+  stats        Json? // sent/read/failed
+  requiresApproval Boolean @default(false)
+  approvedByMemberId String?
+
+  createdAt DateTime @default(now())
+
+  @@index([companyId])
+}
+
+// ─────────────────────────── Quick replies ───────────────────────────
+
+model QuickReply {
+  id        String  @id @default(cuid())
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id])
+  shortcut  String // typed after "/" in composer
+  body      String
+
+  @@unique([companyId, shortcut])
+}
+
+// ─────────────────────────── Driver events ───────────────────────────
+
+model DriverEvent {
+  id         String  @id @default(cuid())
+  driverId   String
+  driver     Member  @relation(fields: [driverId], references: [id])
+  contactId  String
+  contact    Contact @relation(fields: [contactId], references: [id])
+  orderRef   String?
+  eventType  String  // EN_ROUTE | ARRIVED | DELIVERED | FAILED
+  payload    Json?
+  createdAt  DateTime @default(now())
+
+  @@index([contactId])
+}
+
+// ─────────────────────────── Inbound webhooks (ERP / driver app) ───────────────────────────
+
+model WebhookEvent {
+  id        String   @id @default(cuid())
+  source    String // erp | driver-app | meta
+  eventType String?
+  payload   Json
+  processed Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([source])
+}
