@@ -47,25 +47,22 @@ const SECTIONS: { title: string; items: NavItem[] }[] = [
 export function Sidebar({ unread }: { unread?: number }) {
   const path = usePathname();
   return (
-    <aside className="flex w-[236px] shrink-0 flex-col bg-[var(--color-rail)] text-[var(--color-rail-ink)]">
-      <div className="flex items-center gap-2.5 px-5 pt-5 pb-5">
-        {/* Houzs Century brand mark. Black art whitewashed for the dark sidebar. */}
+    <aside className="relative flex w-[236px] shrink-0 flex-col bg-[var(--color-rail)] text-[var(--color-rail-ink)]">
+      {/* Brass hairline on the right edge — same refined separator as the ERP. */}
+      <div className="pointer-events-none absolute right-0 top-0 h-full w-px bg-gradient-to-b from-transparent via-[rgba(161,106,46,0.35)] to-transparent" />
+
+      {/* Brand header — Houzs Century wordmark, whitewashed for the dark rail,
+          identical treatment to the ERP sidebar. "Chat" marks this app. */}
+      <div className="flex h-20 items-center justify-between border-b border-white/10 px-5">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
-          src="/logo-hc-mark.png"
+          src="/logo-wordmark.png"
           alt="Houzs Century"
-          width={30}
-          height={30}
-          className="h-[30px] w-[30px] shrink-0 object-contain brightness-0 invert"
+          className="h-9 w-auto max-w-[150px] object-contain brightness-0 invert"
         />
-        <div className="leading-tight">
-          <div className="text-[13px] font-semibold tracking-tight text-[var(--color-rail-ink)]">
-            Houzs Connect
-          </div>
-          <div className="font-mono text-[10px] uppercase tracking-[0.16em] text-[var(--color-rail-faint)]">
-            Ink &amp; Petrol
-          </div>
-        </div>
+        <span className="font-mono text-[9.5px] font-semibold uppercase tracking-[0.18em] text-[var(--color-brand-bright)]">
+          Chat
+        </span>
       </div>
 
       <nav className="flex flex-1 flex-col gap-4 px-3 py-1">
