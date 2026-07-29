@@ -18,7 +18,7 @@ const plexMono = IBM_Plex_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Houzs Connect",
+  title: "Houzs Connect · Houzs Century",
   description:
     "Houzs Century internal WhatsApp communication & automation platform.",
 };

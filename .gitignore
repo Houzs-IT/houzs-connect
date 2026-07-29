@@ -50,3 +50,6 @@ dev.db-journal
 .dev.vars
 .open-next/
 .wrangler/
+
+# one-time CF token handoff (never committed)
+_cf-token.txt

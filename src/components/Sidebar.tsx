@@ -49,9 +49,15 @@ export function Sidebar({ unread }: { unread?: number }) {
   return (
     <aside className="flex w-[236px] shrink-0 flex-col bg-[var(--color-rail)] text-[var(--color-rail-ink)]">
       <div className="flex items-center gap-2.5 px-5 pt-5 pb-5">
-        <div className="grid h-[30px] w-[30px] place-items-center rounded-[7px] border border-[rgba(216,168,90,0.45)] font-mono text-[12px] font-semibold text-[var(--color-brand-bright)]">
-          HC
-        </div>
+        {/* Houzs Century brand mark. Black art whitewashed for the dark sidebar. */}
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src="/logo-hc-mark.png"
+          alt="Houzs Century"
+          width={30}
+          height={30}
+          className="h-[30px] w-[30px] shrink-0 object-contain brightness-0 invert"
+        />
         <div className="leading-tight">
           <div className="text-[13px] font-semibold tracking-tight text-[var(--color-rail-ink)]">
             Houzs Connect
