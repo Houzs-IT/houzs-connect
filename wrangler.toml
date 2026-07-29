@@ -13,6 +13,16 @@ account_id = "816e457307d7fa0491c2a08a72ad5dcd"
 compatibility_date = "2024-12-30"
 compatibility_flags = ["nodejs_compat"]
 
+# Keep the *.workers.dev URL working alongside the branded custom domain.
+workers_dev = true
+
+# Branded custom domain. houzscentury.com is a zone in THIS same account (the ERP
+# runs erp.houzscentury.com here), so `wrangler deploy` provisions the chat DNS
+# record + TLS cert automatically.
+[[routes]]
+pattern = "chat.houzscentury.com"
+custom_domain = true
+
 # Static assets (Next's public/ + built client chunks), served by the Workers
 # Assets runtime. Directory + binding are the OpenNext convention.
 [assets]
