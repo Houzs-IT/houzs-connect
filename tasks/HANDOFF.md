@@ -1,8 +1,33 @@
 # Houzs Connect — Handoff / current state
 
-_Last updated: 2026-07-28_
+_Last updated: 2026-07-29_
 
-## Where we are: Phase 2a (Automation engine + ERP trigger) — DONE ✅
+## Feature build-out (Phase 2b–4) — DONE ✅ (all DEMO transport)
+
+Everything the owner listed is now built and verified end-to-end in DEMO:
+- **Automation engine + visual builder** — trigger → node graph; react-flow canvas
+  (add/move/connect nodes, node inspector, save); nodes incl. AI agent reply.
+- **Payments — receipt OCR → auto-record** (`src/lib/ocr.ts` + `handleReceipt`):
+  customer sends a slip → OCR parses amount/ref/method → Payment (auto-VERIFIED when it
+  matches the order total, else PENDING) → `/payments` review. LIVE: swap OCR for a
+  vision provider.
+- **Campaigns** — broadcast to all / by-tag with merge vars; list + sent stats.
+- **WhatsApp Forms** — Form + FormResponse tables; builder + publish + response capture
+  onto contact attributes. LIVE: Meta WhatsApp Flows.
+- **AI agent** — `src/lib/ai.ts` pluggable reply generator (DEMO rule-based) + engine
+  `ai_agent_reply` node. LIVE: swap in an LLM call.
+
+### NOT done — needs external prerequisites
+- **LIVE WhatsApp** — requires a Meta WABA number + Cloud API token. Transport interface
+  is ready (`src/lib/whatsapp/transport.ts`); flip `WHATSAPP_MODE=LIVE` + implement the
+  Cloud API send/receive + Meta webhook. Everything else is transport-agnostic.
+- **Postgres / ERP cutover** — switch Prisma provider sqlite→postgresql, point at the
+  ERP's Supabase, wire the ERP webhooks to `/api/webhooks/erp` (replaces the GAS bridge).
+- **Org-chart RBAC from the real ERP org chart** (currently a demo org chart + "view as").
+
+Run: `node node_modules/next/dist/bin/next dev -p 3009` (pnpm exec trips the build gate).
+
+## Earlier: Phase 2a (Automation engine + ERP trigger) — DONE ✅
 
 The owner's #1 ask: ERP triggers a flow that sends the first WhatsApp message, and the
 customer's tap drives the next content. Working end-to-end in DEMO.
