@@ -237,3 +237,38 @@ export async function handleCustomerReply(
   }
   return waiting.length;
 }
+
+/**
+ * A customer message arrived (from the DEMO simulator or a real Meta webhook). Resume
+ * any waiting runs first; if none were waiting, start the channel's NEW_INCOMING_MESSAGE
+ * automations (Seampify's "customer messages us -> a flow fires"). Keyword/callback
+ * matching lives inside each flow's trigger/router nodes.
+ */
+export async function handleInboundMessage(
+  contactId: string,
+  input: { buttonId?: string; text?: string }
+) {
+  const resumed = await handleCustomerReply(contactId, input);
+  if (resumed > 0) return { resumed, started: 0 };
+
+  const contact = await db.contact.findUnique({ where: { id: contactId } });
+  if (!contact) return { resumed: 0, started: 0 };
+  const autos = await db.automation.findMany({
+    where: {
+      companyId: contact.companyId,
+      enabled: true,
+      triggerType: "NEW_INCOMING_MESSAGE",
+    },
+  });
+  let started = 0;
+  for (const a of autos) {
+    // Don't stack a second concurrent run of the same automation on this contact.
+    const active = await db.automationRun.findFirst({
+      where: { automationId: a.id, contactId, status: { in: ["running", "waiting"] } },
+    });
+    if (active) continue;
+    const run = await startRun(a.id, contactId);
+    if (run) started++;
+  }
+  return { resumed: 0, started };
+}

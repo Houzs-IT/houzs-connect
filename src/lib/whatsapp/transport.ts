@@ -1,6 +1,7 @@
 import { db } from "@/lib/db";
 import type { Prisma } from "@prisma/client";
 import type { FlowButton } from "@/lib/automation/types";
+import { isLive, sendButtons, sendText } from "./cloud-api";
 
 /**
  * WhatsApp transport. DEMO mode records messages in the DB (no Meta). LIVE mode
@@ -59,6 +60,22 @@ export async function sendOutbound(
     where: { id: conversationId },
     data: { lastMessageAt: new Date() },
   });
+
+  // LIVE: actually send via the Meta Cloud API and stamp the returned message id.
+  if (isLive()) {
+    const convo = await db.conversation.findUnique({
+      where: { id: conversationId },
+      include: { contact: true },
+    });
+    if (convo) {
+      const waId = interactive
+        ? await sendButtons(convo.contact.phone, body, opts.buttons ?? [])
+        : await sendText(convo.contact.phone, body);
+      if (waId) {
+        await db.message.update({ where: { id: msg.id }, data: { waMessageId: waId } });
+      }
+    }
+  }
   return msg;
 }
 

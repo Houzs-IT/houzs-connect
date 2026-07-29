@@ -5,7 +5,7 @@ import { revalidatePath } from "next/cache";
 import { MEMBER_COOKIE, getCurrentMember } from "@/lib/current-member";
 import { db } from "@/lib/db";
 import { recordInbound } from "@/lib/whatsapp/transport";
-import { handleCustomerReply, handleReceipt } from "@/lib/automation/dispatch";
+import { handleCustomerReply, handleReceipt, handleInboundMessage } from "@/lib/automation/dispatch";
 
 /** Dev-only: switch which member you're acting as (for testing org-chart RBAC). */
 export async function actAsMember(formData: FormData) {
@@ -162,7 +162,7 @@ export async function demoCustomerText(formData: FormData) {
   const convo = await db.conversation.findUnique({ where: { id: conversationId } });
   if (!convo) return;
   await recordInbound(conversationId, text, { type: "TEXT" });
-  await handleCustomerReply(convo.contactId, { text });
+  await handleInboundMessage(convo.contactId, { text });
   revalidatePath(`/inbox/${conversationId}`);
   revalidatePath("/inbox");
 }
