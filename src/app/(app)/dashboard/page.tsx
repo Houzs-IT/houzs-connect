@@ -1,15 +1,24 @@
-import { db } from "@/lib/db";
+import { eq } from "drizzle-orm";
+import { getDb } from "@/db/client";
+import {
+  automation,
+  campaign,
+  contact,
+  conversation,
+  member,
+} from "@/db/schema";
 import { PageChrome } from "@/components/PageChrome";
 
 export default async function DashboardPage() {
+  const db = getDb();
   const [contacts, convos, openConvos, automations, campaigns, members] =
     await Promise.all([
-      db.contact.count(),
-      db.conversation.count(),
-      db.conversation.count({ where: { status: "OPEN" } }),
-      db.automation.count({ where: { enabled: true } }),
-      db.campaign.count(),
-      db.member.count(),
+      db.$count(contact),
+      db.$count(conversation),
+      db.$count(conversation, eq(conversation.status, "OPEN")),
+      db.$count(automation, eq(automation.enabled, true)),
+      db.$count(campaign),
+      db.$count(member),
     ]);
 
   // Demo spend figures mirror Seampify's conversation-billing dashboard.

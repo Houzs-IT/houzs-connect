@@ -45,3 +45,8 @@ dev.db
 dev.db-journal
 *.db
 .env
+
+# Cloudflare / OpenNext
+.dev.vars
+.open-next/
+.wrangler/

@@ -1,4 +1,6 @@
-import { db } from "@/lib/db";
+import { asc } from "drizzle-orm";
+import { getDb } from "@/db/client";
+import { member } from "@/db/schema";
 import { actAsMember } from "@/app/actions";
 import { initials, tint } from "@/lib/format";
 import { IconSearch } from "./icons";
@@ -22,7 +24,8 @@ export async function Topbar({
   subtitle?: string;
   current: { id: string; name: string; role: string; title: string | null };
 }) {
-  const members = await db.member.findMany({ orderBy: { name: "asc" } });
+  const db = getDb();
+  const members = await db.query.member.findMany({ orderBy: asc(member.name) });
 
   return (
     <header className="flex h-16 shrink-0 items-center gap-4 border-b border-[var(--color-border)] bg-[var(--color-surface)] px-6">

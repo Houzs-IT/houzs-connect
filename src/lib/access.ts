@@ -1,4 +1,8 @@
-import type { Member, Prisma } from "@prisma/client";
+import { inArray, or, type SQL } from "drizzle-orm";
+import type { InferSelectModel } from "drizzle-orm";
+import { conversation, member } from "@/db/schema";
+
+type Member = InferSelectModel<typeof member>;
 
 /**
  * Org-chart visibility. A member can see a conversation if:
@@ -51,16 +55,16 @@ export function getVisibility(
   return { scope: "scoped", memberIds, departmentIds };
 }
 
-/** Prisma `where` for conversations this member may see. */
-export function conversationVisibilityWhere(
-  vis: Visibility
-): Prisma.ConversationWhereInput {
-  if (vis.scope === "all") return {};
-  const or: Prisma.ConversationWhereInput[] = [
-    { assignedAgentId: { in: vis.memberIds } },
+/** Drizzle `where` predicate for conversations this member may see. `undefined`
+ *  means no restriction (OWNER/ADMIN). Feeds db.query.conversation.findMany. */
+export function conversationVisibilityWhere(vis: Visibility): SQL | undefined {
+  if (vis.scope === "all") return undefined;
+  const conds: (SQL | undefined)[] = [
+    // memberIds always includes `me`, so never an empty IN.
+    inArray(conversation.assignedAgentId, vis.memberIds),
   ];
   if (vis.departmentIds.length) {
-    or.push({ assignedDepartmentId: { in: vis.departmentIds } });
+    conds.push(inArray(conversation.assignedDepartmentId, vis.departmentIds));
   }
-  return { OR: or };
+  return or(...conds);
 }

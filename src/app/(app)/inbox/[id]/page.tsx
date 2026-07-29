@@ -1,5 +1,7 @@
 import { notFound } from "next/navigation";
-import { db } from "@/lib/db";
+import { asc, eq } from "drizzle-orm";
+import { getDb } from "@/db/client";
+import { contactField, conversation, department, member, tag } from "@/db/schema";
 import { Thread } from "@/components/inbox/Thread";
 import { Composer } from "@/components/inbox/Composer";
 import { ContactPanel } from "@/components/inbox/ContactPanel";
@@ -12,27 +14,28 @@ export default async function ConversationPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
+  const db = getDb();
 
-  const convo = await db.conversation.findUnique({
-    where: { id },
-    include: {
+  const convo = await db.query.conversation.findFirst({
+    where: eq(conversation.id, id),
+    with: {
       contact: true,
       assignedAgent: true,
       assignedDepartment: true,
-      tagLinks: { include: { tag: true } },
-      messages: { orderBy: { createdAt: "asc" } },
+      tagLinks: { with: { tag: true } },
+      messages: { orderBy: (m, { asc }) => asc(m.createdAt) },
     },
   });
   if (!convo) notFound();
 
   const [fields, members, departments, tags] = await Promise.all([
-    db.contactField.findMany({
-      where: { companyId: convo.contact.companyId },
-      orderBy: { createdAt: "asc" },
+    db.query.contactField.findMany({
+      where: eq(contactField.companyId, convo.contact.companyId),
+      orderBy: asc(contactField.createdAt),
     }),
-    db.member.findMany({ orderBy: { name: "asc" } }),
-    db.department.findMany({ orderBy: { name: "asc" } }),
-    db.tag.findMany({ where: { companyId: convo.contact.companyId } }),
+    db.query.member.findMany({ orderBy: asc(member.name) }),
+    db.query.department.findMany({ orderBy: asc(department.name) }),
+    db.query.tag.findMany({ where: eq(tag.companyId, convo.contact.companyId) }),
   ]);
 
   const name = convo.contact.name ?? convo.contact.phone;

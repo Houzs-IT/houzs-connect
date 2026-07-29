@@ -1,7 +1,13 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { db } from "@/lib/db";
+import { eq } from "drizzle-orm";
+import { getDb } from "@/db/client";
+import {
+  contact as contactTable,
+  form as formTable,
+  formResponse as formResponseTable,
+} from "@/db/schema";
 import { getCurrentMember } from "@/lib/current-member";
 
 /** Create a WhatsApp Form. `fieldsText` is one "key | label | type" per line. */
@@ -20,9 +26,8 @@ export async function createForm(formData: FormData) {
       return { key: key || label, label: label || key, type: (type || "text").toLowerCase() };
     });
 
-  await db.form.create({
-    data: { companyId: me.companyId, name, status: "draft", fields },
-  });
+  const db = getDb();
+  await db.insert(formTable).values({ companyId: me.companyId, name, status: "draft", fields });
   revalidatePath("/forms");
 }
 
@@ -30,7 +35,8 @@ export async function setFormStatus(formData: FormData) {
   const id = String(formData.get("formId") ?? "");
   const status = String(formData.get("status") ?? "");
   if (!id || !["draft", "published"].includes(status)) return;
-  await db.form.update({ where: { id }, data: { status } });
+  const db = getDb();
+  await db.update(formTable).set({ status }).where(eq(formTable.id, id));
   revalidatePath("/forms");
 }
 
@@ -39,7 +45,8 @@ export async function setFormStatus(formData: FormData) {
 export async function demoSubmitForm(formData: FormData) {
   const formId = String(formData.get("formId") ?? "");
   const contactId = String(formData.get("contactId") ?? "");
-  const form = await db.form.findUnique({ where: { id: formId } });
+  const db = getDb();
+  const form = await db.query.form.findFirst({ where: eq(formTable.id, formId) });
   if (!form || !contactId) return;
 
   const fields = Array.isArray(form.fields) ? (form.fields as { key: string }[]) : [];
@@ -49,18 +56,18 @@ export async function demoSubmitForm(formData: FormData) {
     if (v) answers[f.key] = v;
   }
 
-  await db.formResponse.create({ data: { formId, contactId, answers } });
+  await db.insert(formResponseTable).values({ formId, contactId, answers });
 
-  const contact = await db.contact.findUnique({ where: { id: contactId } });
+  const contact = await db.query.contact.findFirst({ where: eq(contactTable.id, contactId) });
   if (contact) {
     const cur =
       contact.attributes && typeof contact.attributes === "object"
         ? (contact.attributes as Record<string, string>)
         : {};
-    await db.contact.update({
-      where: { id: contactId },
-      data: { attributes: { ...cur, ...answers } },
-    });
+    await db
+      .update(contactTable)
+      .set({ attributes: { ...cur, ...answers } })
+      .where(eq(contactTable.id, contactId));
   }
   revalidatePath("/forms");
 }

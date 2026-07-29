@@ -1,5 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
-import { db } from "@/lib/db";
+import { and, asc, desc, eq } from "drizzle-orm";
+import { getDb } from "@/db/client";
+import {
+  channel as channelTable,
+  company as companyTable,
+  contact as contactTable,
+  message as messageTable,
+} from "@/db/schema";
 import { getOrCreateConversation, recordInbound } from "@/lib/whatsapp/transport";
 import { handleInboundMessage } from "@/lib/automation/dispatch";
 
@@ -39,11 +46,16 @@ export async function POST(req: NextRequest) {
   } | null;
   if (!body?.entry) return NextResponse.json({ ok: true });
 
+  const db = getDb();
+
   // Single-tenant resolve: first company + its default channel. Multi-tenant would map
   // value.metadata.phone_number_id -> Channel.
-  const company = await db.company.findFirst({ orderBy: { createdAt: "asc" } });
+  const company = await db.query.company.findFirst({ orderBy: asc(companyTable.createdAt) });
   const channel = company
-    ? await db.channel.findFirst({ where: { companyId: company.id }, orderBy: { isDefault: "desc" } })
+    ? await db.query.channel.findFirst({
+        where: eq(channelTable.companyId, company.id),
+        orderBy: desc(channelTable.isDefault),
+      })
     : null;
 
   for (const entry of body.entry) {
@@ -56,10 +68,10 @@ export async function POST(req: NextRequest) {
         const map: Record<string, string> = { sent: "SENT", delivered: "DELIVERED", read: "READ", failed: "FAILED" };
         const status = map[s.status];
         if (status) {
-          await db.message.updateMany({
-            where: { waMessageId: s.id },
-            data: { status: status as "SENT" | "DELIVERED" | "READ" | "FAILED" },
-          });
+          await db
+            .update(messageTable)
+            .set({ status: status as "SENT" | "DELIVERED" | "READ" | "FAILED" })
+            .where(eq(messageTable.waMessageId, s.id));
         }
       }
 
@@ -68,11 +80,19 @@ export async function POST(req: NextRequest) {
       const nameByWaId = new Map((value.contacts ?? []).map((c) => [c.wa_id, c.profile?.name]));
       for (const m of value.messages ?? []) {
         const phone = m.from.replace(/[^\d]/g, "");
-        const contact = await db.contact.upsert({
-          where: { companyId_phone: { companyId: company.id, phone } },
-          update: {},
-          create: { companyId: company.id, phone, name: nameByWaId.get(m.from) ?? null, source: "whatsapp" },
-        });
+        const [contact] = await db
+          .insert(contactTable)
+          .values({
+            companyId: company.id,
+            phone,
+            name: nameByWaId.get(m.from) ?? null,
+            source: "whatsapp",
+          })
+          .onConflictDoUpdate({
+            target: [contactTable.companyId, contactTable.phone],
+            set: { phone }, // no-op keep; forces the existing row to be returned
+          })
+          .returning();
         const convo = await getOrCreateConversation(channel.id, contact.id);
 
         const buttonId = m.interactive?.button_reply?.id ?? m.interactive?.list_reply?.id;

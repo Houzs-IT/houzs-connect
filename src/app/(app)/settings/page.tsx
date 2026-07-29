@@ -1,18 +1,28 @@
-import { db } from "@/lib/db";
+import { asc } from "drizzle-orm";
+import { getDb } from "@/db/client";
+import {
+  channel,
+  contactField,
+  department,
+  member,
+  quickReply,
+  tag,
+} from "@/db/schema";
 import { PageChrome } from "@/components/PageChrome";
 
 export default async function SettingsPage() {
+  const db = getDb();
   const [members, departments, fields, tags, quickReplies, channels] =
     await Promise.all([
-      db.member.findMany({
-        orderBy: { name: "asc" },
-        include: { manager: true, department: true },
+      db.query.member.findMany({
+        orderBy: asc(member.name),
+        with: { manager: true, department: true },
       }),
-      db.department.count(),
-      db.contactField.count(),
-      db.tag.count(),
-      db.quickReply.count(),
-      db.channel.count(),
+      db.$count(department),
+      db.$count(contactField),
+      db.$count(tag),
+      db.$count(quickReply),
+      db.$count(channel),
     ]);
 
   const cards = [

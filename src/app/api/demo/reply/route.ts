@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { db } from "@/lib/db";
+import { eq } from "drizzle-orm";
+import { getDb } from "@/db/client";
+import { conversation } from "@/db/schema";
 import { recordInbound } from "@/lib/whatsapp/transport";
 import { handleCustomerReply } from "@/lib/automation/dispatch";
 
@@ -13,7 +15,10 @@ export async function POST(req: NextRequest) {
   if (!conversationId) {
     return NextResponse.json({ ok: false, error: "conversationId required" }, { status: 400 });
   }
-  const convo = await db.conversation.findUnique({ where: { id: conversationId } });
+  const db = getDb();
+  const convo = await db.query.conversation.findFirst({
+    where: eq(conversation.id, conversationId),
+  });
   if (!convo) return NextResponse.json({ ok: false, error: "no conversation" }, { status: 404 });
 
   // Record the customer's inbound message so it shows in the thread.

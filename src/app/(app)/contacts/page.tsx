@@ -1,11 +1,14 @@
-import { db } from "@/lib/db";
+import { desc } from "drizzle-orm";
+import { getDb } from "@/db/client";
+import { contact } from "@/db/schema";
 import { PageChrome } from "@/components/PageChrome";
 import { attrs, initials, tint } from "@/lib/format";
 
 export default async function ContactsPage() {
-  const contacts = await db.contact.findMany({
-    orderBy: { createdAt: "desc" },
-    include: { tagLinks: { include: { tag: true } } },
+  const db = getDb();
+  const contacts = await db.query.contact.findMany({
+    orderBy: desc(contact.createdAt),
+    with: { tagLinks: { with: { tag: true } } },
   });
 
   return (

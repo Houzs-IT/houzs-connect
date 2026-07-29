@@ -4,20 +4,26 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "build": "next build --webpack",
     "start": "next start",
     "lint": "eslint",
-    "db:push": "node node_modules/prisma/build/index.js db push",
-    "db:studio": "node node_modules/prisma/build/index.js studio",
-    "db:generate": "node node_modules/prisma/build/index.js generate",
-    "db:seed": "node node_modules/tsx/dist/cli.mjs prisma/seed.ts",
-    "db:reset": "node node_modules/prisma/build/index.js db push --accept-data-loss && node node_modules/tsx/dist/cli.mjs prisma/seed.ts"
+    "cf:build": "node node_modules/@opennextjs/cloudflare/dist/cli/index.js build",
+    "preview": "node node_modules/@opennextjs/cloudflare/dist/cli/index.js preview",
+    "deploy": "node node_modules/@opennextjs/cloudflare/dist/cli/index.js deploy",
+    "cf-typegen": "node node_modules/wrangler/bin/wrangler.js types",
+    "db:generate": "node node_modules/drizzle-kit/bin.cjs generate",
+    "db:migrate": "node node_modules/tsx/dist/cli.mjs scripts/db-migrate.ts",
+    "db:studio": "node node_modules/drizzle-kit/bin.cjs studio",
+    "db:seed": "node node_modules/tsx/dist/cli.mjs scripts/seed.ts"
   },
   "dependencies": {
-    "@prisma/client": "^6.2.1",
+    "@opennextjs/cloudflare": "^1.20.2",
+    "@paralleldrive/cuid2": "^3.3.0",
     "@xyflow/react": "^12.11.2",
+    "drizzle-orm": "^0.45.2",
     "geist": "^1.7.2",
     "next": "16.2.12",
+    "postgres": "^3.4.9",
     "react": "19.2.4",
     "react-dom": "19.2.4",
     "zod": "^3.24.1"
@@ -27,11 +33,12 @@
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "drizzle-kit": "^0.31.10",
     "eslint": "^9",
     "eslint-config-next": "16.2.12",
-    "prisma": "^6.2.1",
     "tailwindcss": "^4",
     "tsx": "^4.19.2",
-    "typescript": "^5"
+    "typescript": "^5",
+    "wrangler": "^4.114.0"
   }
 }

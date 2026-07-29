@@ -10,3 +10,8 @@ const nextConfig: NextConfig = {
 };
 
 export default nextConfig;
+
+// OpenNext: make the Cloudflare bindings (HYPERDRIVE, vars, secrets) available
+// through getCloudflareContext() during `next dev`, mirroring prod on Workers.
+import { initOpenNextCloudflareForDev } from "@opennextjs/cloudflare";
+initOpenNextCloudflareForDev();

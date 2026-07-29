@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { db } from "@/lib/db";
+import { eq } from "drizzle-orm";
+import { getDb } from "@/db/client";
+import { automation as automationTable, automationRun as automationRunTable } from "@/db/schema";
 import { asGraph } from "@/lib/automation/types";
 import { FlowCanvas } from "@/components/automation/FlowCanvas";
 import { setAutomationEnabled } from "../actions";
@@ -20,11 +22,17 @@ export default async function AutomationDetail({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  const automation = await db.automation.findUnique({
-    where: { id },
-    include: { channel: true, _count: { select: { runs: true } } },
+  const db = getDb();
+  const automation = await db.query.automation.findFirst({
+    where: eq(automationTable.id, id),
+    with: { channel: true },
   });
   if (!automation) notFound();
+
+  const runCount = await db.$count(
+    automationRunTable,
+    eq(automationRunTable.automationId, id)
+  );
 
   const graph = asGraph(automation.graph);
   const toggle = setAutomationEnabled.bind(null, automation.id, !automation.enabled);
@@ -45,7 +53,7 @@ export default async function AutomationDetail({
           <p className="truncate text-[11.5px] text-[var(--color-muted)]">
             {automation.channel.displayName} ·{" "}
             {TRIGGER_LABEL[automation.triggerType] ?? automation.triggerType} · v
-            {automation.version} · {automation._count.runs} runs
+            {automation.version} · {runCount} runs
           </p>
         </div>
         <div className="ml-auto flex items-center gap-2">

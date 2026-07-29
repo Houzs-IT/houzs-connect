@@ -23,20 +23,20 @@ import type { FlowGraph, NodeType } from "@/lib/automation/types";
 import { saveAutomationGraph } from "@/app/(app)/automations/actions";
 
 const NODE_META: Record<string, { label: string; color: string }> = {
-  trigger: { label: "Trigger", color: "#2f8f5b" },
-  send_text: { label: "Send message", color: "#0d7490" },
-  ask_buttons: { label: "Ask buttons", color: "#e2900a" },
-  collect_input: { label: "Collect input", color: "#b45309" },
-  ai_agent_reply: { label: "AI agent reply", color: "#7c3aed" },
-  criteria_router: { label: "Criteria router", color: "#8e4ec6" },
-  set_attribute: { label: "Set attribute", color: "#1b7f6b" },
-  add_tag: { label: "Add tag", color: "#c2410c" },
-  remove_tag: { label: "Remove tag", color: "#9a3412" },
-  assign: { label: "Assign", color: "#0369a1" },
-  set_status: { label: "Set status", color: "#4d5560" },
-  call_rest_api: { label: "Call REST API", color: "#d5493f" },
-  delay: { label: "Delay", color: "#6d6a63" },
-  end: { label: "End", color: "#9a968d" },
+  trigger: { label: "Trigger", color: "#2f8a5b" },
+  send_text: { label: "Send message", color: "#16695f" },
+  ask_buttons: { label: "Ask buttons", color: "#a16a2e" },
+  collect_input: { label: "Collect input", color: "#1b7f6b" },
+  ai_agent_reply: { label: "AI agent reply", color: "#0c3f39" },
+  criteria_router: { label: "Criteria router", color: "#6e4d12" },
+  set_attribute: { label: "Set attribute", color: "#3d7a6f" },
+  add_tag: { label: "Add tag", color: "#8a5a26" },
+  remove_tag: { label: "Remove tag", color: "#b23a3a" },
+  assign: { label: "Assign", color: "#2f8a5b" },
+  set_status: { label: "Set status", color: "#414539" },
+  call_rest_api: { label: "Call REST API", color: "#b23a3a" },
+  delay: { label: "Delay", color: "#767b6e" },
+  end: { label: "End", color: "#8c968a" },
 };
 
 const PALETTE: NodeType[] = [
@@ -91,7 +91,7 @@ function summarize(d: HcData): string {
 
 function HcNode({ data, selected }: NodeProps) {
   const d = data as HcData;
-  const meta = NODE_META[d.nodeType] ?? { label: d.nodeType, color: "#6d6a63" };
+  const meta = NODE_META[d.nodeType] ?? { label: d.nodeType, color: "#767b6e" };
   const isTrigger = d.nodeType === "trigger";
   return (
     <div
@@ -161,8 +161,8 @@ function FlowCanvasInner({
     target: e.to,
     label: e.branch,
     animated: true,
-    style: { stroke: "#c9c4ba" },
-    labelStyle: { fontSize: 10, fill: "#6d6a63" },
+    style: { stroke: "#c2c6bd" },
+    labelStyle: { fontSize: 10, fill: "#767b6e" },
   }));
 
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
@@ -266,7 +266,7 @@ function FlowCanvasInner({
           <button
             onClick={save}
             disabled={pending}
-            className="rounded-lg bg-[var(--color-accent)] px-3 py-2 text-[13px] font-medium text-[#1b1a17] disabled:opacity-60"
+            className="rounded-lg bg-[var(--color-accent)] px-3 py-2 text-[13px] font-medium text-white disabled:opacity-60"
           >
             {pending ? "Saving…" : saved ? "Saved ✓" : "Save flow"}
           </button>
@@ -286,7 +286,7 @@ function FlowCanvasInner({
           fitView
           proOptions={{ hideAttribution: true }}
         >
-          <Background color="#d8d4cc" gap={18} />
+          <Background color="#c2c6bd" gap={18} />
           <Controls showInteractive={false} />
           <MiniMap pannable zoomable className="!bg-[var(--color-surface-2)]" />
         </ReactFlow>

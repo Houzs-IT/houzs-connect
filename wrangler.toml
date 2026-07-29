@@ -1,0 +1,47 @@
+name = "houzs-connect"
+# Next.js on Cloudflare Workers via OpenNext. `wrangler deploy` uploads the
+# adapter build (.open-next/worker.js) produced by `opennextjs-cloudflare build`.
+main = ".open-next/worker.js"
+
+# Pin the COMPANY account (hello@houzscentury.com) — the same account the ERP
+# (autocount-sync-api) deploys to, so Connect lives beside it. The account id is
+# not a secret. Prevents a stray `wrangler login` from targeting the wrong account.
+account_id = "816e457307d7fa0491c2a08a72ad5dcd"
+
+# OpenNext requires nodejs_compat and a recent compatibility_date. nodejs_compat
+# also gives postgres.js the Node socket/Buffer APIs it needs on Workers.
+compatibility_date = "2024-12-30"
+compatibility_flags = ["nodejs_compat"]
+
+# Static assets (Next's public/ + built client chunks), served by the Workers
+# Assets runtime. Directory + binding are the OpenNext convention.
+[assets]
+directory = ".open-next/assets"
+binding = "ASSETS"
+
+[vars]
+# DEMO stubs WhatsApp (no Meta account needed). Flip to LIVE + set the Meta
+# secrets (wrangler secret put) to send/receive via the Cloud API.
+WHATSAPP_MODE = "DEMO"
+
+[observability]
+enabled = true
+
+# ── Supabase Postgres via Hyperdrive ──────────────────────────────────────────
+# Connect shares the ERP's COMPANY Supabase project but owns the `connect`
+# schema (db/schema.ts qualifies every table), so it never touches the ERP's
+# public tables. The connection string lives in the Hyperdrive config on
+# Cloudflare, NOT here. Create it ONCE (session pooler / port 5432, matching the
+# ERP's proven config), then uncomment the binding and paste the printed id:
+#
+#   wrangler hyperdrive create houzs-connect-pg \
+#     --connection-string="postgresql://postgres.<ref>:<pw>@aws-1-ap-southeast-1.pooler.supabase.com:5432/postgres"
+#
+# Local dev/scripts read DATABASE_URL from .dev.vars instead of this binding.
+# Config houzs-connect-pg -> houzs_connect@anogrigyjbduyzclzjgn (connect schema),
+# session pooler 5432. Created 2026-07-29. NOTE: the temp DB password is baked
+# into this Hyperdrive config on Cloudflare — when it's rotated, update the config
+# with `wrangler hyperdrive update`.
+[[hyperdrive]]
+binding = "HYPERDRIVE"
+id = "8da3d98a8fc94f6f938fc06689f9c611"

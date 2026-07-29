@@ -72,7 +72,7 @@ export function Composer({ conversationId }: { conversationId: string }) {
         />
         <button
           type="submit"
-          className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-[var(--color-accent)] text-[#1b1a17] transition-opacity hover:opacity-90"
+          className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-[var(--color-accent)] text-white transition-opacity hover:opacity-90"
           aria-label="Send"
         >
           <IconSend width={17} height={17} />

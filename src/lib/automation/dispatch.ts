@@ -1,4 +1,16 @@
-import { db } from "@/lib/db";
+import { and, asc, desc, eq, inArray } from "drizzle-orm";
+import { getDb } from "@/db/client";
+import {
+  automation as automationTable,
+  automationRun as automationRunTable,
+  company as companyTable,
+  contact as contactTable,
+  conversation as conversationTable,
+  driverEvent as driverEventTable,
+  member as memberTable,
+  payment as paymentTable,
+  webhookEvent,
+} from "@/db/schema";
 import { attrs } from "@/lib/format";
 import { startRun, resumeRun } from "./engine";
 import { getOrCreateConversation } from "@/lib/whatsapp/transport";
@@ -12,52 +24,65 @@ export interface ErpWebhookPayload {
   attributes?: Record<string, string>;
 }
 
+async function resolveCompany(companySlug?: string) {
+  const db = getDb();
+  return companySlug
+    ? await db.query.company.findFirst({ where: eq(companyTable.slug, companySlug) })
+    : await db.query.company.findFirst({ orderBy: asc(companyTable.createdAt) });
+}
+
 /**
  * ERP → Houzs Connect. Upserts the contact (with order attributes) and fires the
  * matching WEBHOOK-triggered automation, which sends the first WhatsApp message.
  * This is the core seam that replaces Seampify's webhook + Google Apps Script.
  */
 export async function handleErpWebhook(payload: ErpWebhookPayload) {
-  const company = payload.companySlug
-    ? await db.company.findUnique({ where: { slug: payload.companySlug } })
-    : await db.company.findFirst({ orderBy: { createdAt: "asc" } });
+  const db = getDb();
+  const company = await resolveCompany(payload.companySlug);
   if (!company) return { ok: false, error: "no company" as const };
 
   const phone = payload.phone.replace(/[^\d]/g, "");
 
   // Upsert contact + merge incoming ERP attributes.
-  const existing = await db.contact.findUnique({
-    where: { companyId_phone: { companyId: company.id, phone } },
+  const existing = await db.query.contact.findFirst({
+    where: and(eq(contactTable.companyId, company.id), eq(contactTable.phone, phone)),
   });
   const mergedAttrs = { ...attrs(existing?.attributes), ...(payload.attributes ?? {}) };
   const contact = existing
-    ? await db.contact.update({
-        where: { id: existing.id },
-        data: { attributes: mergedAttrs, name: payload.name ?? existing.name },
-      })
-    : await db.contact.create({
-        data: {
-          companyId: company.id,
-          phone,
-          name: payload.name ?? null,
-          source: "erp",
-          attributes: mergedAttrs,
-        },
-      });
+    ? (
+        await db
+          .update(contactTable)
+          .set({ attributes: mergedAttrs, name: payload.name ?? existing.name })
+          .where(eq(contactTable.id, existing.id))
+          .returning()
+      )[0]
+    : (
+        await db
+          .insert(contactTable)
+          .values({
+            companyId: company.id,
+            phone,
+            name: payload.name ?? null,
+            source: "erp",
+            attributes: mergedAttrs,
+          })
+          .returning()
+      )[0];
 
-  await db.webhookEvent.create({
-    data: { source: "erp", eventType: payload.automation ?? "order_event", payload: payload as object },
+  await db.insert(webhookEvent).values({
+    source: "erp",
+    eventType: payload.automation ?? "order_event",
+    payload: payload as object,
   });
 
   // Find enabled WEBHOOK automations (optionally filtered by name).
-  const automations = await db.automation.findMany({
-    where: {
-      companyId: company.id,
-      enabled: true,
-      triggerType: "WEBHOOK",
-      ...(payload.automation ? { name: payload.automation } : {}),
-    },
-  });
+  const conds = [
+    eq(automationTable.companyId, company.id),
+    eq(automationTable.enabled, true),
+    eq(automationTable.triggerType, "WEBHOOK"),
+  ];
+  if (payload.automation) conds.push(eq(automationTable.name, payload.automation));
+  const automations = await db.query.automation.findMany({ where: and(...conds) });
 
   const runs: string[] = [];
   for (const a of automations) {
@@ -106,14 +131,13 @@ const TMS_STATUS: Record<DriverEventPayload["event"], string> = {
  * TMS status (written back to the contact + ERP via the flow's call_rest_api).
  */
 export async function handleDriverEvent(payload: DriverEventPayload) {
-  const company = payload.companySlug
-    ? await db.company.findUnique({ where: { slug: payload.companySlug } })
-    : await db.company.findFirst({ orderBy: { createdAt: "asc" } });
+  const db = getDb();
+  const company = await resolveCompany(payload.companySlug);
   if (!company) return { ok: false, error: "no company" as const };
 
   const phone = payload.phone.replace(/[^\d]/g, "");
-  const existing = await db.contact.findUnique({
-    where: { companyId_phone: { companyId: company.id, phone } },
+  const existing = await db.query.contact.findFirst({
+    where: and(eq(contactTable.companyId, company.id), eq(contactTable.phone, phone)),
   });
   if (!existing) return { ok: false, error: "unknown contact" as const };
 
@@ -130,26 +154,31 @@ export async function handleDriverEvent(payload: DriverEventPayload) {
     ...(payload.carPlate ? { car_plate: payload.carPlate } : {}),
     ...(payload.eta ? { delivery_time: payload.eta } : {}),
   };
-  await db.contact.update({ where: { id: existing.id }, data: { attributes: mergedAttrs } });
+  await db
+    .update(contactTable)
+    .set({ attributes: mergedAttrs })
+    .where(eq(contactTable.id, existing.id));
 
   // Record the driver event (attributed to a DRIVER member if one exists).
-  const driver = await db.member.findFirst({
-    where: { companyId: company.id, role: "DRIVER" },
+  const driver = await db.query.member.findFirst({
+    where: and(eq(memberTable.companyId, company.id), eq(memberTable.role, "DRIVER")),
   });
   if (driver) {
-    await db.driverEvent.create({
-      data: {
-        driverId: driver.id,
-        contactId: existing.id,
-        orderRef,
-        eventType: payload.event,
-        payload: payload as object,
-      },
+    await db.insert(driverEventTable).values({
+      driverId: driver.id,
+      contactId: existing.id,
+      orderRef,
+      eventType: payload.event,
+      payload: payload as object,
     });
   }
 
-  const automations = await db.automation.findMany({
-    where: { companyId: company.id, enabled: true, triggerType: "DRIVER_EVENT" },
+  const automations = await db.query.automation.findMany({
+    where: and(
+      eq(automationTable.companyId, company.id),
+      eq(automationTable.enabled, true),
+      eq(automationTable.triggerType, "DRIVER_EVENT")
+    ),
   });
   const runs: string[] = [];
   for (const a of automations) {
@@ -176,9 +205,10 @@ export async function handleReceipt(
   receiptText: string,
   mediaUrl?: string
 ) {
-  const convo = await db.conversation.findUnique({
-    where: { id: conversationId },
-    include: { contact: true },
+  const db = getDb();
+  const convo = await db.query.conversation.findFirst({
+    where: eq(conversationTable.id, conversationId),
+    with: { contact: true },
   });
   if (!convo) return { ok: false as const, error: "no conversation" };
 
@@ -189,8 +219,9 @@ export async function handleReceipt(
   const verified =
     ocr.amount != null && Number.isFinite(orderTotal) && Math.abs(ocr.amount - orderTotal) < 0.01;
 
-  const payment = await db.payment.create({
-    data: {
+  const [payment] = await db
+    .insert(paymentTable)
+    .values({
       contactId: convo.contactId,
       conversationId,
       amount: ocr.amount,
@@ -201,16 +232,16 @@ export async function handleReceipt(
       receiptMediaUrl: mediaUrl ?? null,
       ocrRawText: ocr.raw,
       status: verified ? "VERIFIED" : "PENDING",
-    },
-  });
+    })
+    .returning();
 
   const runs: string[] = [];
-  const automations = await db.automation.findMany({
-    where: {
-      companyId: convo.contact.companyId,
-      enabled: true,
-      triggerType: "PAYMENT_RECEIVED",
-    },
+  const automations = await db.query.automation.findMany({
+    where: and(
+      eq(automationTable.companyId, convo.contact.companyId),
+      eq(automationTable.enabled, true),
+      eq(automationTable.triggerType, "PAYMENT_RECEIVED")
+    ),
   });
   for (const auto of automations) {
     const run = await startRun(auto.id, convo.contactId);
@@ -228,9 +259,13 @@ export async function handleCustomerReply(
   contactId: string,
   input: { buttonId?: string; text?: string }
 ) {
-  const waiting = await db.automationRun.findMany({
-    where: { contactId, status: "waiting" },
-    orderBy: { updatedAt: "desc" },
+  const db = getDb();
+  const waiting = await db.query.automationRun.findMany({
+    where: and(
+      eq(automationRunTable.contactId, contactId),
+      eq(automationRunTable.status, "waiting")
+    ),
+    orderBy: desc(automationRunTable.updatedAt),
   });
   for (const run of waiting) {
     await resumeRun(run.id, input);
@@ -248,23 +283,30 @@ export async function handleInboundMessage(
   contactId: string,
   input: { buttonId?: string; text?: string }
 ) {
+  const db = getDb();
   const resumed = await handleCustomerReply(contactId, input);
   if (resumed > 0) return { resumed, started: 0 };
 
-  const contact = await db.contact.findUnique({ where: { id: contactId } });
+  const contact = await db.query.contact.findFirst({
+    where: eq(contactTable.id, contactId),
+  });
   if (!contact) return { resumed: 0, started: 0 };
-  const autos = await db.automation.findMany({
-    where: {
-      companyId: contact.companyId,
-      enabled: true,
-      triggerType: "NEW_INCOMING_MESSAGE",
-    },
+  const autos = await db.query.automation.findMany({
+    where: and(
+      eq(automationTable.companyId, contact.companyId),
+      eq(automationTable.enabled, true),
+      eq(automationTable.triggerType, "NEW_INCOMING_MESSAGE")
+    ),
   });
   let started = 0;
   for (const a of autos) {
     // Don't stack a second concurrent run of the same automation on this contact.
-    const active = await db.automationRun.findFirst({
-      where: { automationId: a.id, contactId, status: { in: ["running", "waiting"] } },
+    const active = await db.query.automationRun.findFirst({
+      where: and(
+        eq(automationRunTable.automationId, a.id),
+        eq(automationRunTable.contactId, contactId),
+        inArray(automationRunTable.status, ["running", "waiting"])
+      ),
     });
     if (active) continue;
     const run = await startRun(a.id, contactId);

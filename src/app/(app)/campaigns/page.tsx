@@ -1,17 +1,23 @@
-import { db } from "@/lib/db";
+import { asc, desc, eq } from "drizzle-orm";
+import { getDb } from "@/db/client";
+import { campaign, tag } from "@/db/schema";
 import { PageChrome } from "@/components/PageChrome";
 import { getCurrentMember } from "@/lib/current-member";
 import { createAndSendCampaign } from "./actions";
 import { relTime } from "@/lib/format";
 
 export default async function CampaignsPage() {
+  const db = getDb();
   const me = await getCurrentMember();
   const [campaigns, tags] = await Promise.all([
-    db.campaign.findMany({
-      where: { companyId: me.companyId },
-      orderBy: { createdAt: "desc" },
+    db.query.campaign.findMany({
+      where: eq(campaign.companyId, me.companyId),
+      orderBy: desc(campaign.createdAt),
     }),
-    db.tag.findMany({ where: { companyId: me.companyId }, orderBy: { name: "asc" } }),
+    db.query.tag.findMany({
+      where: eq(tag.companyId, me.companyId),
+      orderBy: asc(tag.name),
+    }),
   ]);
 
   return (
@@ -53,7 +59,7 @@ export default async function CampaignsPage() {
           <p className="mb-3 text-[11px] text-[var(--color-faint)]">
             Merge vars: {"{full_name}"} {"{ref_1}"} {"{amount}"} … · DEMO sends via the stubbed transport.
           </p>
-          <button className="w-full rounded-lg bg-[var(--color-accent)] px-3 py-2 text-[13px] font-medium text-[#1b1a17]">
+          <button className="w-full rounded-lg bg-[var(--color-accent)] px-3 py-2 text-[13px] font-medium text-white">
             Send broadcast
           </button>
         </form>

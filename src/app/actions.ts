@@ -2,8 +2,17 @@
 
 import { cookies } from "next/headers";
 import { revalidatePath } from "next/cache";
+import { and, eq } from "drizzle-orm";
 import { MEMBER_COOKIE, getCurrentMember } from "@/lib/current-member";
-import { db } from "@/lib/db";
+import { getDb } from "@/db/client";
+import {
+  contactTag,
+  conversation,
+  conversationTag,
+  message,
+  note,
+  payment,
+} from "@/db/schema";
 import { recordInbound } from "@/lib/whatsapp/transport";
 import { handleCustomerReply, handleReceipt, handleInboundMessage } from "@/lib/automation/dispatch";
 
@@ -22,27 +31,24 @@ export async function sendMessage(formData: FormData) {
   const kind = String(formData.get("kind") ?? "reply"); // reply | note
   if (!conversationId || !body) return;
 
+  const db = getDb();
   const me = await getCurrentMember();
 
   if (kind === "note") {
-    await db.note.create({
-      data: { conversationId, memberId: me.id, body },
-    });
+    await db.insert(note).values({ conversationId, memberId: me.id, body });
   } else {
-    await db.message.create({
-      data: {
-        conversationId,
-        direction: "OUT",
-        type: "TEXT",
-        body,
-        sentByMemberId: me.id,
-        status: "SENT",
-      },
+    await db.insert(message).values({
+      conversationId,
+      direction: "OUT",
+      type: "TEXT",
+      body,
+      sentByMemberId: me.id,
+      status: "SENT",
     });
-    await db.conversation.update({
-      where: { id: conversationId },
-      data: { lastMessageAt: new Date(), unreadCount: 0 },
-    });
+    await db
+      .update(conversation)
+      .set({ lastMessageAt: new Date(), unreadCount: 0 })
+      .where(eq(conversation.id, conversationId));
   }
   revalidatePath(`/inbox/${conversationId}`);
   revalidatePath("/inbox");
@@ -54,17 +60,14 @@ export async function assignConversation(formData: FormData) {
   const agentId = String(formData.get("assignedAgentId") ?? "");
   const departmentId = String(formData.get("assignedDepartmentId") ?? "");
   if (!conversationId) return;
-  await db.conversation.update({
-    where: { id: conversationId },
-    data: {
-      ...(formData.has("assignedAgentId")
-        ? { assignedAgentId: agentId || null }
-        : {}),
-      ...(formData.has("assignedDepartmentId")
-        ? { assignedDepartmentId: departmentId || null }
-        : {}),
-    },
-  });
+
+  const set: { assignedAgentId?: string | null; assignedDepartmentId?: string | null } = {};
+  if (formData.has("assignedAgentId")) set.assignedAgentId = agentId || null;
+  if (formData.has("assignedDepartmentId")) set.assignedDepartmentId = departmentId || null;
+  if (!Object.keys(set).length) return;
+
+  const db = getDb();
+  await db.update(conversation).set(set).where(eq(conversation.id, conversationId));
   revalidatePath(`/inbox/${conversationId}`);
   revalidatePath("/inbox");
 }
@@ -74,13 +77,15 @@ export async function setConversationStatus(formData: FormData) {
   const conversationId = String(formData.get("conversationId") ?? "");
   const status = String(formData.get("status") ?? "OPEN").toUpperCase();
   if (!conversationId || !["OPEN", "CLOSED", "QUEUE", "PENDING"].includes(status)) return;
-  await db.conversation.update({
-    where: { id: conversationId },
-    data: {
+
+  const db = getDb();
+  await db
+    .update(conversation)
+    .set({
       status: status as "OPEN" | "CLOSED" | "QUEUE" | "PENDING",
       ...(status === "CLOSED" ? { unreadCount: 0 } : {}),
-    },
-  });
+    })
+    .where(eq(conversation.id, conversationId));
   revalidatePath(`/inbox/${conversationId}`);
   revalidatePath("/inbox");
 }
@@ -91,23 +96,29 @@ export async function toggleConversationTag(formData: FormData) {
   const tagId = String(formData.get("tagId") ?? "");
   const remove = formData.get("remove") === "1";
   if (!conversationId || !tagId) return;
-  const convo = await db.conversation.findUnique({ where: { id: conversationId } });
+
+  const db = getDb();
+  const convo = await db.query.conversation.findFirst({
+    where: eq(conversation.id, conversationId),
+  });
   if (!convo) return;
 
   if (remove) {
-    await db.conversationTag.deleteMany({ where: { conversationId, tagId } });
-    await db.contactTag.deleteMany({ where: { contactId: convo.contactId, tagId } });
+    await db
+      .delete(conversationTag)
+      .where(and(eq(conversationTag.conversationId, conversationId), eq(conversationTag.tagId, tagId)));
+    await db
+      .delete(contactTag)
+      .where(and(eq(contactTag.contactId, convo.contactId), eq(contactTag.tagId, tagId)));
   } else {
-    await db.conversationTag.upsert({
-      where: { conversationId_tagId: { conversationId, tagId } },
-      update: {},
-      create: { conversationId, tagId },
-    });
-    await db.contactTag.upsert({
-      where: { contactId_tagId: { contactId: convo.contactId, tagId } },
-      update: {},
-      create: { contactId: convo.contactId, tagId },
-    });
+    await db
+      .insert(conversationTag)
+      .values({ conversationId, tagId })
+      .onConflictDoNothing();
+    await db
+      .insert(contactTag)
+      .values({ contactId: convo.contactId, tagId })
+      .onConflictDoNothing();
   }
   revalidatePath(`/inbox/${conversationId}`);
   revalidatePath("/inbox");
@@ -119,7 +130,11 @@ export async function demoTap(formData: FormData) {
   const buttonId = String(formData.get("buttonId") ?? "");
   const buttonLabel = String(formData.get("buttonLabel") ?? "");
   if (!conversationId || !buttonId) return;
-  const convo = await db.conversation.findUnique({ where: { id: conversationId } });
+
+  const db = getDb();
+  const convo = await db.query.conversation.findFirst({
+    where: eq(conversation.id, conversationId),
+  });
   if (!convo) return;
   await recordInbound(conversationId, buttonLabel || buttonId, {
     type: "INTERACTIVE",
@@ -147,10 +162,12 @@ export async function setPaymentStatus(formData: FormData) {
   const paymentId = String(formData.get("paymentId") ?? "");
   const status = String(formData.get("status") ?? "");
   if (!paymentId || !["VERIFIED", "REJECTED", "PENDING"].includes(status)) return;
-  await db.payment.update({
-    where: { id: paymentId },
-    data: { status: status as "VERIFIED" | "REJECTED" | "PENDING" },
-  });
+
+  const db = getDb();
+  await db
+    .update(payment)
+    .set({ status: status as "VERIFIED" | "REJECTED" | "PENDING" })
+    .where(eq(payment.id, paymentId));
   revalidatePath("/payments");
 }
 
@@ -159,7 +176,11 @@ export async function demoCustomerText(formData: FormData) {
   const conversationId = String(formData.get("conversationId") ?? "");
   const text = String(formData.get("text") ?? "").trim();
   if (!conversationId || !text) return;
-  const convo = await db.conversation.findUnique({ where: { id: conversationId } });
+
+  const db = getDb();
+  const convo = await db.query.conversation.findFirst({
+    where: eq(conversation.id, conversationId),
+  });
   if (!convo) return;
   await recordInbound(conversationId, text, { type: "TEXT" });
   await handleInboundMessage(convo.contactId, { text });

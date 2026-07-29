@@ -2,6 +2,50 @@
 
 _Last updated: 2026-07-29_
 
+## Drizzle + Cloudflare cutover — DONE (code), owner creds needed to deploy
+
+Per the owner: run Connect "the Houzs way" — same Cloudflare account + same Supabase
+as the ERP. The whole data layer was moved off Prisma/SQLite onto **Drizzle + postgres.js
+over Hyperdrive**, and the app now deploys as a **Cloudflare Worker via OpenNext**.
+
+**Done + verified (no creds needed):**
+- `src/db/schema.ts` — full domain (23 tables) in a dedicated **`connect` pgSchema** so it
+  never collides with the ERP's `public` tables. `src/db/pg.ts` is ported verbatim from the
+  ERP's hard-won Hyperdrive config (prepare:false, max:1, no ssl/connect_timeout on the
+  Hyperdrive branch). `src/db/client.ts` = request-scoped `getDb()` (React `cache()`),
+  reads HYPERDRIVE binding (prod) or DATABASE_URL (dev) via `getCloudflareContext()`.
+- All 24 Prisma call sites converted to Drizzle (relational `db.query` + core inserts/
+  updates). Prisma fully removed (`@prisma/client`/`prisma` uninstalled, `src/lib/db.ts`
+  + `prisma/schema.prisma` + old seed deleted; `prisma/seed-data.ts` kept).
+- Cloudflare: `wrangler.toml` (account `816e457307d7fa0491c2a08a72ad5dcd`, nodejs_compat,
+  assets binding, Hyperdrive binding commented until created), `open-next.config.ts`,
+  `next.config.ts` (`initOpenNextCloudflareForDev`), `cloudflare-env.d.ts`.
+- Migration `src/db/migrations/0000_init_connect.sql` (creates `connect` schema + enums +
+  tables). Seed ported to `scripts/seed.ts` (+ `scripts/db-migrate.ts`, `scripts/_env.ts`).
+- **Verified:** `tsc --noEmit` clean; `next build` clean (all routes dynamic ƒ); the
+  OpenNext Worker build compiles + bundles middleware/assets/cache + traces the server
+  function. It stops only at the final **Windows symlink** step (`EPERM: symlink`) — an OS
+  permission limit, not a code issue. Fix: enable Windows **Developer Mode** (non-admin
+  symlinks) or run the OpenNext build/deploy on **Linux CI** (recommended — matches the
+  ERP's PR→CI→deploy methodology).
+
+**Deploy runbook (needs the owner):**
+1. Owner puts the COMPANY Supabase **session-pooler** URL (port 5432) into `.dev.vars` as
+   `DATABASE_URL` (directly — never via chat). `.dev.vars.example` documents it.
+2. `pnpm db:migrate` then `pnpm db:seed` (creates the `connect` schema + tables + demo
+   data; runs locally via tsx, no symlink issue).
+3. Owner authorizes Cloudflare (`wrangler login`, or a CF API token for CI).
+4. `wrangler hyperdrive create houzs-connect-pg --connection-string="<same Supabase URL>"`
+   → paste the printed id into `wrangler.toml` and uncomment the `[[hyperdrive]]` block.
+5. Deploy: `pnpm run deploy` (on Linux CI or Windows Developer Mode). Register the Meta
+   webhook later at `https://<host>/api/webhooks/whatsapp` when going LIVE.
+
+**Design refresh (parallel track):** the current amber theme is being replaced with Houzs's
+real "Ink & Petrol" brand (petrol `#16695f` + brass `#a16a2e`, IBM Plex + Noto Sans SC).
+Prompt + real reference files for claudedesign are in `../houzs-design-reference/`. When
+claudedesign returns `.html`, translate it into the React/Tailwind components (data layer
+is now stable, so only JSX/styles change).
+
 ## Feature build-out (Phase 2b–4) — DONE ✅ (all DEMO transport)
 
 Everything the owner listed is now built and verified end-to-end in DEMO:

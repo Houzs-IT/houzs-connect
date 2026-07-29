@@ -38,7 +38,7 @@ export function Thread({
               <div
                 className={`rounded-2xl px-3.5 py-2.5 text-[13.5px] leading-relaxed shadow-sm ring-1 ${
                   out
-                    ? "rounded-br-md bg-[var(--color-out)] text-[#3d2c07] ring-[color-mix(in_srgb,var(--color-accent)_25%,transparent)]"
+                    ? "rounded-br-md bg-[var(--color-out)] text-[var(--color-accent-ink)] ring-[color-mix(in_srgb,var(--color-accent)_25%,transparent)]"
                     : "rounded-bl-md bg-[var(--color-in)] text-[var(--color-ink)] ring-[var(--color-border)]"
                 }`}
               >
@@ -51,7 +51,9 @@ export function Thread({
                 <p className="whitespace-pre-wrap">{m.body}</p>
                 <div
                   className={`mt-1 flex items-center gap-1 text-[10px] ${
-                    out ? "justify-end text-[#8a6d2e]" : "text-[var(--color-faint)]"
+                    out
+                      ? "justify-end text-[color-mix(in_srgb,var(--color-accent-ink)_60%,transparent)]"
+                      : "text-[var(--color-faint)]"
                   }`}
                 >
                   {clockTime(m.createdAt)}

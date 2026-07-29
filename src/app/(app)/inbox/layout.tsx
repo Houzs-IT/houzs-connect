@@ -1,4 +1,6 @@
-import { db } from "@/lib/db";
+import { desc } from "drizzle-orm";
+import { getDb } from "@/db/client";
+import { conversation, member } from "@/db/schema";
 import { getCurrentMember } from "@/lib/current-member";
 import { getVisibility, conversationVisibilityWhere } from "@/lib/access";
 import { Topbar } from "@/components/Topbar";
@@ -10,19 +12,20 @@ export default async function InboxLayout({
   children: React.ReactNode;
 }) {
   const me = await getCurrentMember();
-  const allMembers = await db.member.findMany({
-    select: { id: true, managerId: true },
+  const db = getDb();
+  const allMembers = await db.query.member.findMany({
+    columns: { id: true, managerId: true },
   });
   const vis = getVisibility(me, allMembers);
 
-  const convos = await db.conversation.findMany({
+  const convos = await db.query.conversation.findMany({
     where: conversationVisibilityWhere(vis),
-    orderBy: [{ lastMessageAt: "desc" }, { createdAt: "desc" }],
-    include: {
+    orderBy: [desc(conversation.lastMessageAt), desc(conversation.createdAt)],
+    with: {
       contact: true,
       assignedAgent: true,
-      tagLinks: { include: { tag: true } },
-      messages: { orderBy: { createdAt: "desc" }, take: 1 },
+      tagLinks: { with: { tag: true } },
+      messages: { orderBy: (m, { desc }) => desc(m.createdAt), limit: 1 },
     },
   });
 

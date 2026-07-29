@@ -1,4 +1,6 @@
-import { db } from "@/lib/db";
+import { desc } from "drizzle-orm";
+import { getDb } from "@/db/client";
+import { payment } from "@/db/schema";
 import { PageChrome } from "@/components/PageChrome";
 import { setPaymentStatus } from "@/app/actions";
 import { relTime } from "@/lib/format";
@@ -10,9 +12,10 @@ const STATUS_STYLE: Record<string, string> = {
 };
 
 export default async function PaymentsPage() {
-  const payments = await db.payment.findMany({
-    orderBy: { createdAt: "desc" },
-    include: { contact: true },
+  const db = getDb();
+  const payments = await db.query.payment.findMany({
+    orderBy: desc(payment.createdAt),
+    with: { contact: true },
   });
 
   const totalVerified = payments

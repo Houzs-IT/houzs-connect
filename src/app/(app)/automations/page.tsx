@@ -1,5 +1,7 @@
 import Link from "next/link";
-import { db } from "@/lib/db";
+import { desc } from "drizzle-orm";
+import { getDb } from "@/db/client";
+import { automation } from "@/db/schema";
 import { PageChrome } from "@/components/PageChrome";
 import { IconBolt } from "@/components/icons";
 
@@ -13,9 +15,10 @@ const TRIGGER_LABEL: Record<string, string> = {
 };
 
 export default async function AutomationsPage() {
-  const automations = await db.automation.findMany({
-    orderBy: { updatedAt: "desc" },
-    include: { channel: true },
+  const db = getDb();
+  const automations = await db.query.automation.findMany({
+    orderBy: desc(automation.updatedAt),
+    with: { channel: true },
   });
 
   return (

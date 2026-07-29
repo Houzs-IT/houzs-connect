@@ -122,7 +122,7 @@ export function ConversationList({ items }: { items: Item[] }) {
                 </div>
               </div>
               {c.unread > 0 && (
-                <span className="mt-1 grid h-[18px] min-w-[18px] shrink-0 place-items-center self-start rounded-full bg-[var(--color-accent)] px-1 text-[10px] font-semibold text-[#1b1a17]">
+                <span className="mt-1 grid h-[18px] min-w-[18px] shrink-0 place-items-center self-start rounded-full bg-[var(--color-accent)] px-1 text-[10px] font-semibold text-white">
                   {c.unread}
                 </span>
               )}

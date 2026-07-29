@@ -1,15 +1,22 @@
-import { db } from "@/lib/db";
+import { desc, eq } from "drizzle-orm";
+import { getDb } from "@/db/client";
+import { form } from "@/db/schema";
 import { PageChrome } from "@/components/PageChrome";
 import { getCurrentMember } from "@/lib/current-member";
 import { createForm, setFormStatus } from "./actions";
 
 export default async function FormsPage() {
+  const db = getDb();
   const me = await getCurrentMember();
-  const forms = await db.form.findMany({
-    where: { companyId: me.companyId },
-    orderBy: { createdAt: "desc" },
-    include: { _count: { select: { responses: true } } },
+  const rows = await db.query.form.findMany({
+    where: eq(form.companyId, me.companyId),
+    orderBy: desc(form.createdAt),
+    with: { responses: { columns: { id: true } } },
   });
+  const forms = rows.map((f) => ({
+    ...f,
+    _count: { responses: f.responses.length },
+  }));
 
   return (
     <PageChrome
@@ -38,7 +45,7 @@ export default async function FormsPage() {
             defaultValue={"delivery_date_1 | Preferred delivery date | date\nhouse_type | Property type | select\ndisposal | Dispose old items? | select"}
             className="mb-3 w-full resize-none rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] p-2 font-mono text-[12px] outline-none focus:border-[var(--color-accent)]"
           />
-          <button className="w-full rounded-lg bg-[var(--color-accent)] px-3 py-2 text-[13px] font-medium text-[#1b1a17]">
+          <button className="w-full rounded-lg bg-[var(--color-accent)] px-3 py-2 text-[13px] font-medium text-white">
             Create form
           </button>
         </form>
