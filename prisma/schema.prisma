@@ -39,6 +39,7 @@ model Company {
   automations  Automation[]
   campaigns    Campaign[]
   quickReplies QuickReply[]
+  forms        Form[]
 }
 
 enum Role {
@@ -439,6 +440,34 @@ model DriverEvent {
   createdAt  DateTime @default(now())
 
   @@index([contactId])
+}
+
+// ─────────────────────────── WhatsApp Forms (Meta Flows) ───────────────────────────
+
+model Form {
+  id        String   @id @default(cuid())
+  companyId String
+  company   Company  @relation(fields: [companyId], references: [id])
+  name      String
+  status    String   @default("draft") // draft | published
+  // Ordered field definitions: [{ key, label, type: text|select|date, options? }]
+  fields    Json?
+  createdAt DateTime @default(now())
+
+  responses FormResponse[]
+
+  @@index([companyId])
+}
+
+model FormResponse {
+  id        String   @id @default(cuid())
+  formId    String
+  form      Form     @relation(fields: [formId], references: [id])
+  contactId String?
+  answers   Json? // { key: value }
+  createdAt DateTime @default(now())
+
+  @@index([formId])
 }
 
 // ─────────────────────────── Inbound webhooks (ERP / driver app) ───────────────────────────

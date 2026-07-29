@@ -5,6 +5,7 @@ export type NodeType =
   | "send_text"
   | "ask_buttons" // interactive buttons; run pauses awaiting a tap
   | "collect_input" // pauses awaiting a free-text reply, saves to an attribute
+  | "ai_agent_reply" // generate + send an AI reply to the last customer message
   | "criteria_router" // branch on a contact attribute
   | "set_attribute"
   | "add_tag"

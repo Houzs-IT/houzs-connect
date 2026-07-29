@@ -4,6 +4,7 @@ import { asGraph, type FlowGraph, type FlowNode } from "./types";
 import { interpolate } from "./vars";
 import { attrs } from "@/lib/format";
 import { getOrCreateConversation, sendOutbound } from "@/lib/whatsapp/transport";
+import { generateAgentReply } from "@/lib/ai";
 
 /**
  * Automation runtime. Interprets a FlowGraph node-by-node, performing side
@@ -110,6 +111,22 @@ async function execNode(
       });
       await logStep(ctx.runId, { node: node.id, type: node.type, awaiting: "text" });
       return { pause: "text" };
+    }
+
+    case "ai_agent_reply": {
+      const lastIn = await db.message.findFirst({
+        where: { conversationId: ctx.conversationId, direction: "IN" },
+        orderBy: { createdAt: "desc" },
+      });
+      const reply = await generateAgentReply({
+        systemPrompt: d.message,
+        lastCustomerMessage: lastIn?.body ?? "",
+        contactName: ctx.contactName,
+        attributes: attrs(varCtx.attributes),
+      });
+      await sendOutbound(ctx.conversationId, reply, { isBot: true });
+      await logStep(ctx.runId, { node: node.id, type: node.type });
+      return { next: nextNodeId(ctx.graph, node.id) };
     }
 
     case "set_attribute": {

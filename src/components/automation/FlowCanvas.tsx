@@ -27,6 +27,7 @@ const NODE_META: Record<string, { label: string; color: string }> = {
   send_text: { label: "Send message", color: "#0d7490" },
   ask_buttons: { label: "Ask buttons", color: "#e2900a" },
   collect_input: { label: "Collect input", color: "#b45309" },
+  ai_agent_reply: { label: "AI agent reply", color: "#7c3aed" },
   criteria_router: { label: "Criteria router", color: "#8e4ec6" },
   set_attribute: { label: "Set attribute", color: "#1b7f6b" },
   add_tag: { label: "Add tag", color: "#c2410c" },
@@ -42,6 +43,7 @@ const PALETTE: NodeType[] = [
   "send_text",
   "ask_buttons",
   "collect_input",
+  "ai_agent_reply",
   "criteria_router",
   "set_attribute",
   "add_tag",
@@ -69,6 +71,7 @@ function summarize(d: HcData): string {
     case "send_text":
     case "ask_buttons":
     case "collect_input":
+    case "ai_agent_reply":
       return d.message ?? "";
     case "set_attribute":
       return `${d.key ?? "?"} = ${d.value ?? ""}`;
@@ -296,8 +299,8 @@ function FlowCanvasInner({
             {NODE_META[d.nodeType]?.label ?? d.nodeType}
           </div>
 
-          {("message" in d || ["send_text", "ask_buttons", "collect_input"].includes(d.nodeType)) && (
-            <Field label="Message">
+          {("message" in d || ["send_text", "ask_buttons", "collect_input", "ai_agent_reply"].includes(d.nodeType)) && (
+            <Field label={d.nodeType === "ai_agent_reply" ? "System prompt (optional)" : "Message"}>
               <textarea
                 value={d.message ?? ""}
                 onChange={(e) => patchSelected({ message: e.target.value })}
