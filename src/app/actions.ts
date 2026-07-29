@@ -5,7 +5,7 @@ import { revalidatePath } from "next/cache";
 import { MEMBER_COOKIE, getCurrentMember } from "@/lib/current-member";
 import { db } from "@/lib/db";
 import { recordInbound } from "@/lib/whatsapp/transport";
-import { handleCustomerReply } from "@/lib/automation/dispatch";
+import { handleCustomerReply, handleReceipt } from "@/lib/automation/dispatch";
 
 /** Dev-only: switch which member you're acting as (for testing org-chart RBAC). */
 export async function actAsMember(formData: FormData) {
@@ -128,6 +128,30 @@ export async function demoTap(formData: FormData) {
   await handleCustomerReply(convo.contactId, { buttonId });
   revalidatePath(`/inbox/${conversationId}`);
   revalidatePath("/inbox");
+}
+
+/** DEMO: simulate the customer sending a payment receipt -> OCR -> record payment. */
+export async function demoSendReceipt(formData: FormData) {
+  const conversationId = String(formData.get("conversationId") ?? "");
+  const text = String(formData.get("text") ?? "").trim();
+  if (!conversationId || !text) return;
+  await recordInbound(conversationId, `[receipt] ${text}`, { type: "IMAGE" });
+  await handleReceipt(conversationId, text);
+  revalidatePath(`/inbox/${conversationId}`);
+  revalidatePath("/inbox");
+  revalidatePath("/payments");
+}
+
+/** Verify or reject a captured payment. */
+export async function setPaymentStatus(formData: FormData) {
+  const paymentId = String(formData.get("paymentId") ?? "");
+  const status = String(formData.get("status") ?? "");
+  if (!paymentId || !["VERIFIED", "REJECTED", "PENDING"].includes(status)) return;
+  await db.payment.update({
+    where: { id: paymentId },
+    data: { status: status as "VERIFIED" | "REJECTED" | "PENDING" },
+  });
+  revalidatePath("/payments");
 }
 
 /** DEMO: simulate the customer sending a free-text message (drives collect_input). */

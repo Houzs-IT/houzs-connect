@@ -66,7 +66,10 @@ export async function sendOutbound(
 export async function recordInbound(
   conversationId: string,
   body: string,
-  meta?: { type?: "TEXT" | "INTERACTIVE"; interactivePayload?: unknown }
+  meta?: {
+    type?: "TEXT" | "INTERACTIVE" | "IMAGE" | "DOCUMENT" | "AUDIO" | "VIDEO";
+    interactivePayload?: unknown;
+  }
 ) {
   const msg = await db.message.create({
     data: {

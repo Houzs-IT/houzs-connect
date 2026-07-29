@@ -10,6 +10,7 @@ import {
   IconCampaign,
   IconForm,
   IconSettings,
+  IconReceipt,
 } from "./icons";
 
 const NAV = [
@@ -17,6 +18,7 @@ const NAV = [
   { href: "/inbox", label: "Inbox", Icon: IconInbox, badge: true },
   { href: "/contacts", label: "Contacts", Icon: IconContacts },
   { href: "/automations", label: "Automations", Icon: IconAutomation },
+  { href: "/payments", label: "Payments", Icon: IconReceipt },
   { href: "/campaigns", label: "Campaigns", Icon: IconCampaign },
   { href: "/forms", label: "WhatsApp Forms", Icon: IconForm },
   { href: "/settings", label: "Settings", Icon: IconSettings },

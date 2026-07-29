@@ -2,6 +2,7 @@ import { db } from "@/lib/db";
 import { attrs } from "@/lib/format";
 import { startRun, resumeRun } from "./engine";
 import { getOrCreateConversation } from "@/lib/whatsapp/transport";
+import { runOcr } from "@/lib/ocr";
 
 export interface ErpWebhookPayload {
   companySlug?: string;
@@ -163,6 +164,60 @@ export async function handleDriverEvent(payload: DriverEventPayload) {
     triggered: automations.map((a) => a.name),
     runs,
   };
+}
+
+/**
+ * A customer sent a payment receipt. OCR it, record the Payment against the order,
+ * auto-verify when the amount matches the order total, and fire PAYMENT_RECEIVED
+ * automations. This is the "auto-capture receipt -> auto-record payment" flow.
+ */
+export async function handleReceipt(
+  conversationId: string,
+  receiptText: string,
+  mediaUrl?: string
+) {
+  const convo = await db.conversation.findUnique({
+    where: { id: conversationId },
+    include: { contact: true },
+  });
+  if (!convo) return { ok: false as const, error: "no conversation" };
+
+  const ocr = runOcr(receiptText);
+  const a = attrs(convo.contact.attributes);
+  const orderTotal = Number(a.order_total ?? a.amount ?? NaN);
+  // Auto-verify only when OCR read an amount that matches the order total.
+  const verified =
+    ocr.amount != null && Number.isFinite(orderTotal) && Math.abs(ocr.amount - orderTotal) < 0.01;
+
+  const payment = await db.payment.create({
+    data: {
+      contactId: convo.contactId,
+      conversationId,
+      amount: ocr.amount,
+      currency: ocr.currency,
+      method: ocr.method,
+      referenceNo: ocr.reference,
+      orderRef: (a.ref_1 as string) ?? null,
+      receiptMediaUrl: mediaUrl ?? null,
+      ocrRawText: ocr.raw,
+      status: verified ? "VERIFIED" : "PENDING",
+    },
+  });
+
+  const runs: string[] = [];
+  const automations = await db.automation.findMany({
+    where: {
+      companyId: convo.contact.companyId,
+      enabled: true,
+      triggerType: "PAYMENT_RECEIVED",
+    },
+  });
+  for (const auto of automations) {
+    const run = await startRun(auto.id, convo.contactId);
+    if (run) runs.push(run.id);
+  }
+
+  return { ok: true as const, paymentId: payment.id, amount: ocr.amount, status: payment.status, verified, runs };
 }
 
 /**
