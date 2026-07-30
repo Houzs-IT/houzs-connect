@@ -9,6 +9,7 @@ import { relTime } from "@/lib/format";
 export default async function CampaignsPage() {
   const db = getDb();
   const me = await getCurrentMember();
+  if (!me) return null;
   const [campaigns, tags] = await Promise.all([
     db.query.campaign.findMany({
       where: eq(campaign.companyId, me.companyId),

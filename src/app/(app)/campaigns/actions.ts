@@ -27,6 +27,7 @@ export async function createAndSendCampaign(formData: FormData) {
 
   const db = getDb();
   const me = await getCurrentMember();
+  if (!me) return;
   const channel = await db.query.channel.findFirst({
     where: eq(channelTable.companyId, me.companyId),
     orderBy: desc(channelTable.isDefault),

@@ -8,6 +8,7 @@ import { createForm, setFormStatus } from "./actions";
 export default async function FormsPage() {
   const db = getDb();
   const me = await getCurrentMember();
+  if (!me) return null;
   const rows = await db.query.form.findMany({
     where: eq(form.companyId, me.companyId),
     orderBy: desc(form.createdAt),

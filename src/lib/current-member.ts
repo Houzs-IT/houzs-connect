@@ -1,39 +1,33 @@
 import { cookies } from "next/headers";
-import { asc, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
+import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { getDb } from "@/db/client";
 import { member } from "@/db/schema";
-
-const COOKIE = "hc_member";
+import { SESSION_COOKIE, verifySession } from "@/lib/erp-auth";
 
 /**
- * Dev-mode "act as" member. Real auth (ERP SSO) comes in Phase 5.
- * Falls back to the OWNER so the app always renders.
+ * The signed-in member, resolved from the session cookie (set at ERP login).
+ * Returns null when there's no valid session — the (app) layout redirects to
+ * /login in that case, so authenticated pages always receive a real member.
  */
 export async function getCurrentMember() {
-  const db = getDb();
   const jar = await cookies();
-  const wantId = jar.get(COOKIE)?.value;
+  const token = jar.get(SESSION_COOKIE)?.value;
+  if (!token) return null;
 
-  if (wantId) {
-    const m = await db.query.member.findFirst({
-      where: eq(member.id, wantId),
-      with: { department: true },
-    });
-    if (m) return m;
-  }
-  const fallback = await db.query.member.findFirst({
-    where: eq(member.role, "OWNER"),
+  const { env } = getCloudflareContext();
+  const secret = env.SESSION_SECRET;
+  if (!secret) return null;
+
+  const memberId = await verifySession(token, secret);
+  if (!memberId) return null;
+
+  const db = getDb();
+  const m = await db.query.member.findFirst({
+    where: eq(member.id, memberId),
     with: { department: true },
-    orderBy: asc(member.createdAt),
   });
-  if (fallback) return fallback;
-
-  // Absolute last resort (empty DB).
-  const any = await db.query.member.findFirst({ with: { department: true } });
-  if (!any) throw new Error("No members in database");
-  return any;
+  return m ?? null;
 }
 
-export type CurrentMember = Awaited<ReturnType<typeof getCurrentMember>>;
-
-export const MEMBER_COOKIE = COOKIE;
+export type CurrentMember = NonNullable<Awaited<ReturnType<typeof getCurrentMember>>>;

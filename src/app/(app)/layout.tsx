@@ -1,7 +1,8 @@
+import { redirect } from "next/navigation";
 import { and, gt, ne } from "drizzle-orm";
 import { Sidebar } from "@/components/Sidebar";
 import { getDb } from "@/db/client";
-import { conversation, member } from "@/db/schema";
+import { conversation } from "@/db/schema";
 import { getCurrentMember } from "@/lib/current-member";
 import { getVisibility, conversationVisibilityWhere } from "@/lib/access";
 
@@ -17,6 +18,8 @@ export default async function AppLayout({
   children: React.ReactNode;
 }) {
   const me = await getCurrentMember();
+  if (!me) redirect("/login");
+
   const db = getDb();
   const allMembers = await db.query.member.findMany({
     columns: { id: true, managerId: true },

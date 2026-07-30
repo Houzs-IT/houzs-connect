@@ -12,6 +12,7 @@ export async function PageChrome({
   children: React.ReactNode;
 }) {
   const me = await getCurrentMember();
+  if (!me) return null; // the (app) layout redirects unauthenticated users to /login
   return (
     <>
       <Topbar title={title} subtitle={subtitle} current={me} />

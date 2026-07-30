@@ -16,6 +16,7 @@ export async function createForm(formData: FormData) {
   const fieldsText = String(formData.get("fields") ?? "");
   if (!name) return;
   const me = await getCurrentMember();
+  if (!me) return;
 
   const fields = fieldsText
     .split("\n")

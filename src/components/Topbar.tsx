@@ -1,7 +1,4 @@
-import { asc } from "drizzle-orm";
-import { getDb } from "@/db/client";
-import { member } from "@/db/schema";
-import { actAsMember } from "@/app/actions";
+import { logout } from "@/app/login/actions";
 import { initials, tint } from "@/lib/format";
 import { IconSearch } from "./icons";
 
@@ -15,7 +12,7 @@ const ROLE_LABEL: Record<string, string> = {
   VIEWER: "Viewer",
 };
 
-export async function Topbar({
+export function Topbar({
   title,
   subtitle,
   current,
@@ -24,9 +21,6 @@ export async function Topbar({
   subtitle?: string;
   current: { id: string; name: string; role: string; title: string | null };
 }) {
-  const db = getDb();
-  const members = await db.query.member.findMany({ orderBy: asc(member.name) });
-
   return (
     <header className="flex h-16 shrink-0 items-center gap-4 border-b border-[var(--color-border)] bg-[var(--color-surface)] px-6">
       <div className="min-w-0">
@@ -44,32 +38,30 @@ export async function Topbar({
           <span>Search…</span>
         </div>
 
-        {/* Dev "act as" switcher — proves org-chart RBAC. Replaced by SSO later. */}
-        <form action={actAsMember} className="flex items-center gap-2">
+        <div className="flex items-center gap-2.5">
           <div
             className="grid h-8 w-8 place-items-center rounded-full text-xs font-semibold text-white"
             style={{ background: tint(current.name) }}
           >
             {initials(current.name).toUpperCase()}
           </div>
-          <select
-            name="memberId"
-            defaultValue={current.id}
-            className="max-w-[190px] rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-2.5 py-2 text-[13px] text-[var(--color-ink)] outline-none focus:border-[var(--color-accent)]"
-          >
-            {members.map((m) => (
-              <option key={m.id} value={m.id}>
-                {m.name} · {ROLE_LABEL[m.role] ?? m.role}
-              </option>
-            ))}
-          </select>
-          <button
-            type="submit"
-            className="rounded-lg bg-[var(--color-ink)] px-3 py-2 text-[13px] font-medium text-white transition-opacity hover:opacity-90"
-          >
-            View as
-          </button>
-        </form>
+          <div className="hidden leading-tight sm:block">
+            <div className="text-[13px] font-medium text-[var(--color-ink)]">
+              {current.name}
+            </div>
+            <div className="text-[11px] text-[var(--color-faint)]">
+              {ROLE_LABEL[current.role] ?? current.role}
+            </div>
+          </div>
+          <form action={logout}>
+            <button
+              type="submit"
+              className="rounded-lg border border-[var(--color-border)] px-3 py-2 text-[12px] font-medium text-[var(--color-muted)] transition-colors hover:bg-[var(--color-surface-2)] hover:text-[var(--color-ink)]"
+            >
+              Sign out
+            </button>
+          </form>
+        </div>
       </div>
     </header>
   );

@@ -1,9 +1,8 @@
 "use server";
 
-import { cookies } from "next/headers";
 import { revalidatePath } from "next/cache";
 import { and, eq } from "drizzle-orm";
-import { MEMBER_COOKIE, getCurrentMember } from "@/lib/current-member";
+import { getCurrentMember } from "@/lib/current-member";
 import { getDb } from "@/db/client";
 import {
   contactTag,
@@ -16,14 +15,6 @@ import {
 import { recordInbound } from "@/lib/whatsapp/transport";
 import { handleCustomerReply, handleReceipt, handleInboundMessage } from "@/lib/automation/dispatch";
 
-/** Dev-only: switch which member you're acting as (for testing org-chart RBAC). */
-export async function actAsMember(formData: FormData) {
-  const id = String(formData.get("memberId") ?? "");
-  const jar = await cookies();
-  jar.set(MEMBER_COOKIE, id, { path: "/", httpOnly: false, sameSite: "lax" });
-  revalidatePath("/", "layout");
-}
-
 /** Demo-mode send: records an outbound agent message on the conversation. */
 export async function sendMessage(formData: FormData) {
   const conversationId = String(formData.get("conversationId") ?? "");
@@ -33,6 +24,7 @@ export async function sendMessage(formData: FormData) {
 
   const db = getDb();
   const me = await getCurrentMember();
+  if (!me) return;
 
   if (kind === "note") {
     await db.insert(note).values({ conversationId, memberId: me.id, body });

@@ -1,6 +1,6 @@
 import { desc } from "drizzle-orm";
 import { getDb } from "@/db/client";
-import { conversation, member } from "@/db/schema";
+import { conversation } from "@/db/schema";
 import { getCurrentMember } from "@/lib/current-member";
 import { getVisibility, conversationVisibilityWhere } from "@/lib/access";
 import { Topbar } from "@/components/Topbar";
@@ -12,6 +12,7 @@ export default async function InboxLayout({
   children: React.ReactNode;
 }) {
   const me = await getCurrentMember();
+  if (!me) return null; // the (app) layout redirects unauthenticated users to /login
   const db = getDb();
   const allMembers = await db.query.member.findMany({
     columns: { id: true, managerId: true },
@@ -45,7 +46,7 @@ export default async function InboxLayout({
     <>
       <Topbar
         title="Inbox"
-        subtitle={`Shared team inbox · viewing as ${me.name} (${me.role})`}
+        subtitle="Shared team inbox"
         current={me}
       />
       <div className="flex min-h-0 flex-1">
