@@ -12,6 +12,7 @@ import {
   signSession,
   SESSION_COOKIE,
 } from "@/lib/erp-auth";
+import { syncOrgChart } from "@/lib/erp-sync";
 
 type LoginState = { error?: string };
 
@@ -61,6 +62,11 @@ export async function login(
 
   const co = await db.query.company.findFirst({ orderBy: (c, { asc }) => asc(c.createdAt) });
   if (!co) return { error: "No company configured." };
+
+  // Mirror the whole ERP org chart (departments + reporting line) so RBAC works
+  // for everyone, not just whoever logged in. Best-effort — a missing grant on
+  // public.departments must never block the login itself.
+  await syncOrgChart(co.id).catch(() => {});
 
   const role = roleFromErp(erp.role_name);
   const [m] = await db
