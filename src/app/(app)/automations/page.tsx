@@ -8,6 +8,7 @@ import { IconBolt } from "@/components/icons";
 const TRIGGER_LABEL: Record<string, string> = {
   NEW_INCOMING_MESSAGE: "New incoming message",
   WEBHOOK: "Webhook received",
+  ACTION_CALLBACK: "Action callback id matches",
   TAG_ADDED: "When a tag is added",
   PAYMENT_RECEIVED: "Payment received",
   DRIVER_EVENT: "Driver event",

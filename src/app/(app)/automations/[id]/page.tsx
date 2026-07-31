@@ -10,6 +10,7 @@ import { setAutomationEnabled } from "../actions";
 const TRIGGER_LABEL: Record<string, string> = {
   NEW_INCOMING_MESSAGE: "New incoming message",
   WEBHOOK: "Webhook received (ERP)",
+  ACTION_CALLBACK: "Action callback id matches",
   TAG_ADDED: "When a tag is added",
   DRIVER_EVENT: "Driver / TMS event",
   PAYMENT_RECEIVED: "Payment received",
