@@ -148,6 +148,112 @@
 }
 
 /* ─────────────────────────────────────────────────────────────
+   Skeletons — the loading language.
+
+   Every route ships a `loading.tsx` whose shapes mirror the real page, so a
+   navigation paints its own layout instantly instead of freezing on the old
+   screen. One primitive does all the work: an inset block on `surface-2` that
+   breathes, with a single soft `surface` sweep travelling across it. Tokens
+   only — skeletons re-theme with the rest of Ink & Petrol, and there is no
+   spinner anywhere.
+   ───────────────────────────────────────────────────────────── */
+@keyframes skeletonBreathe {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.62;
+  }
+}
+@keyframes skeletonSweep {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(100%);
+  }
+}
+.skeleton {
+  position: relative;
+  overflow: hidden;
+  border-radius: 5px;
+  background: var(--color-surface-2);
+  animation: skeletonBreathe 2s ease-in-out infinite;
+}
+/* The sweep is a wide, low-contrast highlight — a hint of movement, never a
+   glossy "loading bar". */
+.skeleton::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    color-mix(in srgb, var(--color-surface) 80%, transparent) 50%,
+    transparent 100%
+  );
+  animation: skeletonSweep 1.9s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+/* Denser variant for placeholders sitting on `surface-2` (insets, table heads). */
+.skeleton-strong {
+  background: var(--color-surface-dim);
+}
+/* Placeholders on the dark rail / dark canvases. */
+.skeleton-rail {
+  background: rgba(231, 234, 228, 0.09);
+}
+.skeleton-rail::after {
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(231, 234, 228, 0.07) 50%,
+    transparent 100%
+  );
+}
+/* Stagger a run of sibling placeholders so a list reads as a list, not a slab.
+   Rows carry `--i`; custom properties inherit, so nested blocks pick up their
+   row's delay without each one having to be numbered. */
+.skeleton-stagger .skeleton,
+.skeleton-stagger .skeleton::after {
+  animation-delay: calc(var(--i, 0) * 90ms);
+}
+
+/* Navigation acknowledgement: the pending dot on a sidebar link that has been
+   clicked but whose server render has not landed yet. Petrol, lightened just
+   enough to hold on the dark rail. */
+@keyframes navPending {
+  0%,
+  100% {
+    opacity: 0.3;
+    transform: scale(0.7);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+.nav-pending {
+  display: block;
+  height: 6px;
+  width: 6px;
+  flex: none;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--color-accent) 45%, white);
+  animation: navPending 0.9s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skeleton,
+  .nav-pending {
+    animation: none !important;
+  }
+  .skeleton::after {
+    display: none;
+  }
+}
+
+/* ─────────────────────────────────────────────────────────────
    Auth shell — ported 1:1 from Houzs ERP (frontend/src/index.css).
    Fine paper grain + the two counter-drifting pine auroras +
    the wordmark float / sheen. Cream-on-Nature-Black login canvas.

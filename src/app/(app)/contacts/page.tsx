@@ -4,17 +4,29 @@ import { contact } from "@/db/schema";
 import { PageChrome } from "@/components/PageChrome";
 import { attrs, initials, tint } from "@/lib/format";
 
+/**
+ * How many contacts the table renders. The CRM is fed by ERP order sync, so
+ * this list grows without bound — an unlimited `findMany` (plus a tag join per
+ * row) would degrade the page a little more every week. The header still shows
+ * the true total, from a count that does not read the rows.
+ */
+const PAGE_SIZE = 200;
+
 export default async function ContactsPage() {
   const db = getDb();
-  const contacts = await db.query.contact.findMany({
-    orderBy: desc(contact.createdAt),
-    with: { tagLinks: { with: { tag: true } } },
-  });
+  const [total, contacts] = await Promise.all([
+    db.$count(contact),
+    db.query.contact.findMany({
+      orderBy: desc(contact.createdAt),
+      limit: PAGE_SIZE,
+      with: { tagLinks: { with: { tag: true } } },
+    }),
+  ]);
 
   return (
     <PageChrome
       title="Contacts"
-      subtitle={`${contacts.length} contacts · dynamic custom fields`}
+      subtitle={`${total} contacts · dynamic custom fields`}
     >
       <div className="p-6">
         <div className="overflow-hidden rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)]">
@@ -80,6 +92,11 @@ export default async function ContactsPage() {
               })}
             </tbody>
           </table>
+          {total > contacts.length && (
+            <div className="border-t border-[var(--color-border)] bg-[var(--color-surface-2)] px-4 py-2.5 text-[12px] text-[var(--color-faint)]">
+              Showing the {contacts.length} most recent of {total} contacts.
+            </div>
+          )}
         </div>
       </div>
     </PageChrome>

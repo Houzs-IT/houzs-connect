@@ -1,6 +1,6 @@
-import { asc, desc, eq } from "drizzle-orm";
+import { asc, count, desc, eq } from "drizzle-orm";
 import { getDb } from "@/db/client";
-import { campaign, contact, contactField, tag } from "@/db/schema";
+import { campaign, contact, contactField, contactTag, tag } from "@/db/schema";
 import { PageChrome } from "@/components/PageChrome";
 import { getCurrentMember } from "@/lib/current-member";
 import { CampaignComposer } from "./CampaignComposer";
@@ -16,6 +16,9 @@ const STATUS_COLOR: Record<string, string> = {
   sent: "var(--color-success)",
 };
 
+/** Campaign history rows rendered — newest first. */
+const CAMPAIGN_HISTORY_LIMIT = 200;
+
 interface CampaignStats {
   total?: number;
   sent?: number;
@@ -29,28 +32,27 @@ export default async function CampaignsPage() {
   const me = await getCurrentMember();
   if (!me) return null;
 
-  const [campaigns, tagsWithLinks, totalContacts, fields] = await Promise.all([
+  const [campaigns, tagOpts, totalContacts, fields] = await Promise.all([
     db.query.campaign.findMany({
       where: eq(campaign.companyId, me.companyId),
       orderBy: desc(campaign.createdAt),
+      limit: CAMPAIGN_HISTORY_LIMIT,
     }),
-    db.query.tag.findMany({
-      where: eq(tag.companyId, me.companyId),
-      orderBy: asc(tag.name),
-      with: { contactLinks: true },
-    }),
+    // Audience size per tag is a count — do it in Postgres rather than loading
+    // every contact↔tag link row into the Worker to read `.length`.
+    db
+      .select({ name: tag.name, color: tag.color, count: count(contactTag.contactId) })
+      .from(tag)
+      .leftJoin(contactTag, eq(contactTag.tagId, tag.id))
+      .where(eq(tag.companyId, me.companyId))
+      .groupBy(tag.id, tag.name, tag.color)
+      .orderBy(asc(tag.name)),
     db.$count(contact, eq(contact.companyId, me.companyId)),
     db.query.contactField.findMany({
       where: eq(contactField.companyId, me.companyId),
       orderBy: asc(contactField.key),
     }),
   ]);
-
-  const tagOpts = tagsWithLinks.map((t) => ({
-    name: t.name,
-    color: t.color,
-    count: t.contactLinks.length,
-  }));
 
   // Built-in merge vars plus every configured custom field key.
   const varKeys = ["full_name", "phone", ...fields.map((f) => f.key)];

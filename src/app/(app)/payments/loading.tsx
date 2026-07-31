@@ -1,0 +1,54 @@
+import { PageSkeleton, Skel, TableSkeleton } from "@/components/skeleton";
+
+/**
+ * Payments loading state — the two summary tiles above the receipts table.
+ * The tiles keep the real `px-4 py-3` box so the table never shifts up.
+ */
+export default function PaymentsLoading() {
+  return (
+    <PageSkeleton
+      title="Payments"
+      subtitle="Receipts auto-captured by OCR from customer chats"
+    >
+      <div className="p-6">
+        <div className="mb-4 flex gap-4">
+          {["Verified total", "Pending review"].map((label) => (
+            <div
+              key={label}
+              className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-3"
+            >
+              <div className="text-[11px] text-[var(--color-muted)]">{label}</div>
+              <Skel className="mt-1 h-[26px] w-32" />
+            </div>
+          ))}
+        </div>
+
+        <div className="overflow-hidden rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)]">
+          <TableSkeleton
+            headers={[
+              "Contact",
+              "Amount",
+              "Reference",
+              "Method",
+              "Order",
+              "When",
+              "Status",
+              "Action",
+            ]}
+            widths={[
+              "w-28",
+              "w-20",
+              "w-24",
+              "w-16",
+              "w-16",
+              "w-16",
+              "w-16",
+              "w-24",
+            ]}
+            rows={8}
+          />
+        </div>
+      </div>
+    </PageSkeleton>
+  );
+}

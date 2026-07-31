@@ -1,3 +1,4 @@
+import { cache } from "react";
 import { cookies } from "next/headers";
 import { eq } from "drizzle-orm";
 import { getCloudflareContext } from "@opennextjs/cloudflare";
@@ -9,8 +10,13 @@ import { SESSION_COOKIE, verifySession } from "@/lib/erp-auth";
  * The signed-in member, resolved from the session cookie (set at ERP login).
  * Returns null when there's no valid session — the (app) layout redirects to
  * /login in that case, so authenticated pages always receive a real member.
+ *
+ * Memoised per request with React's `cache()`. A single render calls this from
+ * the layout, from `PageChrome`, from the page body and from each streamed
+ * section; without memoisation that is one signature verification and one
+ * `member` round-trip each time, on the critical path.
  */
-export async function getCurrentMember() {
+export const getCurrentMember = cache(async () => {
   const jar = await cookies();
   const token = jar.get(SESSION_COOKIE)?.value;
   if (!token) return null;
@@ -28,6 +34,6 @@ export async function getCurrentMember() {
     with: { department: true },
   });
   return m ?? null;
-}
+});
 
 export type CurrentMember = NonNullable<Awaited<ReturnType<typeof getCurrentMember>>>;

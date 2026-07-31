@@ -1,4 +1,4 @@
-import { desc } from "drizzle-orm";
+import { desc, sql } from "drizzle-orm";
 import { getDb } from "@/db/client";
 import { payment } from "@/db/schema";
 import { PageChrome } from "@/components/PageChrome";
@@ -11,17 +11,37 @@ const STATUS_STYLE: Record<string, string> = {
   REJECTED: "bg-[color-mix(in_srgb,var(--color-danger)_12%,transparent)] text-[var(--color-danger)]",
 };
 
+/** Receipts shown in the review table — newest first. */
+const PAGE_SIZE = 200;
+
 export default async function PaymentsPage() {
   const db = getDb();
-  const payments = await db.query.payment.findMany({
-    orderBy: desc(payment.createdAt),
-    with: { contact: true },
-  });
+  // The two headline figures are whole-table aggregates, so Postgres computes
+  // them. Summing them in JS meant loading every payment (and its contact) just
+  // to add up a column, which also capped the table at "however many rows we
+  // can afford to fetch".
+  const [totals, payments] = await Promise.all([
+    db
+      .select({
+        verifiedAmount:
+          sql<number>`coalesce(sum(${payment.amount}) filter (where ${payment.status} = 'VERIFIED'), 0)`.mapWith(
+            Number
+          ),
+        pending:
+          sql<number>`count(*) filter (where ${payment.status} = 'PENDING')`.mapWith(
+            Number
+          ),
+      })
+      .from(payment),
+    db.query.payment.findMany({
+      orderBy: desc(payment.createdAt),
+      limit: PAGE_SIZE,
+      with: { contact: true },
+    }),
+  ]);
 
-  const totalVerified = payments
-    .filter((p) => p.status === "VERIFIED")
-    .reduce((s, p) => s + (p.amount ?? 0), 0);
-  const pending = payments.filter((p) => p.status === "PENDING").length;
+  const totalVerified = totals[0].verifiedAmount;
+  const pending = totals[0].pending;
 
   return (
     <PageChrome
