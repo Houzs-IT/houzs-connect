@@ -1,6 +1,6 @@
-import { desc, eq } from "drizzle-orm";
+import { count, desc, eq } from "drizzle-orm";
 import { getDb } from "@/db/client";
-import { form } from "@/db/schema";
+import { form, formResponse } from "@/db/schema";
 import { PageChrome } from "@/components/PageChrome";
 import { getCurrentMember } from "@/lib/current-member";
 import { createForm, setFormStatus } from "./actions";
@@ -9,14 +9,22 @@ export default async function FormsPage() {
   const db = getDb();
   const me = await getCurrentMember();
   if (!me) return null;
-  const rows = await db.query.form.findMany({
-    where: eq(form.companyId, me.companyId),
-    orderBy: desc(form.createdAt),
-    with: { responses: { columns: { id: true } } },
-  });
+  // The card footer needs a response *count*, so count in Postgres. Loading
+  // every form_response row to read `.length` grew with submissions forever.
+  const [rows, responseCounts] = await Promise.all([
+    db.query.form.findMany({
+      where: eq(form.companyId, me.companyId),
+      orderBy: desc(form.createdAt),
+    }),
+    db
+      .select({ formId: formResponse.formId, n: count() })
+      .from(formResponse)
+      .groupBy(formResponse.formId),
+  ]);
+  const countByForm = new Map(responseCounts.map((r) => [r.formId, r.n]));
   const forms = rows.map((f) => ({
     ...f,
-    _count: { responses: f.responses.length },
+    _count: { responses: countByForm.get(f.id) ?? 0 },
   }));
 
   return (

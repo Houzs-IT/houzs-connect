@@ -8,6 +8,14 @@ import { ContactPanel } from "@/components/inbox/ContactPanel";
 import { DemoReplyBar } from "@/components/inbox/DemoReplyBar";
 import { attrs, initials, tint } from "@/lib/format";
 
+/**
+ * How much of the thread is rendered. WhatsApp threads with a customer run for
+ * months; loading every message meant the page got slower for exactly the
+ * customers the team talks to most. The tail is what operators read, so take
+ * the newest N and put them back in reading order.
+ */
+const THREAD_LIMIT = 200;
+
 export default async function ConversationPage({
   params,
 }: {
@@ -23,10 +31,16 @@ export default async function ConversationPage({
       assignedAgent: true,
       assignedDepartment: true,
       tagLinks: { with: { tag: true } },
-      messages: { orderBy: (m, { asc }) => asc(m.createdAt) },
+      messages: {
+        orderBy: (m, { desc }) => desc(m.createdAt),
+        limit: THREAD_LIMIT,
+      },
     },
   });
   if (!convo) notFound();
+
+  // Newest-first off the index, oldest-first on screen.
+  const messages = convo.messages.slice().reverse();
 
   const [fields, members, departments, tags] = await Promise.all([
     db.query.contactField.findMany({
@@ -71,7 +85,7 @@ export default async function ConversationPage({
         </div>
 
         <Thread
-          messages={convo.messages}
+          messages={messages}
           contactName={name}
           conversationId={convo.id}
         />

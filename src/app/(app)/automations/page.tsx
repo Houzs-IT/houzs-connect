@@ -1,7 +1,7 @@
 import Link from "next/link";
-import { desc } from "drizzle-orm";
+import { desc, eq, sql } from "drizzle-orm";
 import { getDb } from "@/db/client";
-import { automation } from "@/db/schema";
+import { automation, channel } from "@/db/schema";
 import { PageChrome } from "@/components/PageChrome";
 import { IconBolt } from "@/components/icons";
 
@@ -17,10 +17,28 @@ const TRIGGER_LABEL: Record<string, string> = {
 
 export default async function AutomationsPage() {
   const db = getDb();
-  const automations = await db.query.automation.findMany({
-    orderBy: desc(automation.updatedAt),
-    with: { channel: true },
-  });
+  // The card only shows a node *count*, so ask Postgres for the count instead
+  // of shipping every automation's whole graph to the Worker — the biggest live
+  // flow is 184 nodes, and this list renders all of them at once.
+  const automations = await db
+    .select({
+      id: automation.id,
+      name: automation.name,
+      description: automation.description,
+      triggerType: automation.triggerType,
+      enabled: automation.enabled,
+      version: automation.version,
+      channelName: channel.displayName,
+      // `jsonb_array_length` errors on a non-array, and `graph` is nullable and
+      // free-form, so gate on the type first.
+      nodeCount:
+        sql<number>`coalesce(case when jsonb_typeof(${automation.graph} -> 'nodes') = 'array' then jsonb_array_length(${automation.graph} -> 'nodes') end, 0)`.mapWith(
+          Number
+        ),
+    })
+    .from(automation)
+    .innerJoin(channel, eq(channel.id, automation.channelId))
+    .orderBy(desc(automation.updatedAt));
 
   return (
     <PageChrome
@@ -30,8 +48,6 @@ export default async function AutomationsPage() {
       <div className="p-6">
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
           {automations.map((a) => {
-            const graph = (a.graph as { nodes?: unknown[] } | null) ?? {};
-            const nodeCount = Array.isArray(graph.nodes) ? graph.nodes.length : 0;
             return (
               <Link
                 key={a.id}
@@ -56,7 +72,7 @@ export default async function AutomationsPage() {
                   {a.name}
                 </h3>
                 <p className="mt-0.5 text-[12px] text-[var(--color-muted)]">
-                  {a.channel.displayName} ·{" "}
+                  {a.channelName} ·{" "}
                   {TRIGGER_LABEL[a.triggerType] ?? a.triggerType}
                 </p>
                 {a.description && (
@@ -65,7 +81,7 @@ export default async function AutomationsPage() {
                   </p>
                 )}
                 <div className="mt-3 border-t border-[var(--color-border)] pt-2 font-mono text-[11px] text-[var(--color-faint)]">
-                  {nodeCount} nodes · v{a.version}
+                  {a.nodeCount} nodes · v{a.version}
                 </div>
               </Link>
             );
