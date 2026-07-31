@@ -66,6 +66,9 @@ type HcData = {
   status?: string;
   url?: string;
   method?: string;
+  body?: string;
+  headers?: string;
+  saveResponseTo?: string;
   saveTo?: string;
   rules?: CriteriaRule[];
   event?: TriggerEvent;
@@ -1223,6 +1226,30 @@ function Inspector({
         <Field label="URL">
           <input value={d.url ?? ""} onChange={(e) => patch({ url: e.target.value })} className={inputCls} />
         </Field>
+        <Field label="Headers">
+          <textarea
+            value={d.headers ?? ""}
+            onChange={(e) => patch({ headers: e.target.value })}
+            rows={2}
+            placeholder={'{"Authorization": "Bearer ..."}  or  Key: value per line'}
+            className="w-full resize-none rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] p-2 font-mono text-[11.5px] outline-none focus:border-[var(--color-accent)]"
+          />
+        </Field>
+        <Field label="Body">
+          <VarTextarea value={d.body ?? ""} onChange={(v) => patch({ body: v })} />
+        </Field>
+        <Field label="Save response to attribute (optional)">
+          <input
+            value={d.saveResponseTo ?? ""}
+            onChange={(e) => patch({ saveResponseTo: e.target.value })}
+            placeholder="e.g. erp_ack"
+            className={inputCls}
+          />
+        </Field>
+        <Note>
+          Called for real when the flow runs. Variables resolve in the URL, headers and body. A
+          failed call is recorded in the run log and the flow continues.
+        </Note>
       </>
     );
   }

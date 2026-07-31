@@ -58,6 +58,11 @@ jobs:
       - name: Org-sync planner smoke test (pure, no DB)
         run: node scripts/smoke-org-sync.mjs
 
+      # Hermetic: every endpoint it calls is a loopback server the script itself
+      # starts, so CI never hits the owner's real Apps Script webhooks.
+      - name: call_rest_api smoke test (loopback only, no internet)
+        run: node scripts/smoke-rest-api.mjs
+
       - name: Build (OpenNext, Linux)
         # Mirrors deploy.yml's build; the placeholder Hyperdrive URL lets the
         # build resolve its binding without any real Cloudflare credentials

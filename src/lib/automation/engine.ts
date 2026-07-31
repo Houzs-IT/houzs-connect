@@ -11,6 +11,7 @@ import {
   tag as tagTable,
 } from "@/db/schema";
 import { asGraph, type FlowGraph, type FlowNode } from "./types";
+import { callRestApi } from "./rest";
 import { interpolate } from "./vars";
 import { attrs } from "@/lib/format";
 import { getOrCreateConversation, sendOutbound } from "@/lib/whatsapp/transport";
@@ -249,14 +250,25 @@ async function execNode(
     }
 
     case "call_rest_api": {
-      // DEMO: record intent, don't call out. LIVE: fetch(d.url, ...).
+      // Real outbound HTTP (see lib/automation/rest.ts). callRestApi never
+      // throws: a dead endpoint is logged and the flow carries on, because the
+      // customer conversation must survive a failed ERP/Sheet write.
+      const res = await callRestApi(d, varCtx);
       await logStep(ctx.runId, {
         node: node.id,
         type: node.type,
-        method: d.method ?? "POST",
-        url: d.url,
-        demo: true,
+        method: res.method,
+        url: res.url,
+        ok: res.ok,
+        status: res.status,
+        response: res.snippet,
+        ...(res.error ? { error: res.error } : {}),
       });
+      // Only a successful call may overwrite an attribute — persisting an error
+      // page would poison later criteria_router branches on that key.
+      if (res.ok && d.saveResponseTo) {
+        await setContactAttr(ctx.contactId, String(d.saveResponseTo), res.text);
+      }
       return { next: nextNodeId(ctx.graph, node.id) };
     }
 
