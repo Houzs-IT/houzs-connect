@@ -367,17 +367,20 @@ export async function ensureErpOrgColumns(db: DB): Promise<void> {
   await db.execute(sql`ALTER TABLE "connect"."company" ADD COLUMN IF NOT EXISTS "erp_company_id" integer`);
   await db.execute(sql`ALTER TABLE "connect"."company" ADD COLUMN IF NOT EXISTS "code" text`);
   await db.execute(sql`ALTER TABLE "connect"."company" ADD COLUMN IF NOT EXISTS "active" boolean DEFAULT true NOT NULL`);
+  // NON-partial unique indexes: bare ON CONFLICT targets (login + sync upserts)
+  // won't match a partial index (Postgres 42P10). NULLs are distinct in a unique
+  // index, so null-erp_company_id / null-email / null-erp_user_id rows coexist.
   await db.execute(
-    sql`CREATE UNIQUE INDEX IF NOT EXISTS "company_erp_company_id_key" ON "connect"."company" ("erp_company_id") WHERE "erp_company_id" IS NOT NULL`
+    sql`CREATE UNIQUE INDEX IF NOT EXISTS "company_erp_company_id_key" ON "connect"."company" ("erp_company_id")`
   );
   await db.execute(sql`ALTER TABLE "connect"."member" ADD COLUMN IF NOT EXISTS "erp_user_id" integer`);
   await db.execute(sql`ALTER TABLE "connect"."member" ADD COLUMN IF NOT EXISTS "active" boolean DEFAULT true NOT NULL`);
   await db.execute(sql`ALTER TABLE "connect"."member" DROP CONSTRAINT IF EXISTS "member_email_unique"`);
   await db.execute(
-    sql`CREATE UNIQUE INDEX IF NOT EXISTS "member_company_email_unique" ON "connect"."member" ("company_id", "email") WHERE "email" IS NOT NULL`
+    sql`CREATE UNIQUE INDEX IF NOT EXISTS "member_company_email_unique" ON "connect"."member" ("company_id", "email")`
   );
   await db.execute(
-    sql`CREATE UNIQUE INDEX IF NOT EXISTS "member_company_erp_user_key" ON "connect"."member" ("company_id", "erp_user_id") WHERE "erp_user_id" IS NOT NULL`
+    sql`CREATE UNIQUE INDEX IF NOT EXISTS "member_company_erp_user_key" ON "connect"."member" ("company_id", "erp_user_id")`
   );
 }
 
@@ -461,10 +464,10 @@ export async function applyOrgSync(db: DB, plan: OrgSyncPlan): Promise<AppliedCo
         erpUserId: m.erpUserId,
         active: true,
       })
-      .onConflictDoNothing({
-        target: [member.companyId, member.erpUserId],
-        where: sql`"erp_user_id" is not null`,
-      });
+      // Bare target — matches the NON-partial member_company_erp_user_key index.
+      // (A `where` predicate here would only match a partial index, and there is
+      // none, so it would throw 42P10.)
+      .onConflictDoNothing({ target: [member.companyId, member.erpUserId] });
     membersInserted++;
   }
 

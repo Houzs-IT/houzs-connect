@@ -17,8 +17,11 @@ ALTER TABLE "connect"."company" ADD COLUMN IF NOT EXISTS "code" text;
 --> statement-breakpoint
 ALTER TABLE "connect"."company" ADD COLUMN IF NOT EXISTS "active" boolean DEFAULT true NOT NULL;
 --> statement-breakpoint
+-- NON-partial on purpose: a bare ON CONFLICT (erp_company_id) target won't match
+-- a partial index (Postgres 42P10). NULLs are distinct in a unique index, so
+-- pre-sync seeded rows (null erp_company_id) still coexist.
 CREATE UNIQUE INDEX IF NOT EXISTS "company_erp_company_id_key"
-  ON "connect"."company" ("erp_company_id") WHERE "erp_company_id" IS NOT NULL;
+  ON "connect"."company" ("erp_company_id");
 --> statement-breakpoint
 
 -- connect.member: mirror users.id, plus a soft-delete flag (never hard-delete).
@@ -33,8 +36,12 @@ ALTER TABLE "connect"."member" ADD COLUMN IF NOT EXISTS "active" boolean DEFAULT
 -- (company_id, erp_user_id).
 ALTER TABLE "connect"."member" DROP CONSTRAINT IF EXISTS "member_email_unique";
 --> statement-breakpoint
+-- Both NON-partial: the login upsert conflicts on (company_id, email) and the
+-- sync upsert on (company_id, erp_user_id) with BARE targets, which Postgres
+-- won't match against a partial index (42P10). NULLs are distinct in a unique
+-- index, so multiple null-email / null-erp_user_id rows per company still coexist.
 CREATE UNIQUE INDEX IF NOT EXISTS "member_company_email_unique"
-  ON "connect"."member" ("company_id", "email") WHERE "email" IS NOT NULL;
+  ON "connect"."member" ("company_id", "email");
 --> statement-breakpoint
 CREATE UNIQUE INDEX IF NOT EXISTS "member_company_erp_user_key"
-  ON "connect"."member" ("company_id", "erp_user_id") WHERE "erp_user_id" IS NOT NULL;
+  ON "connect"."member" ("company_id", "erp_user_id");

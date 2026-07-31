@@ -11,7 +11,7 @@
 // existing id shape.
 
 import { createId } from "@paralleldrive/cuid2";
-import { relations, sql } from "drizzle-orm";
+import { relations } from "drizzle-orm";
 import {
   boolean,
   doublePrecision,
@@ -101,16 +101,17 @@ export const company = connect.table(
     // ERP org sync (one-way ERP -> Connect). The ERP `companies` master is the
     // source of truth; these mirror companies.id / companies.code / is_active so
     // 2990 shows up and multi-tenant scoping resolves. Nullable so pre-sync
-    // seeded rows stay valid; a partial unique index keeps erp_company_id 1:1.
+    // seeded rows stay valid; a (non-partial) unique index keeps erp_company_id
+    // 1:1. It must be NON-partial: Postgres won't match a bare ON CONFLICT
+    // target to a partial index (42P10), and the sync upserts on erp_company_id.
+    // NULLs are distinct in a unique index, so seeded rows (null) still coexist.
     erpCompanyId: integer("erp_company_id"),
     code: text("code"),
     active: boolean("active").notNull().default(true),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({
-    erpCompanyIdx: uniqueIndex("company_erp_company_id_key")
-      .on(t.erpCompanyId)
-      .where(sql`${t.erpCompanyId} is not null`),
+    erpCompanyIdx: uniqueIndex("company_erp_company_id_key").on(t.erpCompanyId),
   })
 );
 
@@ -122,8 +123,8 @@ export const member = connect.table(
     name: text("name").notNull(),
     // Email is NO LONGER globally unique: the ERP org sync fans one ERP user out
     // to one member row per granted company, so the same email legitimately
-    // appears once per company. Identity is (company_id, erp_user_id) instead
-    // (partial unique index below).
+    // appears once per company. Uniqueness is (company_id, email) and identity is
+    // (company_id, erp_user_id) — both non-partial unique indexes below.
     email: text("email").notNull(),
     phone: text("phone"),
     title: text("title"),
@@ -144,13 +145,12 @@ export const member = connect.table(
     managerIdx: index("member_manager_idx").on(t.managerId),
     // Replaces the dropped global email-unique: a person is unique WITHIN a
     // company by email (but recurs across companies via the fan-out). This is
-    // also the login upsert's conflict target — see app/login/actions.ts.
-    companyEmailUnique: uniqueIndex("member_company_email_unique")
-      .on(t.companyId, t.email)
-      .where(sql`${t.email} is not null`),
-    erpUserIdx: uniqueIndex("member_company_erp_user_key")
-      .on(t.companyId, t.erpUserId)
-      .where(sql`${t.erpUserId} is not null`),
+    // also the login upsert's conflict target — see app/login/actions.ts — so it
+    // must be NON-partial (a bare ON CONFLICT target won't match a partial index,
+    // 42P10). NULLs are distinct in a unique index anyway, so this keeps the same
+    // "multiple null rows per company allowed" behavior.
+    companyEmailUnique: uniqueIndex("member_company_email_unique").on(t.companyId, t.email),
+    erpUserIdx: uniqueIndex("member_company_erp_user_key").on(t.companyId, t.erpUserId),
   })
 );
 
