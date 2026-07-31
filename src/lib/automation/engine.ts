@@ -367,15 +367,43 @@ async function buildCtx(runId: string): Promise<RunCtx | null> {
   };
 }
 
+/**
+ * Choose which trigger node to start from. A flow can have several trigger nodes
+ * (Seampify packs multiple entry points — e.g. one per "Action Callback Id" — into
+ * a single automation). When an entry hint is given, start from the trigger whose
+ * configured callbackId / keywords matches it, so the correct branch runs; else the
+ * first trigger.
+ */
+function pickEntryTrigger(
+  graph: FlowGraph,
+  entry?: { callbackId?: string; tag?: string }
+): FlowNode | undefined {
+  const triggers = graph.nodes.filter((n) => n.type === "trigger");
+  const key = entry?.callbackId ?? entry?.tag;
+  if (key != null && key !== "") {
+    const matched = triggers.find((t) => {
+      const d = t.data ?? {};
+      if (d.callbackId && d.callbackId === key) return true;
+      return Array.isArray(d.keywords) && (d.keywords as string[]).includes(key);
+    });
+    if (matched) return matched;
+  }
+  return triggers[0] ?? graph.nodes[0];
+}
+
 /** Start a fresh run of an automation for a contact (from a trigger). */
-export async function startRun(automationId: string, contactId: string) {
+export async function startRun(
+  automationId: string,
+  contactId: string,
+  entry?: { callbackId?: string; tag?: string }
+) {
   const db = getDb();
   const automation = await db.query.automation.findFirst({
     where: eq(automationTable.id, automationId),
   });
   if (!automation) return null;
   const graph = asGraph(automation.graph);
-  const trigger = graph.nodes.find((n) => n.type === "trigger") ?? graph.nodes[0];
+  const trigger = pickEntryTrigger(graph, entry);
   if (!trigger) return null;
 
   const [run] = await db
