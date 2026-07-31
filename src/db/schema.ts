@@ -11,7 +11,7 @@
 // existing id shape.
 
 import { createId } from "@paralleldrive/cuid2";
-import { relations } from "drizzle-orm";
+import { relations, sql } from "drizzle-orm";
 import {
   boolean,
   doublePrecision,
@@ -92,12 +92,27 @@ const id = () =>
 
 // ─────────────────────────── Org & people ───────────────────────────
 
-export const company = connect.table("company", {
-  id: id(),
-  name: text("name").notNull(),
-  slug: text("slug").notNull().unique(),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-});
+export const company = connect.table(
+  "company",
+  {
+    id: id(),
+    name: text("name").notNull(),
+    slug: text("slug").notNull().unique(),
+    // ERP org sync (one-way ERP -> Connect). The ERP `companies` master is the
+    // source of truth; these mirror companies.id / companies.code / is_active so
+    // 2990 shows up and multi-tenant scoping resolves. Nullable so pre-sync
+    // seeded rows stay valid; a partial unique index keeps erp_company_id 1:1.
+    erpCompanyId: integer("erp_company_id"),
+    code: text("code"),
+    active: boolean("active").notNull().default(true),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    erpCompanyIdx: uniqueIndex("company_erp_company_id_key")
+      .on(t.erpCompanyId)
+      .where(sql`${t.erpCompanyId} is not null`),
+  })
+);
 
 export const member = connect.table(
   "member",
@@ -105,7 +120,11 @@ export const member = connect.table(
     id: id(),
     companyId: text("company_id").notNull(),
     name: text("name").notNull(),
-    email: text("email").notNull().unique(),
+    // Email is NO LONGER globally unique: the ERP org sync fans one ERP user out
+    // to one member row per granted company, so the same email legitimately
+    // appears once per company. Identity is (company_id, erp_user_id) instead
+    // (partial unique index below).
+    email: text("email").notNull(),
     phone: text("phone"),
     title: text("title"),
     role: roleEnum("role").notNull().default("AGENT"),
@@ -113,11 +132,25 @@ export const member = connect.table(
     concurrencyLimit: integer("concurrency_limit").notNull().default(0),
     managerId: text("manager_id"),
     departmentId: text("department_id"),
+    // ERP org sync: the ERP users.id this member mirrors, and a soft-delete flag
+    // (members are never hard-deleted — they may own conversation assignments —
+    // so a user removed from the ERP is marked active=false instead).
+    erpUserId: integer("erp_user_id"),
+    active: boolean("active").notNull().default(true),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({
     companyIdx: index("member_company_idx").on(t.companyId),
     managerIdx: index("member_manager_idx").on(t.managerId),
+    // Replaces the dropped global email-unique: a person is unique WITHIN a
+    // company by email (but recurs across companies via the fan-out). This is
+    // also the login upsert's conflict target — see app/login/actions.ts.
+    companyEmailUnique: uniqueIndex("member_company_email_unique")
+      .on(t.companyId, t.email)
+      .where(sql`${t.email} is not null`),
+    erpUserIdx: uniqueIndex("member_company_erp_user_key")
+      .on(t.companyId, t.erpUserId)
+      .where(sql`${t.erpUserId} is not null`),
   })
 );
 

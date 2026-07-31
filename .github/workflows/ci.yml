@@ -55,6 +55,9 @@ jobs:
       - name: Trigger smoke test (real Postgres, real engine)
         run: node scripts/smoke-trigger.mjs
 
+      - name: Org-sync planner smoke test (pure, no DB)
+        run: node scripts/smoke-org-sync.mjs
+
       - name: Build (OpenNext, Linux)
         # Mirrors deploy.yml's build; the placeholder Hyperdrive URL lets the
         # build resolve its binding without any real Cloudflare credentials

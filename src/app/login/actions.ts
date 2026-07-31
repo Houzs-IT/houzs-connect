@@ -12,7 +12,6 @@ import {
   signSession,
   SESSION_COOKIE,
 } from "@/lib/erp-auth";
-import { syncOrgChart } from "@/lib/erp-sync";
 
 type LoginState = { error?: string };
 
@@ -63,17 +62,17 @@ export async function login(
   const co = await db.query.company.findFirst({ orderBy: (c, { asc }) => asc(c.createdAt) });
   if (!co) return { error: "No company configured." };
 
-  // Mirror the whole ERP org chart (departments + reporting line) so RBAC works
-  // for everyone, not just whoever logged in. Best-effort — a missing grant on
-  // public.departments must never block the login itself.
-  await syncOrgChart(co.id).catch(() => {});
-
+  // Mirror the logging-in user into a Connect member for THIS company. The org
+  // as a whole is mirrored one-way from the ERP by the dedicated API sync
+  // (src/lib/sync/erp-org.ts); Connect does not build an org chart here. Conflict
+  // target is (company_id, email) — member.email is no longer globally unique
+  // (the same person recurs once per company via the sync's fan-out).
   const role = roleFromErp(erp.role_name);
   const [m] = await db
     .insert(member)
     .values({ companyId: co.id, email, name: erp.name ?? email, role, title: erp.role_name ?? null })
     .onConflictDoUpdate({
-      target: member.email,
+      target: [member.companyId, member.email],
       set: { name: erp.name ?? email, role, title: erp.role_name ?? null },
     })
     .returning();

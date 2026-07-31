@@ -19,4 +19,12 @@ interface CloudflareEnv {
   WHATSAPP_TOKEN?: string;
   WHATSAPP_PHONE_NUMBER_ID?: string;
   WHATSAPP_VERIFY_TOKEN?: string;
+
+  // ERP org sync (see src/lib/sync/erp-org.ts + app/api/admin/sync-org).
+  // ERP_API_BASE defaults to https://erp.houzscentury.com when unset.
+  ERP_API_BASE?: string;
+  // Shared Bearer token the ERP treats as a fail-open service user.
+  ERP_SERVICE_TOKEN?: string;
+  // Guards POST /api/admin/sync-org (x-sync-token header must equal this).
+  SYNC_ADMIN_TOKEN?: string;
 }
