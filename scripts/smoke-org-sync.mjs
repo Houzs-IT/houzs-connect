@@ -10,7 +10,11 @@
 //   - ERP role -> member.role enum mapping
 //
 // Runs under tsx (same hooks as smoke-trigger.mjs) so it can import the real .ts.
-// Exits non-zero on any failed assertion. No DATABASE_URL required.
+// Exits non-zero on any failed assertion. The pure planner asserts need no
+// DATABASE_URL. When DATABASE_URL IS set (CI has a Postgres service container),
+// an extra DB-backed section replays the real ON CONFLICT upserts twice — the
+// ONLY thing that reproduces the 42P10 "no unique constraint matching the ON
+// CONFLICT specification" that a PARTIAL unique index causes for a bare target.
 
 import { register as registerCjs } from "tsx/cjs/api";
 import { register as registerEsm } from "tsx/esm/api";
@@ -20,6 +24,103 @@ registerEsm();
 
 function assert(cond, msg) {
   if (!cond) throw new Error(`ASSERT FAILED: ${msg}`);
+}
+
+/**
+ * DB-backed regression for the partial-index bug (only runs with DATABASE_URL).
+ * Reproduces the exact upsert shapes that broke prod login + sync:
+ *   1. login's onConflictDoUpdate({ target: [company_id, email] })
+ *   2. applyOrgSync's company/member inserts (bare ON CONFLICT targets)
+ * Runs each twice; a partial index would throw 42P10 on the second pass.
+ */
+async function dbRegression() {
+  const { loadDevVars, scriptDb } = await import("./_env.ts");
+  loadDevVars();
+  if (!process.env.DATABASE_URL) {
+    console.log("  (db regression skipped — no DATABASE_URL)");
+    return;
+  }
+
+  const { migrate } = await import("drizzle-orm/postgres-js/migrator");
+  const { eq, inArray } = await import("drizzle-orm");
+  const { company, member } = await import("../src/db/schema.ts");
+  const { planOrgSync, applyOrgSync, loadExistingOrg, ensureErpOrgColumns } = await import(
+    "../src/lib/sync/erp-org.ts"
+  );
+
+  const { db, sql } = scriptDb();
+  await migrate(db, {
+    migrationsFolder: "src/db/migrations",
+    migrationsSchema: "connect",
+    migrationsTable: "__drizzle_migrations",
+  });
+  await ensureErpOrgColumns(db);
+
+  const SLUGS = ["smokenp", "smokenp2"];
+  const EMAILS = ["np-login@smoke.test", "np-new@smoke.test", "np-direct@smoke.test"];
+
+  const teardown = async () => {
+    await db.delete(member).where(inArray(member.email, EMAILS));
+    await db.delete(company).where(inArray(company.slug, SLUGS));
+  };
+  await teardown();
+
+  // Seed: a company whose slug matches slugify('SMOKENP') and a LOGIN-style
+  // member in it (email, no erp_user_id) — exactly the rows the sync reconciles.
+  const [seedCo] = await db
+    .insert(company)
+    .values({ name: "Seed NP", slug: "smokenp" })
+    .returning();
+  await db.insert(member).values({
+    companyId: seedCo.id,
+    name: "NP Login",
+    email: "np-login@smoke.test",
+    role: "AGENT",
+  });
+
+  // (1) Login's upsert shape, replayed — the exact prod-crash path.
+  for (let i = 0; i < 2; i++) {
+    await db
+      .insert(member)
+      .values({ companyId: seedCo.id, name: `Direct ${i}`, email: "np-direct@smoke.test", role: "AGENT" })
+      .onConflictDoUpdate({
+        target: [member.companyId, member.email],
+        set: { name: `Direct ${i}` },
+      });
+  }
+  const directRows = await db
+    .select({ id: member.id })
+    .from(member)
+    .where(eq(member.email, "np-direct@smoke.test"));
+  assert(directRows.length === 1, `login-shape upsert must keep 1 row, got ${directRows.length}`);
+
+  // (2) Full sync apply, replayed with the SAME plan so the second pass re-runs
+  //     the company + member inserts against their bare ON CONFLICT targets.
+  const erp = {
+    companies: [
+      { id: 990001, code: "SMOKENP", name: "Smoke NP" },
+      { id: 990002, code: "SMOKENP2", name: "Smoke NP2" }, // brand-new -> company insert
+    ],
+    users: [
+      { id: 990010, email: "np-login@smoke.test", name: "NP Login", phone: null, status: "active", role_name: "Manager" },
+      { id: 990011, email: "np-new@smoke.test", name: "NP New", phone: null, status: "active", role_name: "Sales" },
+    ],
+    grants: { 990010: [], 990011: [990001] }, // login user fail-open (both), new user -> 990001 only
+  };
+  const plan = planOrgSync(erp, await loadExistingOrg(db));
+  await applyOrgSync(db, plan); // pass 1
+  await applyOrgSync(db, plan); // pass 2 — throws 42P10 here if any index is partial
+
+  const newCo = await db.select({ id: company.id }).from(company).where(eq(company.slug, "smokenp2"));
+  assert(newCo.length === 1, `new company inserted exactly once, got ${newCo.length}`);
+  const npNew = await db.select({ id: member.id }).from(member).where(eq(member.email, "np-new@smoke.test"));
+  assert(npNew.length === 1, `np-new member inserted exactly once, got ${npNew.length}`);
+  const npLogin = await db.select({ id: member.id }).from(member).where(eq(member.email, "np-login@smoke.test"));
+  assert(npLogin.length === 2, `np-login must fan out to exactly 2 companies, got ${npLogin.length}`);
+
+  await teardown();
+  await sql.end();
+  console.log("  db regression PASS: login upsert + sync inserts idempotent (no 42P10)");
 }
 
 async function main() {
@@ -140,6 +241,10 @@ async function main() {
   console.log(`  members:    +${plan.members.insert.length} insert, ~${plan.members.update.length} update, -${plan.members.deactivate.length} deactivate`);
   console.log(`  reconciled: alice by email -> erp_user_id 1`);
   console.log(`  idempotent replay: ${replay.members.update.length} updates, 0 inserts/deactivations`);
+
+  // DB-backed ON CONFLICT regression (the partial-index 42P10 guard).
+  await dbRegression();
+
   process.exit(0);
 }
 
