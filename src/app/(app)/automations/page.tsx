@@ -76,8 +76,9 @@ export default async function AutomationsPage() {
                 Visual flow builder
               </p>
               <p className="mt-1 text-[12px] text-[var(--color-muted)]">
-                Drag-and-drop canvas (buttons, criteria router, delay, collect
-                input, call ERP, capture receipt) — Phase 2.
+                Open an automation to build its flow — searchable node palette,
+                trigger, criteria router, messaging and tagging nodes, draft /
+                live publishing, and version history.
               </p>
             </div>
           </div>

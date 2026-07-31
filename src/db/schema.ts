@@ -336,6 +336,22 @@ export const automationRun = connect.table(
   (t) => ({ automationIdx: index("automation_run_automation_idx").on(t.automationId) })
 );
 
+export const automationVersion = connect.table(
+  "automation_version",
+  {
+    id: id(),
+    automationId: text("automation_id").notNull(),
+    version: integer("version").notNull(),
+    label: text("label"),
+    status: text("status"),
+    triggerType: text("trigger_type"),
+    triggerConfig: jsonb("trigger_config"),
+    graph: jsonb("graph"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({ automationIdx: index("automation_version_automation_idx").on(t.automationId) })
+);
+
 // ─────────────────────────── Payments (receipt OCR) ───────────────────────────
 
 export const payment = connect.table(
@@ -581,11 +597,19 @@ export const automationRelations = relations(automation, ({ one, many }) => ({
   company: one(company, { fields: [automation.companyId], references: [company.id] }),
   channel: one(channel, { fields: [automation.channelId], references: [channel.id] }),
   runs: many(automationRun),
+  versions: many(automationVersion),
 }));
 
 export const automationRunRelations = relations(automationRun, ({ one }) => ({
   automation: one(automation, {
     fields: [automationRun.automationId],
+    references: [automation.id],
+  }),
+}));
+
+export const automationVersionRelations = relations(automationVersion, ({ one }) => ({
+  automation: one(automation, {
+    fields: [automationVersion.automationId],
     references: [automation.id],
   }),
 }));

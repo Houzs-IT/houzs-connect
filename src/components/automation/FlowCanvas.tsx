@@ -1,6 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useTransition,
+} from "react";
 import {
   ReactFlow,
   ReactFlowProvider,
@@ -13,44 +20,41 @@ import {
   useNodesState,
   useEdgesState,
   useUpdateNodeInternals,
+  useReactFlow,
+  BaseEdge,
+  EdgeLabelRenderer,
+  getBezierPath,
   type Node,
   type Edge,
   type Connection,
   type NodeProps,
+  type EdgeProps,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import type { FlowGraph, NodeType } from "@/lib/automation/types";
-import { saveAutomationGraph } from "@/app/(app)/automations/actions";
+import {
+  type CriteriaRule,
+  type FlowGraph,
+  type NodeType,
+  type TriggerEvent,
+} from "@/lib/automation/types";
+import {
+  CATEGORY_ORDER,
+  NODE_CATALOG,
+  nodeMeta,
+  type NodeCategory,
+} from "@/lib/automation/nodeCatalog";
+import {
+  listAutomationVersions,
+  restoreAutomationVersion,
+  saveAutomationGraph,
+} from "@/app/(app)/automations/actions";
 
-const NODE_META: Record<string, { label: string; color: string }> = {
-  trigger: { label: "Trigger", color: "#2f8a5b" },
-  send_text: { label: "Send message", color: "#16695f" },
-  ask_buttons: { label: "Ask buttons", color: "#a16a2e" },
-  collect_input: { label: "Collect input", color: "#1b7f6b" },
-  ai_agent_reply: { label: "AI agent reply", color: "#0c3f39" },
-  criteria_router: { label: "Criteria router", color: "#6e4d12" },
-  set_attribute: { label: "Set attribute", color: "#3d7a6f" },
-  add_tag: { label: "Add tag", color: "#8a5a26" },
-  remove_tag: { label: "Remove tag", color: "#b23a3a" },
-  assign: { label: "Assign", color: "#2f8a5b" },
-  set_status: { label: "Set status", color: "#414539" },
-  call_rest_api: { label: "Call REST API", color: "#b23a3a" },
-  delay: { label: "Delay", color: "#767b6e" },
-  end: { label: "End", color: "#8c968a" },
-};
+// ────────────────────────────── shared shapes ──────────────────────────────
 
-const PALETTE: NodeType[] = [
-  "send_text",
-  "ask_buttons",
-  "collect_input",
-  "ai_agent_reply",
-  "criteria_router",
-  "set_attribute",
-  "add_tag",
-  "assign",
-  "call_rest_api",
-  "delay",
-];
+interface Opt {
+  id: string;
+  name: string;
+}
 
 type HcData = {
   nodeType: string;
@@ -62,16 +66,75 @@ type HcData = {
   status?: string;
   url?: string;
   method?: string;
-  rules?: { branch: string; field: string; op: string; value?: string }[];
+  saveTo?: string;
+  rules?: CriteriaRule[];
+  event?: TriggerEvent;
+  keywords?: string[];
+  targetAutomationId?: string;
+  targetAutomationName?: string;
+  campaignId?: string;
+  campaignName?: string;
+  agentId?: string;
+  sheetId?: string;
+  sheetTab?: string;
+  columns?: string;
+  expression?: string;
+  unit?: string;
+  amount?: number;
+  memberId?: string;
+  departmentId?: string;
   [k: string]: unknown;
 };
 
+const TRIGGER_EVENTS: { value: TriggerEvent; label: string }[] = [
+  { value: "NEW_INCOMING_MESSAGE", label: "New message received" },
+  { value: "WEBHOOK", label: "Webhook received (ERP)" },
+  { value: "TAG_ADDED", label: "When a tag is added" },
+  { value: "ACTION_CALLBACK", label: "Action callback id matches" },
+];
+
+const OPERATORS: { value: CriteriaRule["op"]; label: string }[] = [
+  { value: "eq", label: "equals" },
+  { value: "neq", label: "does not equal" },
+  { value: "contains", label: "contains" },
+  { value: "set", label: "is set" },
+  { value: "unset", label: "is not set" },
+];
+
+/** Does this node type fan out to multiple, branch-labelled outputs? */
+function branchesOf(d: HcData): { id: string; label: string }[] | null {
+  if (d.nodeType === "criteria_router") {
+    const rules = d.rules ?? [];
+    return [
+      ...rules.map((r, i) => ({ id: r.branch, label: `Rule ${i + 1}` })),
+      { id: "default", label: "Else" },
+    ];
+  }
+  if (d.nodeType === "ask_buttons") {
+    const btns = d.buttons ?? [];
+    return [
+      ...btns.map((b) => ({ id: b.id, label: b.label || b.id })),
+      { id: "default", label: "Fallback" },
+    ];
+  }
+  return null;
+}
+
 function summarize(d: HcData): string {
   switch (d.nodeType) {
+    case "trigger": {
+      const ev = TRIGGER_EVENTS.find((e) => e.value === d.event);
+      const base = ev?.label ?? "New message received";
+      return d.event === "ACTION_CALLBACK" && (d.keywords?.length ?? 0)
+        ? `${base}: ${d.keywords!.join(", ")}`
+        : base;
+    }
     case "send_text":
-    case "ask_buttons":
-    case "collect_input":
     case "ai_agent_reply":
+      return d.message ?? "";
+    case "collect_input":
+      return d.message ?? "";
+    case "ask_buttons":
       return d.message ?? "";
     case "set_attribute":
       return `${d.key ?? "?"} = ${d.value ?? ""}`;
@@ -79,108 +142,469 @@ function summarize(d: HcData): string {
     case "remove_tag":
       return d.tag ?? "";
     case "criteria_router":
-      return `${d.rules?.length ?? 0} rule(s)`;
+      return "";
+    case "jump_to_automation":
+      return d.targetAutomationName ?? "";
+    case "add_to_drip":
+    case "remove_from_drip":
+      return d.campaignName ?? "";
+    case "google_sheets":
+      return d.sheetTab ? `Sheet · ${d.sheetTab}` : d.sheetId ?? "";
+    case "eval":
+      return d.expression ?? "";
     case "call_rest_api":
       return `${d.method ?? "POST"} ${d.url ?? ""}`;
     case "set_status":
       return d.status ?? "";
+    case "delay":
+      return d.amount ? `${d.amount} ${d.unit ?? "minutes"}` : "";
     default:
       return "";
   }
 }
 
+// ────────────────────────────── node view ──────────────────────────────
+
 function HcNode({ data, selected }: NodeProps) {
   const d = data as HcData;
-  const meta = NODE_META[d.nodeType] ?? { label: d.nodeType, color: "#767b6e" };
+  const meta = nodeMeta(d.nodeType);
   const isTrigger = d.nodeType === "trigger";
+  const branches = branchesOf(d);
+  const sum = summarize(d);
+
   return (
     <div
-      className="w-52 rounded-xl border bg-white shadow-sm"
+      className="w-56 rounded-xl border bg-[var(--color-surface)] shadow-sm"
       style={{
         borderColor: selected ? meta.color : "var(--color-border)",
         boxShadow: selected ? `0 0 0 2px ${meta.color}40` : undefined,
       }}
     >
-      {!isTrigger && <Handle type="target" position={Position.Left} />}
+      {!isTrigger && (
+        <Handle type="target" position={Position.Left} id="in" style={{ background: "#c2c6bd" }} />
+      )}
       <div
-        className="flex items-center gap-1.5 rounded-t-xl px-2.5 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-white"
+        className="flex items-center gap-2 rounded-t-xl px-2.5 py-1.5 text-white"
         style={{ background: meta.color }}
       >
-        {meta.label}
+        <span className="grid h-5 w-5 shrink-0 place-items-center rounded bg-white/20 text-[12px] leading-none">
+          {meta.glyph}
+        </span>
+        <span className="truncate text-[11px] font-semibold uppercase tracking-wide">
+          {meta.label}
+        </span>
       </div>
+
       <div className="px-2.5 py-2 text-[11.5px] leading-snug text-[var(--color-ink)]">
-        {summarize(d) ? (
-          <span className="line-clamp-3">{summarize(d)}</span>
+        {sum ? (
+          <span className="line-clamp-3 whitespace-pre-wrap">{sum}</span>
         ) : (
-          <span className="text-[var(--color-faint)]">—</span>
-        )}
-        {d.buttons && d.buttons.length > 0 && (
-          <div className="mt-1.5 flex flex-wrap gap-1">
-            {d.buttons.map((b) => (
-              <span
-                key={b.id}
-                className="rounded border border-[var(--color-border)] px-1.5 py-0.5 text-[10px] text-[var(--color-muted)]"
-              >
-                {b.label}
-              </span>
-            ))}
-          </div>
+          <span className="text-[var(--color-faint)]">
+            {branches ? "" : "Not configured"}
+          </span>
         )}
       </div>
-      <Handle type="source" position={Position.Right} />
+
+      {/* Output handles: one per branch for branching nodes, else a single out. */}
+      {branches ? (
+        <div className="border-t border-[var(--color-border)]">
+          {branches.map((b, i) => (
+            <div
+              key={b.id}
+              className="relative flex items-center justify-end px-2.5 py-1 text-[10.5px] text-[var(--color-muted)]"
+              style={{
+                borderTop: i === 0 ? undefined : "1px dashed var(--color-border-subtle)",
+              }}
+            >
+              <span className="truncate">{b.label}</span>
+              <Handle
+                type="source"
+                position={Position.Right}
+                id={b.id}
+                style={{ position: "absolute", right: -6, background: meta.color }}
+              />
+            </div>
+          ))}
+        </div>
+      ) : (
+        <Handle type="source" position={Position.Right} id="out" style={{ background: meta.color }} />
+      )}
     </div>
   );
 }
 
-function FlowCanvasInner({
+// ────────────────────────────── deletable edge ──────────────────────────────
+
+type EdgeCtx = { onDelete: (id: string) => void };
+const edgeCtxRef: { current: EdgeCtx } = { current: { onDelete: () => {} } };
+
+function ButtonEdge({
+  id,
+  sourceX,
+  sourceY,
+  targetX,
+  targetY,
+  sourcePosition,
+  targetPosition,
+  markerEnd,
+}: EdgeProps) {
+  const [path, labelX, labelY] = getBezierPath({
+    sourceX,
+    sourceY,
+    targetX,
+    targetY,
+    sourcePosition,
+    targetPosition,
+  });
+  return (
+    <>
+      <BaseEdge id={id} path={path} markerEnd={markerEnd} style={{ stroke: "#c2c6bd" }} />
+      <EdgeLabelRenderer>
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            edgeCtxRef.current.onDelete(id);
+          }}
+          className="nodrag nopan grid h-4 w-4 place-items-center rounded-full border border-[var(--color-border-strong)] bg-[var(--color-surface)] text-[10px] leading-none text-[var(--color-faint)] shadow-sm hover:border-[var(--color-danger)] hover:text-[var(--color-danger)]"
+          style={{
+            position: "absolute",
+            transform: `translate(-50%, -50%) translate(${labelX}px,${labelY}px)`,
+            pointerEvents: "all",
+          }}
+          aria-label="Delete connection"
+        >
+          ×
+        </button>
+      </EdgeLabelRenderer>
+    </>
+  );
+}
+
+// ────────────────────────────── graph <-> flow ──────────────────────────────
+
+function toFlow(
+  graph: FlowGraph,
+  seedTrigger?: { event?: TriggerEvent; keywords?: string[] }
+): { nodes: Node[]; edges: Edge[] } {
+  const typeById = new Map(graph.nodes.map((n) => [n.id, n.type]));
+  const nodes: Node[] = graph.nodes.map((n, i) => {
+    const data: HcData = { nodeType: n.type, ...(n.data ?? {}) };
+    if (n.type === "trigger" && seedTrigger) {
+      if (data.event == null) data.event = seedTrigger.event ?? "NEW_INCOMING_MESSAGE";
+      if (data.keywords == null) data.keywords = seedTrigger.keywords ?? [];
+    }
+    return {
+      id: n.id,
+      type: "hc",
+      position: { x: n.x ?? 80 + i * 40, y: n.y ?? 60 + i * 90 },
+      data: data as Record<string, unknown>,
+    };
+  });
+  const edges: Edge[] = graph.edges.map((e, i) => {
+    const srcType = typeById.get(e.from);
+    const branching = srcType === "criteria_router" || srcType === "ask_buttons";
+    const sourceHandle = e.branch ?? (branching ? "default" : "out");
+    return {
+      id: `e${i}_${e.from}_${e.to}`,
+      source: e.from,
+      target: e.to,
+      sourceHandle,
+      targetHandle: "in",
+      type: "button",
+      animated: true,
+    };
+  });
+  return { nodes, edges };
+}
+
+function fromFlow(nodes: Node[], edges: Edge[]): FlowGraph {
+  return {
+    nodes: nodes.map((n) => {
+      const { nodeType, ...rest } = n.data as HcData;
+      return {
+        id: n.id,
+        type: nodeType as NodeType,
+        data: rest,
+        x: Math.round(n.position.x),
+        y: Math.round(n.position.y),
+      };
+    }),
+    edges: edges.map((e) => {
+      const sh = e.sourceHandle;
+      const branch = sh && sh !== "out" ? sh : undefined;
+      return { from: e.source, to: e.target, branch };
+    }),
+  };
+}
+
+// ────────────────────────────── palette ──────────────────────────────
+
+function NodePalette({
+  onAdd,
+  hasTrigger,
+  disabled,
+}: {
+  onAdd: (t: NodeType) => void;
+  hasTrigger: boolean;
+  disabled: boolean;
+}) {
+  const [q, setQ] = useState("");
+  const query = q.trim().toLowerCase();
+
+  const grouped = useMemo(() => {
+    const out: Partial<Record<NodeCategory, typeof NODE_CATALOG>> = {};
+    for (const entry of NODE_CATALOG) {
+      if (entry.type === "trigger" && hasTrigger) continue; // one trigger per flow
+      const hay = [entry.label, entry.hint, ...entry.keywords].join(" ").toLowerCase();
+      if (query && !hay.includes(query)) continue;
+      (out[entry.category] ??= []).push(entry);
+    }
+    return out;
+  }, [query, hasTrigger]);
+
+  const anyResult = CATEGORY_ORDER.some((c) => (grouped[c]?.length ?? 0) > 0);
+
+  return (
+    <div className="flex w-56 shrink-0 flex-col border-r border-[var(--color-border)] bg-[var(--color-surface)]">
+      <div className="border-b border-[var(--color-border)] p-2">
+        <input
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          placeholder="Search node…"
+          className="w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] px-2.5 py-1.5 text-[12px] outline-none focus:border-[var(--color-accent)]"
+        />
+      </div>
+      <div className="scroll-thin flex-1 overflow-y-auto p-2">
+        {CATEGORY_ORDER.map((cat) => {
+          const items = grouped[cat];
+          if (!items || items.length === 0) return null;
+          return (
+            <div key={cat} className="mb-3">
+              <div className="px-1 pb-1 text-[10px] font-semibold uppercase tracking-wide text-[var(--color-faint)]">
+                {cat}
+              </div>
+              <div className="flex flex-col gap-0.5">
+                {items.map((n) => (
+                  <button
+                    key={n.type}
+                    disabled={disabled}
+                    onClick={() => onAdd(n.type)}
+                    className="flex items-start gap-2 rounded-md px-2 py-1.5 text-left hover:bg-[var(--color-surface-2)] disabled:opacity-50"
+                  >
+                    <span
+                      className="mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded text-[11px] leading-none text-white"
+                      style={{ background: n.color }}
+                    >
+                      {n.glyph}
+                    </span>
+                    <span className="min-w-0">
+                      <span className="block truncate text-[12px] text-[var(--color-ink)]">
+                        {n.label}
+                      </span>
+                      <span className="block truncate text-[10.5px] text-[var(--color-faint)]">
+                        {n.hint}
+                      </span>
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          );
+        })}
+        {!anyResult && (
+          <p className="px-1 py-4 text-center text-[11.5px] text-[var(--color-faint)]">
+            No nodes match “{q}”.
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ────────────────────────────── history dialog ──────────────────────────────
+
+interface VersionRow {
+  id: string;
+  version: number;
+  label: string;
+  status: string | null;
+  createdAt: string;
+  nodeCount: number;
+  graph: FlowGraph;
+}
+
+function HistoryDialog({
   automationId,
-  graph,
+  onClose,
+  onPreview,
+  onRestore,
 }: {
   automationId: string;
-  graph: FlowGraph;
+  onClose: () => void;
+  onPreview: (graph: FlowGraph, version: number) => void;
+  onRestore: (versionId: string) => void;
 }) {
+  const [rows, setRows] = useState<VersionRow[] | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    listAutomationVersions(automationId).then((r) => {
+      if (active) setRows(r as VersionRow[]);
+    });
+    return () => {
+      active = false;
+    };
+  }, [automationId]);
+
+  return (
+    <div
+      className="absolute inset-0 z-20 grid place-items-center bg-[color-mix(in_srgb,var(--color-ink)_38%,transparent)] p-6"
+      onClick={onClose}
+    >
+      <div
+        className="flex max-h-full w-[440px] flex-col overflow-hidden rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] shadow-card"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between border-b border-[var(--color-border)] px-4 py-3">
+          <div>
+            <h2 className="text-[13.5px] font-semibold text-[var(--color-ink)]">
+              Version history
+            </h2>
+            <p className="text-[11px] text-[var(--color-faint)]">
+              Last 10 saves · preview or restore any snapshot
+            </p>
+          </div>
+          <button
+            onClick={onClose}
+            className="grid h-7 w-7 place-items-center rounded-md text-[var(--color-faint)] hover:bg-[var(--color-surface-2)]"
+            aria-label="Close"
+          >
+            ×
+          </button>
+        </div>
+        <div className="scroll-thin flex-1 overflow-y-auto p-2">
+          {rows == null ? (
+            <p className="px-2 py-6 text-center text-[12px] text-[var(--color-faint)]">
+              Loading…
+            </p>
+          ) : rows.length === 0 ? (
+            <p className="px-2 py-6 text-center text-[12px] text-[var(--color-faint)]">
+              No snapshots yet. Save the flow to create one.
+            </p>
+          ) : (
+            <ul className="flex flex-col gap-1">
+              {rows.map((r) => (
+                <li
+                  key={r.id}
+                  className="rounded-lg border border-[var(--color-border)] p-2.5"
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="text-[12.5px] font-medium text-[var(--color-ink)]">
+                      v{r.version} · {r.label}
+                    </span>
+                    <span
+                      className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${
+                        r.status === "PUBLISHED"
+                          ? "bg-[color-mix(in_srgb,var(--color-success)_12%,transparent)] text-[var(--color-success)]"
+                          : "bg-[var(--color-surface-2)] text-[var(--color-faint)]"
+                      }`}
+                    >
+                      {r.status === "PUBLISHED" ? "Live" : "Draft"}
+                    </span>
+                  </div>
+                  <div className="mt-0.5 font-mono text-[10.5px] text-[var(--color-faint)]">
+                    {new Date(r.createdAt).toLocaleString()} · {r.nodeCount} nodes
+                  </div>
+                  <div className="mt-2 flex gap-1.5">
+                    <button
+                      onClick={() => onPreview(r.graph, r.version)}
+                      className="rounded-md border border-[var(--color-border)] px-2.5 py-1 text-[11.5px] text-[var(--color-ink)] hover:bg-[var(--color-surface-2)]"
+                    >
+                      Preview
+                    </button>
+                    <button
+                      disabled={busy === r.id}
+                      onClick={() => {
+                        setBusy(r.id);
+                        onRestore(r.id);
+                      }}
+                      className="rounded-md bg-[var(--color-accent)] px-2.5 py-1 text-[11.5px] font-medium text-white disabled:opacity-60"
+                    >
+                      {busy === r.id ? "Restoring…" : "Restore"}
+                    </button>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ────────────────────────────── canvas ──────────────────────────────
+
+interface CanvasProps {
+  automationId: string;
+  graph: FlowGraph;
+  initialEnabled: boolean;
+  initialTriggerEvent?: TriggerEvent;
+  initialKeywords?: string[];
+  automations: Opt[];
+  campaigns: Opt[];
+}
+
+function FlowCanvasInner(props: CanvasProps) {
+  const { automationId, graph, automations, campaigns } = props;
   const nodeTypes = useMemo(() => ({ hc: HcNode }), []);
+  const edgeTypes = useMemo(() => ({ button: ButtonEdge }), []);
   const updateNodeInternals = useUpdateNodeInternals();
+  const { screenToFlowPosition } = useReactFlow();
 
-  const initialNodes: Node[] = graph.nodes.map((n, i) => ({
-    id: n.id,
-    type: "hc",
-    position: { x: n.x ?? 60 + i * 60, y: n.y ?? 60 + i * 40 },
-    data: { nodeType: n.type, ...(n.data ?? {}) },
-    // Provide dimensions up front so react-flow treats nodes as measured and can
-    // compute edge paths even if the client-side ResizeObserver pass stalls.
-    width: 208,
-    height: 84,
-    measured: { width: 208, height: 84 },
-    initialWidth: 208,
-    initialHeight: 84,
-  }));
-  const initialEdges: Edge[] = graph.edges.map((e, i) => ({
-    id: `e${i}`,
-    source: e.from,
-    target: e.to,
-    label: e.branch,
-    animated: true,
-    style: { stroke: "#c2c6bd" },
-    labelStyle: { fontSize: 10, fill: "#767b6e" },
-  }));
+  const seed = useMemo(
+    () => ({ event: props.initialTriggerEvent, keywords: props.initialKeywords }),
+    [props.initialTriggerEvent, props.initialKeywords]
+  );
+  const initial = useMemo(() => toFlow(graph, seed), [graph, seed]);
 
-  const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
-  const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
+  const [nodes, setNodes, onNodesChange] = useNodesState(initial.nodes);
+  const [edges, setEdges, onEdgesChange] = useEdgesState(initial.edges);
   const [selected, setSelected] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
-  const [saved, setSaved] = useState(false);
+  const [saved, setSaved] = useState<"live" | "draft" | null>(null);
+  const [live, setLive] = useState(props.initialEnabled);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [preview, setPreview] = useState<number | null>(null);
+  const preSnapshot = useRef<{ nodes: Node[]; edges: Edge[] } | null>(null);
+
+  const readOnly = preview != null;
+
+  const deleteEdge = useCallback(
+    (id: string) => {
+      setEdges((eds) => eds.filter((e) => e.id !== id));
+      setSaved(null);
+    },
+    [setEdges]
+  );
+  useEffect(() => {
+    edgeCtxRef.current.onDelete = deleteEdge;
+  }, [deleteEdge]);
 
   const onConnect = useCallback(
-    (c: Connection) => setEdges((eds) => addEdge({ ...c, animated: true }, eds)),
+    (c: Connection) => {
+      setEdges((eds) => addEdge({ ...c, type: "button", animated: true }, eds));
+      setSaved(null);
+    },
     [setEdges]
   );
 
-  // Force react-flow to (re)measure each node's handles after mount so edges can
-  // resolve their endpoints and paint (handle bounds can fail to register on first
-  // mount under the dev bundler).
+  // Re-measure handles after mount / preview swap so edges resolve their
+  // endpoints (handle bounds can fail to register on first mount).
   useEffect(() => {
-    const ids = graph.nodes.map((n) => n.id);
+    const ids = nodes.map((n) => n.id);
     const run = () => ids.forEach((id) => updateNodeInternals(id));
     const t1 = setTimeout(run, 80);
     const t2 = setTimeout(run, 350);
@@ -188,214 +612,640 @@ function FlowCanvasInner({
       clearTimeout(t1);
       clearTimeout(t2);
     };
-  }, [graph, updateNodeInternals]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [preview]);
 
   const selectedNode = nodes.find((n) => n.id === selected) ?? null;
-
-  const patchSelected = (patch: Partial<HcData>) => {
-    setNodes((nds) =>
-      nds.map((n) => (n.id === selected ? { ...n, data: { ...n.data, ...patch } } : n))
-    );
-    setSaved(false);
-  };
-
-  const addNode = (t: NodeType) => {
-    const id = `n_${t}_${nodes.length + 1}_${Math.floor(nodes.length * 7 + 3)}`;
-    setNodes((nds) => [
-      ...nds,
-      {
-        id,
-        type: "hc",
-        position: { x: 200, y: 80 + nds.length * 20 },
-        data: { nodeType: t },
-      },
-    ]);
-    setSaved(false);
-  };
-
-  const save = () => {
-    const g = {
-      nodes: nodes.map((n) => {
-        const { nodeType, ...rest } = n.data as HcData;
-        return {
-          id: n.id,
-          type: nodeType as NodeType,
-          data: rest,
-          x: Math.round(n.position.x),
-          y: Math.round(n.position.y),
-        };
-      }),
-      edges: edges.map((e) => ({
-        from: e.source,
-        to: e.target,
-        branch: (e.label as string) || undefined,
-      })),
-    } as unknown as FlowGraph;
-    startTransition(async () => {
-      await saveAutomationGraph(automationId, g);
-      setSaved(true);
-    });
-  };
-
   const d = (selectedNode?.data as HcData) ?? null;
+
+  const patchSelected = useCallback(
+    (patch: Partial<HcData>) => {
+      if (!selected) return;
+      setNodes((nds) =>
+        nds.map((n) => (n.id === selected ? { ...n, data: { ...n.data, ...patch } } : n))
+      );
+      setSaved(null);
+      // Handle count may have changed (rules / buttons) — re-measure.
+      requestAnimationFrame(() => updateNodeInternals(selected));
+    },
+    [selected, setNodes, updateNodeInternals]
+  );
+
+  const hasTrigger = nodes.some((n) => (n.data as HcData).nodeType === "trigger");
+
+  const addNode = useCallback(
+    (t: NodeType) => {
+      if (readOnly) return;
+      const id = `n_${t}_${Math.random().toString(36).slice(2, 8)}`;
+      const seedData: HcData = { nodeType: t };
+      if (t === "trigger") seedData.event = "NEW_INCOMING_MESSAGE";
+      if (t === "criteria_router")
+        seedData.rules = [
+          { branch: `r_${Math.random().toString(36).slice(2, 7)}`, field: "", op: "eq", value: "" },
+        ];
+      if (t === "ask_buttons") seedData.buttons = [];
+      const pos = screenToFlowPosition({ x: 360, y: 220 });
+      setNodes((nds) => [
+        ...nds,
+        { id, type: "hc", position: pos, data: seedData as Record<string, unknown> },
+      ]);
+      setSelected(id);
+      setSaved(null);
+    },
+    [readOnly, screenToFlowPosition, setNodes]
+  );
+
+  const deleteSelected = useCallback(() => {
+    if (!selected || readOnly) return;
+    setNodes((nds) => nds.filter((n) => n.id !== selected));
+    setEdges((eds) => eds.filter((e) => e.source !== selected && e.target !== selected));
+    setSelected(null);
+    setSaved(null);
+  }, [selected, readOnly, setNodes, setEdges]);
+
+  const doSave = useCallback(
+    (publish: boolean) => {
+      const g = fromFlow(nodes, edges);
+      const trig = nodes.find((n) => (n.data as HcData).nodeType === "trigger")?.data as
+        | HcData
+        | undefined;
+      startTransition(async () => {
+        await saveAutomationGraph(automationId, g, {
+          publish,
+          trigger: trig?.event
+            ? { event: trig.event, keywords: trig.keywords ?? [] }
+            : undefined,
+        });
+        setLive(publish);
+        setSaved(publish ? "live" : "draft");
+      });
+    },
+    [nodes, edges, automationId]
+  );
+
+  const enterPreview = useCallback(
+    (g: FlowGraph, version: number) => {
+      if (preSnapshot.current == null) {
+        preSnapshot.current = { nodes, edges };
+      }
+      const flow = toFlow(g, seed);
+      setNodes(flow.nodes);
+      setEdges(flow.edges);
+      setSelected(null);
+      setPreview(version);
+      setHistoryOpen(false);
+    },
+    [nodes, edges, seed, setNodes, setEdges]
+  );
+
+  const exitPreview = useCallback(() => {
+    if (preSnapshot.current) {
+      setNodes(preSnapshot.current.nodes);
+      setEdges(preSnapshot.current.edges);
+      preSnapshot.current = null;
+    }
+    setPreview(null);
+  }, [setNodes, setEdges]);
+
+  const doRestore = useCallback(
+    (versionId: string) => {
+      startTransition(async () => {
+        const res = await restoreAutomationVersion(automationId, versionId);
+        if (res.ok) {
+          preSnapshot.current = null;
+          setPreview(null);
+          setHistoryOpen(false);
+          setSaved(null);
+          // Reload so the restored graph becomes the fresh server truth.
+          window.location.reload();
+        }
+      });
+    },
+    [automationId]
+  );
 
   return (
     <div className="relative flex h-full min-h-0 flex-1">
-      {/* palette */}
-      <div className="flex w-44 shrink-0 flex-col gap-1 border-r border-[var(--color-border)] bg-[var(--color-surface)] p-2">
-        <div className="px-1 pb-1 text-[10px] font-semibold uppercase tracking-wide text-[var(--color-faint)]">
-          Add node
-        </div>
-        {PALETTE.map((t) => (
-          <button
-            key={t}
-            onClick={() => addNode(t)}
-            className="flex items-center gap-2 rounded-md px-2 py-1.5 text-left text-[12px] text-[var(--color-ink)] hover:bg-[var(--color-surface-2)]"
-          >
-            <span
-              className="h-2.5 w-2.5 rounded-sm"
-              style={{ background: NODE_META[t]?.color }}
-            />
-            {NODE_META[t]?.label ?? t}
-          </button>
-        ))}
-        <div className="mt-auto flex flex-col gap-1.5 pt-2">
-          <div className="px-1 font-mono text-[10px] text-[var(--color-faint)]">
-            {nodes.length} nodes · {edges.length} edges
-          </div>
-          <button
-            onClick={save}
-            disabled={pending}
-            className="rounded-lg bg-[var(--color-accent)] px-3 py-2 text-[13px] font-medium text-white disabled:opacity-60"
-          >
-            {pending ? "Saving…" : saved ? "Saved ✓" : "Save flow"}
-          </button>
-        </div>
-      </div>
+      {!readOnly && (
+        <NodePalette onAdd={addNode} hasTrigger={hasTrigger} disabled={readOnly} />
+      )}
 
-      <div className="h-full min-w-0 flex-1">
-        <ReactFlow
-          nodes={nodes}
-          edges={edges}
-          onNodesChange={onNodesChange}
-          onEdgesChange={onEdgesChange}
-          onConnect={onConnect}
-          onNodeClick={(_, n) => setSelected(n.id)}
-          onPaneClick={() => setSelected(null)}
-          nodeTypes={nodeTypes}
-          fitView
-          proOptions={{ hideAttribution: true }}
-        >
-          <Background color="#c2c6bd" gap={18} />
-          <Controls showInteractive={false} />
-          <MiniMap pannable zoomable className="!bg-[var(--color-surface-2)]" />
-        </ReactFlow>
+      <div className="flex min-w-0 flex-1 flex-col">
+        {/* toolbar */}
+        <div className="flex items-center gap-2 border-b border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2">
+          <div className="flex overflow-hidden rounded-full border border-[var(--color-border)] text-[11.5px]">
+            <span
+              className={`px-2.5 py-1 ${
+                live
+                  ? "text-[var(--color-faint)]"
+                  : "bg-[var(--color-surface-2)] font-medium text-[var(--color-ink)]"
+              }`}
+            >
+              Draft
+            </span>
+            <span
+              className={`px-2.5 py-1 ${
+                live
+                  ? "bg-[color-mix(in_srgb,var(--color-success)_16%,transparent)] font-medium text-[var(--color-success)]"
+                  : "text-[var(--color-faint)]"
+              }`}
+            >
+              Live
+            </span>
+          </div>
+
+          <div className="ml-auto flex items-center gap-1.5">
+            <span className="mr-1 font-mono text-[10.5px] text-[var(--color-faint)]">
+              {nodes.length} nodes · {edges.length} edges
+            </span>
+            <button
+              onClick={() => setHistoryOpen(true)}
+              className="rounded-lg border border-[var(--color-border)] px-3 py-1.5 text-[12.5px] text-[var(--color-ink)] hover:bg-[var(--color-surface-2)]"
+            >
+              History
+            </button>
+            <button
+              onClick={() => doSave(false)}
+              disabled={pending || readOnly}
+              className="rounded-lg border border-[var(--color-border)] px-3 py-1.5 text-[12.5px] text-[var(--color-ink)] hover:bg-[var(--color-surface-2)] disabled:opacity-60"
+            >
+              {pending && saved == null ? "Saving…" : "Save as draft"}
+            </button>
+            <button
+              onClick={() => doSave(true)}
+              disabled={pending || readOnly}
+              className="rounded-lg bg-[var(--color-accent)] px-3 py-1.5 text-[12.5px] font-medium text-white disabled:opacity-60"
+            >
+              {live ? "Save & keep live" : "Publish live"}
+            </button>
+          </div>
+        </div>
+
+        {preview != null && (
+          <div className="flex items-center gap-3 border-b border-[var(--color-border)] bg-[var(--color-brand-soft)] px-3 py-1.5 text-[11.5px] text-[var(--color-brand-ink)]">
+            <span>Previewing snapshot v{preview} (read-only).</span>
+            <button
+              onClick={exitPreview}
+              className="rounded-md border border-[var(--color-brand)] px-2 py-0.5 text-[var(--color-brand-ink)]"
+            >
+              Exit preview
+            </button>
+          </div>
+        )}
+
+        {saved && (
+          <div className="border-b border-[var(--color-border)] bg-[var(--color-accent-soft)] px-3 py-1 text-[11px] text-[var(--color-accent-ink)]">
+            Saved {saved === "live" ? "and published live" : "as draft"} · snapshot added to history.
+          </div>
+        )}
+
+        <div className="relative min-h-0 flex-1">
+          <ReactFlow
+            nodes={nodes}
+            edges={edges}
+            onNodesChange={onNodesChange}
+            onEdgesChange={onEdgesChange}
+            onConnect={onConnect}
+            onNodeClick={(_, n) => setSelected(n.id)}
+            onPaneClick={() => setSelected(null)}
+            nodeTypes={nodeTypes}
+            edgeTypes={edgeTypes}
+            nodesDraggable={!readOnly}
+            nodesConnectable={!readOnly}
+            elementsSelectable={!readOnly}
+            fitView
+            proOptions={{ hideAttribution: true }}
+          >
+            <Background color="#c2c6bd" gap={18} />
+            <Controls showInteractive={false} />
+            <MiniMap pannable zoomable className="!bg-[var(--color-surface-2)]" />
+          </ReactFlow>
+
+          {historyOpen && (
+            <HistoryDialog
+              automationId={automationId}
+              onClose={() => setHistoryOpen(false)}
+              onPreview={enterPreview}
+              onRestore={doRestore}
+            />
+          )}
+        </div>
       </div>
 
       {/* inspector */}
-      {selectedNode && d && (
-        <div className="w-72 shrink-0 overflow-y-auto border-l border-[var(--color-border)] bg-[var(--color-surface)] p-4">
-          <div className="mb-3 text-[11px] font-semibold uppercase tracking-wide text-[var(--color-faint)]">
-            {NODE_META[d.nodeType]?.label ?? d.nodeType}
+      {selectedNode && d && !readOnly && (
+        <div className="scroll-thin w-72 shrink-0 overflow-y-auto border-l border-[var(--color-border)] bg-[var(--color-surface)] p-4">
+          <div className="mb-3 flex items-center gap-2">
+            <span
+              className="grid h-6 w-6 place-items-center rounded text-[12px] text-white"
+              style={{ background: nodeMeta(d.nodeType).color }}
+            >
+              {nodeMeta(d.nodeType).glyph}
+            </span>
+            <span className="text-[12.5px] font-semibold text-[var(--color-ink)]">
+              {nodeMeta(d.nodeType).label}
+            </span>
           </div>
 
-          {("message" in d || ["send_text", "ask_buttons", "collect_input", "ai_agent_reply"].includes(d.nodeType)) && (
-            <Field label={d.nodeType === "ai_agent_reply" ? "System prompt (optional)" : "Message"}>
-              <textarea
-                value={d.message ?? ""}
-                onChange={(e) => patchSelected({ message: e.target.value })}
-                rows={4}
-                className="w-full resize-none rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] p-2 text-[12.5px] outline-none focus:border-[var(--color-accent)]"
-              />
-            </Field>
-          )}
+          <Inspector
+            d={d}
+            patch={patchSelected}
+            automations={automations}
+            campaigns={campaigns}
+          />
 
-          {d.nodeType === "ask_buttons" && (
-            <Field label="Buttons (one label per line)">
-              <textarea
-                value={(d.buttons ?? []).map((b) => b.label).join("\n")}
-                onChange={(e) =>
-                  patchSelected({
-                    buttons: e.target.value
-                      .split("\n")
-                      .filter((s) => s.trim())
-                      .map((label, i) => ({ id: (d.buttons?.[i]?.id ?? label.toLowerCase().replace(/\s+/g, "_")), label: label.trim() })),
-                  })
-                }
-                rows={3}
-                className="w-full resize-none rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] p-2 text-[12.5px] outline-none focus:border-[var(--color-accent)]"
-              />
-            </Field>
+          {d.nodeType !== "trigger" && (
+            <button
+              onClick={deleteSelected}
+              className="mt-3 w-full rounded-lg border border-[color-mix(in_srgb,var(--color-danger)_40%,transparent)] px-3 py-1.5 text-[12px] font-medium text-[var(--color-danger)] hover:bg-[color-mix(in_srgb,var(--color-danger)_8%,transparent)]"
+            >
+              Delete node
+            </button>
           )}
-
-          {d.nodeType === "collect_input" && (
-            <Field label="Save answer to attribute">
-              <input
-                value={(d.saveTo as string) ?? ""}
-                onChange={(e) => patchSelected({ saveTo: e.target.value })}
-                className={inputCls}
-              />
-            </Field>
-          )}
-
-          {d.nodeType === "set_attribute" && (
-            <>
-              <Field label="Attribute key">
-                <input value={d.key ?? ""} onChange={(e) => patchSelected({ key: e.target.value })} className={inputCls} />
-              </Field>
-              <Field label="Value">
-                <input value={d.value ?? ""} onChange={(e) => patchSelected({ value: e.target.value })} className={inputCls} />
-              </Field>
-            </>
-          )}
-
-          {(d.nodeType === "add_tag" || d.nodeType === "remove_tag") && (
-            <Field label="Tag">
-              <input value={d.tag ?? ""} onChange={(e) => patchSelected({ tag: e.target.value })} className={inputCls} />
-            </Field>
-          )}
-
-          {d.nodeType === "call_rest_api" && (
-            <>
-              <Field label="Method">
-                <input value={d.method ?? "POST"} onChange={(e) => patchSelected({ method: e.target.value })} className={inputCls} />
-              </Field>
-              <Field label="URL">
-                <input value={d.url ?? ""} onChange={(e) => patchSelected({ url: e.target.value })} className={inputCls} />
-              </Field>
-            </>
-          )}
-
-          {d.nodeType === "set_status" && (
-            <Field label="Status">
-              <input value={d.status ?? ""} onChange={(e) => patchSelected({ status: e.target.value })} className={inputCls} />
-            </Field>
-          )}
-
-          <button
-            onClick={() => {
-              setNodes((nds) => nds.filter((n) => n.id !== selected));
-              setEdges((eds) => eds.filter((e) => e.source !== selected && e.target !== selected));
-              setSelected(null);
-              setSaved(false);
-            }}
-            className="mt-3 w-full rounded-lg border border-[color-mix(in_srgb,var(--color-danger)_40%,transparent)] px-3 py-1.5 text-[12px] font-medium text-[var(--color-danger)] hover:bg-[color-mix(in_srgb,var(--color-danger)_8%,transparent)]"
-          >
-            Delete node
-          </button>
         </div>
       )}
     </div>
   );
 }
 
-export function FlowCanvas(props: { automationId: string; graph: FlowGraph }) {
-  return (
-    <ReactFlowProvider>
-      <FlowCanvasInner {...props} />
-    </ReactFlowProvider>
-  );
+// ────────────────────────────── inspector fields ──────────────────────────────
+
+function Inspector({
+  d,
+  patch,
+  automations,
+  campaigns,
+}: {
+  d: HcData;
+  patch: (p: Partial<HcData>) => void;
+  automations: Opt[];
+  campaigns: Opt[];
+}) {
+  const t = d.nodeType;
+
+  if (t === "trigger") {
+    return (
+      <>
+        <Field label="Event">
+          <select
+            value={d.event ?? "NEW_INCOMING_MESSAGE"}
+            onChange={(e) => patch({ event: e.target.value as TriggerEvent })}
+            className={inputCls}
+          >
+            {TRIGGER_EVENTS.map((e) => (
+              <option key={e.value} value={e.value}>
+                {e.label}
+              </option>
+            ))}
+          </select>
+        </Field>
+        {d.event === "ACTION_CALLBACK" && (
+          <Field label="Match keywords / callback ids (comma-separated)">
+            <input
+              value={(d.keywords ?? []).join(", ")}
+              onChange={(e) =>
+                patch({
+                  keywords: e.target.value
+                    .split(",")
+                    .map((s) => s.trim())
+                    .filter(Boolean),
+                })
+              }
+              placeholder="order_status, track, where is my order"
+              className={inputCls}
+            />
+          </Field>
+        )}
+        <Note>The trigger is the flow entry — one per automation.</Note>
+      </>
+    );
+  }
+
+  if (t === "send_text" || t === "ai_agent_reply") {
+    return (
+      <Field label={t === "ai_agent_reply" ? "System prompt (optional)" : "Message"}>
+        <VarTextarea value={d.message ?? ""} onChange={(v) => patch({ message: v })} />
+      </Field>
+    );
+  }
+
+  if (t === "collect_input") {
+    return (
+      <>
+        <Field label="Prompt message">
+          <VarTextarea value={d.message ?? ""} onChange={(v) => patch({ message: v })} />
+        </Field>
+        <Field label="Save answer to attribute">
+          <input
+            value={d.saveTo ?? ""}
+            onChange={(e) => patch({ saveTo: e.target.value })}
+            placeholder="e.g. delivery_address"
+            className={inputCls}
+          />
+        </Field>
+      </>
+    );
+  }
+
+  if (t === "ask_buttons") {
+    const buttons = d.buttons ?? [];
+    return (
+      <>
+        <Field label="Message">
+          <VarTextarea value={d.message ?? ""} onChange={(v) => patch({ message: v })} />
+        </Field>
+        <Field label="Buttons">
+          <div className="flex flex-col gap-1.5">
+            {buttons.map((b, i) => (
+              <div key={b.id} className="flex gap-1">
+                <input
+                  value={b.label}
+                  onChange={(e) => {
+                    const next = buttons.slice();
+                    next[i] = { ...b, label: e.target.value };
+                    patch({ buttons: next });
+                  }}
+                  className={inputCls}
+                  placeholder={`Button ${i + 1}`}
+                />
+                <button
+                  onClick={() => patch({ buttons: buttons.filter((_, j) => j !== i) })}
+                  className="shrink-0 rounded-lg border border-[var(--color-border)] px-2 text-[13px] text-[var(--color-faint)] hover:text-[var(--color-danger)]"
+                  aria-label="Remove button"
+                >
+                  ×
+                </button>
+              </div>
+            ))}
+            <button
+              onClick={() =>
+                patch({
+                  buttons: [
+                    ...buttons,
+                    { id: `b_${Math.random().toString(36).slice(2, 7)}`, label: "" },
+                  ],
+                })
+              }
+              className="rounded-lg border border-dashed border-[var(--color-border-strong)] px-2 py-1 text-[11.5px] text-[var(--color-muted)] hover:bg-[var(--color-surface-2)]"
+            >
+              + Add button
+            </button>
+          </div>
+        </Field>
+        <Note>Each button (and Fallback) is a separate output — connect it to the next node.</Note>
+      </>
+    );
+  }
+
+  if (t === "criteria_router") {
+    const rules = d.rules ?? [];
+    return (
+      <>
+        <div className="mb-1 text-[11px] text-[var(--color-muted)]">Rules</div>
+        <div className="flex flex-col gap-2">
+          {rules.map((r, i) => (
+            <div key={r.branch} className="rounded-lg border border-[var(--color-border)] p-2">
+              <div className="mb-1 flex items-center justify-between">
+                <span className="text-[11px] font-medium text-[var(--color-ink)]">
+                  Rule {i + 1}
+                </span>
+                <button
+                  onClick={() => patch({ rules: rules.filter((_, j) => j !== i) })}
+                  className="text-[13px] text-[var(--color-faint)] hover:text-[var(--color-danger)]"
+                  aria-label="Delete rule"
+                >
+                  ×
+                </button>
+              </div>
+              <input
+                value={r.field}
+                onChange={(e) => {
+                  const next = rules.slice();
+                  next[i] = { ...r, field: e.target.value };
+                  patch({ rules: next });
+                }}
+                placeholder="Field (attribute key / full_name / phone)"
+                className={`${inputCls} mb-1`}
+              />
+              <select
+                value={r.op}
+                onChange={(e) => {
+                  const next = rules.slice();
+                  next[i] = { ...r, op: e.target.value as CriteriaRule["op"] };
+                  patch({ rules: next });
+                }}
+                className={`${inputCls} mb-1`}
+              >
+                {OPERATORS.map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                  </option>
+                ))}
+              </select>
+              {r.op !== "set" && r.op !== "unset" && (
+                <input
+                  value={r.value ?? ""}
+                  onChange={(e) => {
+                    const next = rules.slice();
+                    next[i] = { ...r, value: e.target.value };
+                    patch({ rules: next });
+                  }}
+                  placeholder="Value"
+                  className={inputCls}
+                />
+              )}
+            </div>
+          ))}
+          <button
+            onClick={() =>
+              patch({
+                rules: [
+                  ...rules,
+                  { branch: `r_${Math.random().toString(36).slice(2, 7)}`, field: "", op: "eq", value: "" },
+                ],
+              })
+            }
+            className="rounded-lg border border-dashed border-[var(--color-border-strong)] px-2 py-1 text-[11.5px] text-[var(--color-muted)] hover:bg-[var(--color-surface-2)]"
+          >
+            + Add rule
+          </button>
+        </div>
+        <Note>Rules match top-to-bottom. The “Else” output fires when no rule matches.</Note>
+      </>
+    );
+  }
+
+  if (t === "set_attribute") {
+    return (
+      <>
+        <Field label="Attribute key">
+          <input value={d.key ?? ""} onChange={(e) => patch({ key: e.target.value })} className={inputCls} />
+        </Field>
+        <Field label="Value">
+          <input value={d.value ?? ""} onChange={(e) => patch({ value: e.target.value })} className={inputCls} />
+        </Field>
+      </>
+    );
+  }
+
+  if (t === "add_tag" || t === "remove_tag") {
+    return (
+      <Field label="Tag">
+        <input value={d.tag ?? ""} onChange={(e) => patch({ tag: e.target.value })} className={inputCls} />
+      </Field>
+    );
+  }
+
+  if (t === "jump_to_automation") {
+    return (
+      <Field label="Target automation">
+        <select
+          value={d.targetAutomationId ?? ""}
+          onChange={(e) => {
+            const opt = automations.find((a) => a.id === e.target.value);
+            patch({ targetAutomationId: e.target.value, targetAutomationName: opt?.name });
+          }}
+          className={inputCls}
+        >
+          <option value="">Select…</option>
+          {automations.map((a) => (
+            <option key={a.id} value={a.id}>
+              {a.name}
+            </option>
+          ))}
+        </select>
+      </Field>
+    );
+  }
+
+  if (t === "add_to_drip" || t === "remove_from_drip") {
+    return (
+      <Field label="Drip campaign">
+        <select
+          value={d.campaignId ?? ""}
+          onChange={(e) => {
+            const opt = campaigns.find((c) => c.id === e.target.value);
+            patch({ campaignId: e.target.value, campaignName: opt?.name });
+          }}
+          className={inputCls}
+        >
+          <option value="">Select…</option>
+          {campaigns.map((c) => (
+            <option key={c.id} value={c.id}>
+              {c.name}
+            </option>
+          ))}
+        </select>
+      </Field>
+    );
+  }
+
+  if (t === "opt_in" || t === "opt_out") {
+    return (
+      <Note>
+        Marks the contact as marketing {t === "opt_in" ? "opted-in" : "opted-out"} when the
+        flow reaches this node.
+      </Note>
+    );
+  }
+
+  if (t === "google_sheets") {
+    return (
+      <>
+        <Field label="Spreadsheet ID">
+          <input value={d.sheetId ?? ""} onChange={(e) => patch({ sheetId: e.target.value })} className={inputCls} />
+        </Field>
+        <Field label="Tab name">
+          <input value={d.sheetTab ?? ""} onChange={(e) => patch({ sheetTab: e.target.value })} className={inputCls} />
+        </Field>
+        <Field label="Columns (comma-separated, supports {{vars}})">
+          <input value={d.columns ?? ""} onChange={(e) => patch({ columns: e.target.value })} className={inputCls} />
+        </Field>
+        <Note>Config-only for now — the row append is not executed yet.</Note>
+      </>
+    );
+  }
+
+  if (t === "eval") {
+    return (
+      <>
+        <Field label="Expression">
+          <VarTextarea value={d.expression ?? ""} onChange={(v) => patch({ expression: v })} />
+        </Field>
+        <Note>Config-only for now — the expression is not evaluated yet.</Note>
+      </>
+    );
+  }
+
+  if (t === "delay") {
+    return (
+      <>
+        <Field label="Wait amount">
+          <input
+            type="number"
+            value={d.amount ?? ""}
+            onChange={(e) => patch({ amount: Number(e.target.value) })}
+            className={inputCls}
+          />
+        </Field>
+        <Field label="Unit">
+          <select
+            value={d.unit ?? "minutes"}
+            onChange={(e) => patch({ unit: e.target.value })}
+            className={inputCls}
+          >
+            <option value="minutes">minutes</option>
+            <option value="hours">hours</option>
+            <option value="days">days</option>
+          </select>
+        </Field>
+      </>
+    );
+  }
+
+  if (t === "call_rest_api") {
+    return (
+      <>
+        <Field label="Method">
+          <input value={d.method ?? "POST"} onChange={(e) => patch({ method: e.target.value })} className={inputCls} />
+        </Field>
+        <Field label="URL">
+          <input value={d.url ?? ""} onChange={(e) => patch({ url: e.target.value })} className={inputCls} />
+        </Field>
+      </>
+    );
+  }
+
+  if (t === "assign") {
+    return (
+      <>
+        <Field label="Assign to member id">
+          <input value={d.memberId ?? ""} onChange={(e) => patch({ memberId: e.target.value })} className={inputCls} />
+        </Field>
+        <Field label="Or department id">
+          <input value={d.departmentId ?? ""} onChange={(e) => patch({ departmentId: e.target.value })} className={inputCls} />
+        </Field>
+      </>
+    );
+  }
+
+  if (t === "set_status") {
+    return (
+      <Field label="Status">
+        <select value={d.status ?? "OPEN"} onChange={(e) => patch({ status: e.target.value })} className={inputCls}>
+          <option value="OPEN">OPEN</option>
+          <option value="PENDING">PENDING</option>
+          <option value="QUEUE">QUEUE</option>
+          <option value="CLOSED">CLOSED</option>
+        </select>
+      </Field>
+    );
+  }
+
+  return <Note>This node has no configuration.</Note>;
 }
+
+// ────────────────────────────── small helpers ──────────────────────────────
 
 const inputCls =
   "w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] px-2.5 py-1.5 text-[12.5px] outline-none focus:border-[var(--color-accent)]";
@@ -406,5 +1256,67 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
       <label className="mb-1 block text-[11px] text-[var(--color-muted)]">{label}</label>
       {children}
     </div>
+  );
+}
+
+function Note({ children }: { children: React.ReactNode }) {
+  return (
+    <p className="mt-2 rounded-lg bg-[var(--color-surface-2)] px-2.5 py-2 text-[11px] leading-snug text-[var(--color-faint)]">
+      {children}
+    </p>
+  );
+}
+
+/** Textarea with a quick {{ variable }} insert helper. */
+function VarTextarea({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  const ref = useRef<HTMLTextAreaElement>(null);
+  const VARS = ["full_name", "phone", "order_total", "ref_1", "tms_status"];
+  const insert = (v: string) => {
+    const el = ref.current;
+    const token = `{{${v}}}`;
+    if (!el) {
+      onChange(value + token);
+      return;
+    }
+    const start = el.selectionStart ?? value.length;
+    const end = el.selectionEnd ?? value.length;
+    onChange(value.slice(0, start) + token + value.slice(end));
+  };
+  return (
+    <div>
+      <textarea
+        ref={ref}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        rows={4}
+        className="w-full resize-none rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] p-2 text-[12.5px] outline-none focus:border-[var(--color-accent)]"
+      />
+      <div className="mt-1 flex flex-wrap gap-1">
+        {VARS.map((v) => (
+          <button
+            key={v}
+            type="button"
+            onClick={() => insert(v)}
+            className="rounded border border-[var(--color-border)] px-1.5 py-0.5 font-mono text-[10px] text-[var(--color-muted)] hover:bg-[var(--color-surface-2)]"
+          >
+            {v}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+export function FlowCanvas(props: CanvasProps) {
+  return (
+    <ReactFlowProvider>
+      <FlowCanvasInner {...props} />
+    </ReactFlowProvider>
   );
 }

@@ -1,20 +1,14 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { eq } from "drizzle-orm";
+import { and, eq, ne } from "drizzle-orm";
 import { getDb } from "@/db/client";
-import { automation as automationTable, automationRun as automationRunTable } from "@/db/schema";
-import { asGraph } from "@/lib/automation/types";
+import {
+  automation as automationTable,
+  automationRun as automationRunTable,
+  campaign as campaignTable,
+} from "@/db/schema";
+import { asGraph, type TriggerEvent } from "@/lib/automation/types";
 import { FlowCanvas } from "@/components/automation/FlowCanvas";
-import { setAutomationEnabled } from "../actions";
-
-const TRIGGER_LABEL: Record<string, string> = {
-  NEW_INCOMING_MESSAGE: "New incoming message",
-  WEBHOOK: "Webhook received (ERP)",
-  TAG_ADDED: "When a tag is added",
-  DRIVER_EVENT: "Driver / TMS event",
-  PAYMENT_RECEIVED: "Payment received",
-  CONTACT_FIELD_UPDATED: "Contact field updated",
-};
 
 export default async function AutomationDetail({
   params,
@@ -34,8 +28,25 @@ export default async function AutomationDetail({
     eq(automationRunTable.automationId, id)
   );
 
+  // Option lists for node pickers (jump-to-automation, drip campaigns).
+  const [otherAutomations, campaigns] = await Promise.all([
+    db.query.automation.findMany({
+      where: and(
+        eq(automationTable.companyId, automation.companyId),
+        ne(automationTable.id, id)
+      ),
+      columns: { id: true, name: true },
+    }),
+    db.query.campaign.findMany({
+      where: eq(campaignTable.companyId, automation.companyId),
+      columns: { id: true, name: true },
+    }),
+  ]);
+
   const graph = asGraph(automation.graph);
-  const toggle = setAutomationEnabled.bind(null, automation.id, !automation.enabled);
+  const triggerConfig =
+    (automation.triggerConfig as { event?: TriggerEvent; keywords?: string[] } | null) ??
+    null;
 
   return (
     <>
@@ -51,27 +62,20 @@ export default async function AutomationDetail({
             {automation.name}
           </h1>
           <p className="truncate text-[11.5px] text-[var(--color-muted)]">
-            {automation.channel.displayName} ·{" "}
-            {TRIGGER_LABEL[automation.triggerType] ?? automation.triggerType} · v
-            {automation.version} · {runCount} runs
+            {automation.channel.displayName} · v{automation.version} · {runCount} runs
           </p>
-        </div>
-        <div className="ml-auto flex items-center gap-2">
-          <form action={toggle}>
-            <button
-              className={`rounded-full px-3 py-1.5 text-[12px] font-medium ${
-                automation.enabled
-                  ? "bg-[color-mix(in_srgb,var(--color-success)_14%,transparent)] text-[var(--color-success)]"
-                  : "bg-[var(--color-surface-2)] text-[var(--color-muted)]"
-              }`}
-            >
-              {automation.enabled ? "● Active — click to pause" : "○ Draft — click to activate"}
-            </button>
-          </form>
         </div>
       </header>
 
-      <FlowCanvas automationId={automation.id} graph={graph} />
+      <FlowCanvas
+        automationId={automation.id}
+        graph={graph}
+        initialEnabled={automation.enabled}
+        initialTriggerEvent={triggerConfig?.event}
+        initialKeywords={triggerConfig?.keywords ?? []}
+        automations={otherAutomations}
+        campaigns={campaigns}
+      />
     </>
   );
 }
