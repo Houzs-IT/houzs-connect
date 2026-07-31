@@ -142,6 +142,12 @@ export const member = connect.table(
   (t) => ({
     companyIdx: index("member_company_idx").on(t.companyId),
     managerIdx: index("member_manager_idx").on(t.managerId),
+    // Replaces the dropped global email-unique: a person is unique WITHIN a
+    // company by email (but recurs across companies via the fan-out). This is
+    // also the login upsert's conflict target — see app/login/actions.ts.
+    companyEmailUnique: uniqueIndex("member_company_email_unique")
+      .on(t.companyId, t.email)
+      .where(sql`${t.email} is not null`),
     erpUserIdx: uniqueIndex("member_company_erp_user_key")
       .on(t.companyId, t.erpUserId)
       .where(sql`${t.erpUserId} is not null`),

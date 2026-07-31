@@ -28,9 +28,13 @@ ALTER TABLE "connect"."member" ADD COLUMN IF NOT EXISTS "active" boolean DEFAULT
 --> statement-breakpoint
 
 -- Email is no longer globally unique — one ERP user fans out to one member per
--- granted company, so the same email recurs once per company. Identity moves to
+-- granted company, so the same email recurs once per company. Uniqueness moves
+-- to (company_id, email) [login upsert conflict target] and identity to
 -- (company_id, erp_user_id).
 ALTER TABLE "connect"."member" DROP CONSTRAINT IF EXISTS "member_email_unique";
+--> statement-breakpoint
+CREATE UNIQUE INDEX IF NOT EXISTS "member_company_email_unique"
+  ON "connect"."member" ("company_id", "email") WHERE "email" IS NOT NULL;
 --> statement-breakpoint
 CREATE UNIQUE INDEX IF NOT EXISTS "member_company_erp_user_key"
   ON "connect"."member" ("company_id", "erp_user_id") WHERE "erp_user_id" IS NOT NULL;

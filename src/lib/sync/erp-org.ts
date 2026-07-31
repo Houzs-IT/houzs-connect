@@ -214,18 +214,20 @@ export function planOrgSync(erp: ErpOrg, existing: ExistingOrg): OrgSyncPlan {
   const syncedErpCompanyIds = new Set(erp.companies.map((c) => c.id));
 
   // ── Members ────────────────────────────────────────────────
-  // Index existing members for O(1) reconciliation.
-  //   • byCompanyErpUser: already-synced rows, keyed (connectCompanyId, erpUserId)
-  //   • seededByCompanyEmail: pre-sync rows (no erp_user_id), keyed
-  //     (connectCompanyId, lowercased email) — the reconcile-not-duplicate path.
+  // Index existing members for O(1) reconciliation, both ways:
+  //   • byCompanyEmail: ALL rows, keyed (connectCompanyId, lowercased email) —
+  //     matches login-created / seeded rows (no erp_user_id) AND already-synced
+  //     rows. This is the login upsert's unique key, so it must be the PRIMARY
+  //     reconcile key: never insert a second row for an email already present in
+  //     the company (that would violate member_company_email_unique).
+  //   • byCompanyErpUser: rows that already carry erp_user_id, keyed
+  //     (connectCompanyId, erpUserId) — the stable identity fallback when a
+  //     user's email changed in the ERP.
+  const byCompanyEmail = new Map<string, ExistingMember>();
   const byCompanyErpUser = new Map<string, ExistingMember>();
-  const seededByCompanyEmail = new Map<string, ExistingMember>();
   for (const m of existing.members) {
-    if (m.erpUserId != null) {
-      byCompanyErpUser.set(`${m.companyId}:${m.erpUserId}`, m);
-    } else {
-      seededByCompanyEmail.set(`${m.companyId}:${m.email.toLowerCase()}`, m);
-    }
+    byCompanyEmail.set(`${m.companyId}:${m.email.toLowerCase()}`, m);
+    if (m.erpUserId != null) byCompanyErpUser.set(`${m.companyId}:${m.erpUserId}`, m);
   }
 
   // Existing members that WERE synced (have erp_user_id) — anything not touched
@@ -264,12 +266,24 @@ export function planOrgSync(erp: ErpOrg, existing: ExistingOrg): OrgSyncPlan {
         continue;
       }
 
-      // 1) Already synced for this (company, user) -> update in place.
-      const existingByPair = byCompanyErpUser.get(`${connectCompanyId}:${u.id}`);
-      if (existingByPair) {
-        consumed.add(existingByPair.id);
+      // Reconcile by (company, email) FIRST — this is the row a login upsert
+      // created (email, no erp_user_id) and the row the unique index protects —
+      // then fall back to (company, erp_user_id) for an email that changed in the
+      // ERP. Either match is UPDATED (backfilling erp_user_id when it was null),
+      // never duplicated.
+      const emailHit = byCompanyEmail.get(`${connectCompanyId}:${email}`);
+      const userHit = byCompanyErpUser.get(`${connectCompanyId}:${u.id}`);
+      const match =
+        emailHit && !consumed.has(emailHit.id)
+          ? emailHit
+          : userHit && !consumed.has(userHit.id)
+            ? userHit
+            : null;
+
+      if (match) {
+        consumed.add(match.id);
         plan.members.update.push({
-          id: existingByPair.id,
+          id: match.id,
           erpUserId: u.id,
           email,
           name,
@@ -277,32 +291,12 @@ export function planOrgSync(erp: ErpOrg, existing: ExistingOrg): OrgSyncPlan {
           title,
           role,
           status,
-          backfilledErpUserId: false,
+          backfilledErpUserId: match.erpUserId == null,
         });
         continue;
       }
 
-      // 2) Pre-existing seeded row for this company+email -> reconcile (backfill).
-      const seeded = seededByCompanyEmail.get(`${connectCompanyId}:${email}`);
-      if (seeded) {
-        consumed.add(seeded.id);
-        // Don't reuse the same seeded row for two different ERP users.
-        seededByCompanyEmail.delete(`${connectCompanyId}:${email}`);
-        plan.members.update.push({
-          id: seeded.id,
-          erpUserId: u.id,
-          email,
-          name,
-          phone: u.phone ?? null,
-          title,
-          role,
-          status,
-          backfilledErpUserId: true,
-        });
-        continue;
-      }
-
-      // 3) Nothing to reconcile -> insert.
+      // Nothing to reconcile -> insert.
       plan.members.insert.push({
         erpCompanyId,
         erpUserId: u.id,
@@ -379,6 +373,9 @@ export async function ensureErpOrgColumns(db: DB): Promise<void> {
   await db.execute(sql`ALTER TABLE "connect"."member" ADD COLUMN IF NOT EXISTS "erp_user_id" integer`);
   await db.execute(sql`ALTER TABLE "connect"."member" ADD COLUMN IF NOT EXISTS "active" boolean DEFAULT true NOT NULL`);
   await db.execute(sql`ALTER TABLE "connect"."member" DROP CONSTRAINT IF EXISTS "member_email_unique"`);
+  await db.execute(
+    sql`CREATE UNIQUE INDEX IF NOT EXISTS "member_company_email_unique" ON "connect"."member" ("company_id", "email") WHERE "email" IS NOT NULL`
+  );
   await db.execute(
     sql`CREATE UNIQUE INDEX IF NOT EXISTS "member_company_erp_user_key" ON "connect"."member" ("company_id", "erp_user_id") WHERE "erp_user_id" IS NOT NULL`
   );

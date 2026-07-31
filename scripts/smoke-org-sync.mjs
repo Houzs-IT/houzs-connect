@@ -26,8 +26,11 @@ async function main() {
   const { planOrgSync } = await import("../src/lib/sync/erp-org.ts");
 
   // ── Existing Connect snapshot ──
-  // One seeded company (HOUZS, no erp link yet) and two seeded members in it:
+  // One seeded company (HOUZS, no erp link yet) and three seeded members in it:
   //   m_alice  — plain seeded (no erp_user_id): must reconcile by email
+  //   m_dave   — LOGIN-created row (has email + company, no erp_user_id): the
+  //              production path the (company_id, email) unique index protects —
+  //              the sync must reconcile+backfill it, NEVER insert a 2nd row
   //   m_carol  — previously synced (erp_user_id 3): user is gone from ERP now
   const existing = {
     companies: [
@@ -35,6 +38,7 @@ async function main() {
     ],
     members: [
       { id: "m_alice", companyId: "c_houzs", email: "alice@houzs.com", erpUserId: null, active: true },
+      { id: "m_dave", companyId: "c_houzs", email: "dave@houzs.com", erpUserId: null, active: true },
       { id: "m_carol", companyId: "c_houzs", email: "carol@houzs.com", erpUserId: 3, active: true },
     ],
   };
@@ -51,8 +55,11 @@ async function main() {
       { id: 1, email: "Alice@Houzs.com", name: "Alice", phone: "011", status: "active", role_name: "Owner" },
       // Sales exec granted ONLY company 2 -> lands in 2990 alone.
       { id: 2, email: "bob@houzs.com", name: "Bob", phone: null, status: "active", role_name: "Sales Executive" },
+      // Dave granted ONLY company 1 (HOUZS), where a login-created row already
+      // exists for him -> must be reconciled by (company, email), not duplicated.
+      { id: 4, email: "dave@houzs.com", name: "Dave", phone: null, status: "active", role_name: "Manager" },
     ],
-    grants: { 1: [], 2: [2] },
+    grants: { 1: [], 2: [2], 4: [1] },
   };
 
   const plan = planOrgSync(erp, existing);
@@ -77,6 +84,19 @@ async function main() {
   // Alice must NOT be re-inserted into HOUZS (that would be a duplicate).
   const aliceInsertHouzs = plan.members.insert.find((m) => m.erpUserId === 1 && m.erpCompanyId === 1);
   assert(!aliceInsertHouzs, "alice must not be duplicated into HOUZS via insert");
+
+  // ── (company, email) reconcile of a LOGIN-created row (the prod-crash path) ──
+  // Dave has a login-created member in HOUZS (email, no erp_user_id). The sync
+  // must reconcile it by (company, email) and backfill erp_user_id — and must
+  // NOT insert a second HOUZS row (which would violate member_company_email_unique
+  // and, before the fix, mirror the exact bug that broke login).
+  const daveMatch = plan.members.update.find((m) => m.id === "m_dave");
+  assert(daveMatch, "login-created dave must be reconciled by (company, email), present in updates");
+  assert(daveMatch.erpUserId === 4, "dave should be backfilled with erp_user_id 4");
+  assert(daveMatch.backfilledErpUserId === true, "dave match should be flagged as a (company,email) backfill");
+  assert(daveMatch.role === "MANAGER", `dave role should map to MANAGER, got ${daveMatch.role}`);
+  const daveInsert = plan.members.insert.find((m) => m.erpUserId === 4);
+  assert(!daveInsert, "dave must NOT be inserted as a duplicate (company, email) row");
 
   // ── Member-per-company fan-out ──
   // Alice (no grants) -> also inserted into 2990. Bob (grant [2]) -> only 2990.
@@ -103,6 +123,7 @@ async function main() {
     { id: "m_alice", companyId: "c_houzs", email: "alice@houzs.com", erpUserId: 1, active: true },
     { id: "m_alice2990", companyId: "c_2990", email: "alice@houzs.com", erpUserId: 1, active: true },
     { id: "m_bob2990", companyId: "c_2990", email: "bob@houzs.com", erpUserId: 2, active: true },
+    { id: "m_dave", companyId: "c_houzs", email: "dave@houzs.com", erpUserId: 4, active: true },
     // carol already deactivated -> excluded from further deactivation.
     { id: "m_carol", companyId: "c_houzs", email: "carol@houzs.com", erpUserId: 3, active: false },
   ];
@@ -112,7 +133,7 @@ async function main() {
   assert(replay.members.insert.length === 0, "idempotent replay: no member inserts");
   assert(replay.members.deactivate.length === 0, "idempotent replay: no new deactivations");
   // Updates are allowed on replay (field refresh) but must not duplicate rows.
-  assert(replay.members.update.length === 3, `idempotent replay: expected 3 member updates, got ${replay.members.update.length}`);
+  assert(replay.members.update.length === 4, `idempotent replay: expected 4 member updates, got ${replay.members.update.length}`);
 
   console.log("ORG-SYNC SMOKE PASS:");
   console.log(`  companies:  +${plan.companies.insert.length} insert, ~${plan.companies.update.length} update`);
