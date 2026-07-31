@@ -1,9 +1,15 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 import { and, desc, eq, sql } from "drizzle-orm";
 import { getDb } from "@/db/client";
-import { automation, automationVersion } from "@/db/schema";
+import {
+  automation,
+  automationVersion,
+  company as companyTable,
+  contact as contactTable,
+} from "@/db/schema";
 import {
   asGraph,
   TRIGGER_EVENT_TO_TYPE,
@@ -11,6 +17,14 @@ import {
   type FlowGraph,
   type TriggerEvent,
 } from "@/lib/automation/types";
+import { attrs } from "@/lib/format";
+import {
+  handleDriverEvent,
+  handleErpWebhook,
+  handleInboundMessage,
+} from "@/lib/automation/dispatch";
+import { startRun } from "@/lib/automation/engine";
+import { getOrCreateConversation } from "@/lib/whatsapp/transport";
 
 const MAX_VERSIONS = 10;
 
@@ -42,6 +56,7 @@ async function ensureAutomationVersionTable() {
 
 interface TriggerPayload {
   event: TriggerEvent;
+  callbackId?: string;
   keywords?: string[];
 }
 
@@ -104,6 +119,7 @@ export async function saveAutomationGraph(
     set.triggerType = TRIGGER_EVENT_TO_TYPE[opts.trigger.event] ?? opts.trigger.event;
     set.triggerConfig = {
       event: opts.trigger.event,
+      callbackId: opts.trigger.callbackId ?? "",
       keywords: opts.trigger.keywords ?? [],
     };
   }
@@ -221,4 +237,120 @@ export async function restoreAutomationVersion(
   revalidatePath(`/automations/${automationId}`);
   revalidatePath("/automations");
   return { ok: true as const, version: row?.version ?? null };
+}
+
+// A stable demo contact used by the "Test run" button so repeated tests reuse one
+// conversation instead of spawning throwaways. Seeded with a few order attributes
+// so {{variables}} in the flow interpolate to something readable.
+const TEST_CONTACT_PHONE = "60000000000";
+const TEST_CONTACT_ATTRS: Record<string, string> = {
+  ref_1: "TEST-0001",
+  delivery_date_1: "2026/08/15",
+  amount: "1200",
+  order_total: "1200",
+};
+
+/**
+ * Fire this automation once against a demo test contact and jump to the resulting
+ * conversation so the builder can SEE the flow run. Invokes the same dispatch seam
+ * the ERP/driver webhooks use (so ACTION_CALLBACK / WEBHOOK resolution is exercised
+ * for real); if that seam fires nothing (e.g. the automation is still a Draft, so
+ * the webhook filter skips it), it falls back to running this automation directly
+ * so the test always produces a visible result.
+ */
+export async function testRunAutomation(automationId: string) {
+  const db = getDb();
+  const auto = await db.query.automation.findFirst({
+    where: eq(automation.id, automationId),
+  });
+  if (!auto) return;
+  const company = await db.query.company.findFirst({
+    where: eq(companyTable.id, auto.companyId),
+  });
+  if (!company) return;
+
+  // Ensure the demo contact exists for this company (idempotent).
+  let contact = await db.query.contact.findFirst({
+    where: and(
+      eq(contactTable.companyId, auto.companyId),
+      eq(contactTable.phone, TEST_CONTACT_PHONE)
+    ),
+  });
+  if (!contact) {
+    [contact] = await db
+      .insert(contactTable)
+      .values({
+        companyId: auto.companyId,
+        phone: TEST_CONTACT_PHONE,
+        name: "Test Contact",
+        source: "test-run",
+        attributes: { ...TEST_CONTACT_ATTRS },
+      })
+      .returning();
+  } else {
+    contact = (
+      await db
+        .update(contactTable)
+        .set({ attributes: { ...TEST_CONTACT_ATTRS, ...attrs(contact.attributes) } })
+        .where(eq(contactTable.id, contact.id))
+        .returning()
+    )[0];
+  }
+
+  const cfg = (auto.triggerConfig ?? {}) as { callbackId?: string };
+  let fired = 0;
+
+  // Exercise the real dispatch handler for the automation's trigger type.
+  switch (auto.triggerType) {
+    case "ACTION_CALLBACK": {
+      const callbackId = cfg.callbackId || auto.name;
+      const res = await handleErpWebhook({
+        companySlug: company.slug,
+        phone: TEST_CONTACT_PHONE,
+        name: "Test Contact",
+        automation: callbackId,
+        attributes: { ...TEST_CONTACT_ATTRS, status: callbackId },
+      });
+      fired = res.ok ? (res.runs?.length ?? 0) : 0;
+      break;
+    }
+    case "WEBHOOK": {
+      const res = await handleErpWebhook({
+        companySlug: company.slug,
+        phone: TEST_CONTACT_PHONE,
+        name: "Test Contact",
+        automation: auto.name,
+        attributes: { ...TEST_CONTACT_ATTRS },
+      });
+      fired = res.ok ? (res.runs?.length ?? 0) : 0;
+      break;
+    }
+    case "DRIVER_EVENT": {
+      const res = await handleDriverEvent({
+        companySlug: company.slug,
+        phone: TEST_CONTACT_PHONE,
+        event: "EN_ROUTE",
+        driverName: "Demo Driver",
+        carPlate: "TEST 1234",
+        eta: "30 mins",
+      });
+      fired = res.ok ? (res.runs?.length ?? 0) : 0;
+      break;
+    }
+    case "NEW_INCOMING_MESSAGE": {
+      const res = await handleInboundMessage(contact.id, { text: "test" });
+      fired = res.started + res.resumed;
+      break;
+    }
+    default:
+      break;
+  }
+
+  // Fallback: run THIS automation directly if the webhook filter fired nothing
+  // (Draft/disabled, or a trigger type without a simple simulation).
+  if (fired === 0) await startRun(automationId, contact.id);
+
+  const convo = await getOrCreateConversation(auto.channelId, contact.id);
+  revalidatePath(`/inbox/${convo.id}`);
+  redirect(`/inbox/${convo.id}`);
 }

@@ -9,6 +9,7 @@ import {
 } from "@/db/schema";
 import { asGraph, type TriggerEvent } from "@/lib/automation/types";
 import { FlowCanvas } from "@/components/automation/FlowCanvas";
+import { testRunAutomation } from "../actions";
 
 export default async function AutomationDetail({
   params,
@@ -45,8 +46,14 @@ export default async function AutomationDetail({
 
   const graph = asGraph(automation.graph);
   const triggerConfig =
-    (automation.triggerConfig as { event?: TriggerEvent; keywords?: string[] } | null) ??
-    null;
+    (automation.triggerConfig as {
+      event?: TriggerEvent;
+      callbackId?: string;
+      keywords?: string[];
+    } | null) ?? null;
+
+  // Server action bound to this automation for the header "Test run" button.
+  const runTest = testRunAutomation.bind(null, automation.id);
 
   return (
     <>
@@ -65,6 +72,15 @@ export default async function AutomationDetail({
             {automation.channel.displayName} · v{automation.version} · {runCount} runs
           </p>
         </div>
+        {/* Fire the flow against a demo test contact, then jump to its conversation. */}
+        <form action={runTest} className="ml-auto shrink-0">
+          <button
+            type="submit"
+            className="rounded-lg border border-[var(--color-border)] px-3 py-1.5 text-[12.5px] font-medium text-[var(--color-ink)] hover:bg-[var(--color-surface-2)]"
+          >
+            Test run
+          </button>
+        </form>
       </header>
 
       <FlowCanvas
@@ -72,6 +88,7 @@ export default async function AutomationDetail({
         graph={graph}
         initialEnabled={automation.enabled}
         initialTriggerEvent={triggerConfig?.event}
+        initialCallbackId={triggerConfig?.callbackId ?? ""}
         initialKeywords={triggerConfig?.keywords ?? []}
         automations={otherAutomations}
         campaigns={campaigns}

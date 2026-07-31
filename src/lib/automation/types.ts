@@ -38,9 +38,13 @@ export interface CriteriaRule {
 /**
  * Trigger events surfaced in the builder's Trigger node. The engine dispatches on
  * Automation.triggerType (see lib/automation/dispatch.ts); TRIGGER_EVENT_TO_TYPE
- * maps a builder event to the column value. ACTION_CALLBACK is an inbound-message
- * entry whose keyword/callback match is intended to be resolved inside the flow,
- * so it maps to NEW_INCOMING_MESSAGE for dispatch.
+ * maps a builder event to the column value.
+ *
+ * ACTION_CALLBACK is now first-class: it maps to its own triggerType so the ERP
+ * webhook can fire an automation whose configured `callbackId` equals the incoming
+ * "Action Callback Id" (Seampify's contract — the Sheet/ERP POSTs that string to
+ * /api/webhooks/erp). It is NOT remapped to NEW_INCOMING_MESSAGE, which would make
+ * it fire on every inbound message instead of only on the matching callback.
  */
 export type TriggerEvent =
   | "NEW_INCOMING_MESSAGE"
@@ -50,14 +54,15 @@ export type TriggerEvent =
 
 export const TRIGGER_EVENT_TO_TYPE: Record<TriggerEvent, string> = {
   NEW_INCOMING_MESSAGE: "NEW_INCOMING_MESSAGE",
-  ACTION_CALLBACK: "NEW_INCOMING_MESSAGE",
+  ACTION_CALLBACK: "ACTION_CALLBACK",
   WEBHOOK: "WEBHOOK",
   TAG_ADDED: "TAG_ADDED",
 };
 
 export interface TriggerData {
   event?: TriggerEvent;
-  keywords?: string[]; // ACTION_CALLBACK: callback ids / keywords to match
+  callbackId?: string; // ACTION_CALLBACK: the exact Action Callback Id to match
+  keywords?: string[]; // ACTION_CALLBACK: legacy list of callback ids / keywords (fallback match)
   [k: string]: unknown;
 }
 
@@ -83,6 +88,7 @@ export interface FlowNode {
     timeoutMinutes?: number;
     // trigger
     event?: TriggerEvent;
+    callbackId?: string;
     keywords?: string[];
     // jump_to_automation
     targetAutomationId?: string;

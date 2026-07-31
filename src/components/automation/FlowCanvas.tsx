@@ -69,6 +69,7 @@ type HcData = {
   saveTo?: string;
   rules?: CriteriaRule[];
   event?: TriggerEvent;
+  callbackId?: string;
   keywords?: string[];
   targetAutomationId?: string;
   targetAutomationName?: string;
@@ -125,9 +126,10 @@ function summarize(d: HcData): string {
     case "trigger": {
       const ev = TRIGGER_EVENTS.find((e) => e.value === d.event);
       const base = ev?.label ?? "New message received";
-      return d.event === "ACTION_CALLBACK" && (d.keywords?.length ?? 0)
-        ? `${base}: ${d.keywords!.join(", ")}`
-        : base;
+      if (d.event !== "ACTION_CALLBACK") return base;
+      // Prefer the single callbackId; fall back to the legacy keywords list.
+      const match = d.callbackId?.trim() || (d.keywords?.length ? d.keywords.join(", ") : "");
+      return match ? `${base}: ${match}` : base;
     }
     case "send_text":
     case "ai_agent_reply":
@@ -285,13 +287,14 @@ function ButtonEdge({
 
 function toFlow(
   graph: FlowGraph,
-  seedTrigger?: { event?: TriggerEvent; keywords?: string[] }
+  seedTrigger?: { event?: TriggerEvent; callbackId?: string; keywords?: string[] }
 ): { nodes: Node[]; edges: Edge[] } {
   const typeById = new Map(graph.nodes.map((n) => [n.id, n.type]));
   const nodes: Node[] = graph.nodes.map((n, i) => {
     const data: HcData = { nodeType: n.type, ...(n.data ?? {}) };
     if (n.type === "trigger" && seedTrigger) {
       if (data.event == null) data.event = seedTrigger.event ?? "NEW_INCOMING_MESSAGE";
+      if (data.callbackId == null) data.callbackId = seedTrigger.callbackId ?? "";
       if (data.keywords == null) data.keywords = seedTrigger.keywords ?? [];
     }
     return {
@@ -552,6 +555,7 @@ interface CanvasProps {
   graph: FlowGraph;
   initialEnabled: boolean;
   initialTriggerEvent?: TriggerEvent;
+  initialCallbackId?: string;
   initialKeywords?: string[];
   automations: Opt[];
   campaigns: Opt[];
@@ -565,8 +569,12 @@ function FlowCanvasInner(props: CanvasProps) {
   const { screenToFlowPosition } = useReactFlow();
 
   const seed = useMemo(
-    () => ({ event: props.initialTriggerEvent, keywords: props.initialKeywords }),
-    [props.initialTriggerEvent, props.initialKeywords]
+    () => ({
+      event: props.initialTriggerEvent,
+      callbackId: props.initialCallbackId,
+      keywords: props.initialKeywords,
+    }),
+    [props.initialTriggerEvent, props.initialCallbackId, props.initialKeywords]
   );
   const initial = useMemo(() => toFlow(graph, seed), [graph, seed]);
 
@@ -673,7 +681,11 @@ function FlowCanvasInner(props: CanvasProps) {
         await saveAutomationGraph(automationId, g, {
           publish,
           trigger: trig?.event
-            ? { event: trig.event, keywords: trig.keywords ?? [] }
+            ? {
+                event: trig.event,
+                callbackId: trig.callbackId ?? "",
+                keywords: trig.keywords ?? [],
+              }
             : undefined,
         });
         setLive(publish);
@@ -900,21 +912,20 @@ function Inspector({
           </select>
         </Field>
         {d.event === "ACTION_CALLBACK" && (
-          <Field label="Match keywords / callback ids (comma-separated)">
+          <Field label="Action Callback Id Matches">
             <input
-              value={(d.keywords ?? []).join(", ")}
-              onChange={(e) =>
-                patch({
-                  keywords: e.target.value
-                    .split(",")
-                    .map((s) => s.trim())
-                    .filter(Boolean),
-                })
-              }
-              placeholder="order_status, track, where is my order"
+              value={d.callbackId ?? ""}
+              onChange={(e) => patch({ callbackId: e.target.value })}
+              placeholder="e.g. To Send Delivery Date"
               className={inputCls}
             />
           </Field>
+        )}
+        {d.event === "ACTION_CALLBACK" && (
+          <Note>
+            Fires when the ERP posts this exact Action Callback Id to the webhook
+            (Seampify&apos;s &ldquo;Action Callback Id Matches&rdquo;).
+          </Note>
         )}
         <Note>The trigger is the flow entry — one per automation.</Note>
       </>
