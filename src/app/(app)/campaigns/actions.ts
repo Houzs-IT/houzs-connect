@@ -13,16 +13,32 @@ import {
 import { getCurrentMember } from "@/lib/current-member";
 import { getOrCreateConversation, sendOutbound } from "@/lib/whatsapp/transport";
 import { interpolate } from "@/lib/automation/vars";
+import { attrs } from "@/lib/format";
 
 /**
- * Create a broadcast campaign and send it to the resolved audience (DEMO transport).
- * Audience = "all" contacts in the company, or those carrying a given tag. Message
- * supports {full_name}/{ref_1}/... merge vars per contact.
+ * Create a one-time broadcast campaign and (unless scheduled for later) send it
+ * to the resolved audience via the DEMO transport.
+ *
+ * Audience is one of:
+ *   - all       → every contact in the company
+ *   - tag       → contacts carrying the named tag
+ *   - attribute → contacts whose custom attribute `key` equals `value`
+ *
+ * Scheduling: when the caller picks "send later" with a future timestamp the
+ * campaign is stored with status "scheduled" and NOT sent — a future dispatcher
+ * (or the LIVE Cloud API worker) would pick scheduled rows up. Send-now runs the
+ * dispatch inline exactly as before. Message body supports {var}/{{var}} merge.
  */
 export async function createAndSendCampaign(formData: FormData) {
   const name = String(formData.get("name") ?? "").trim();
-  const audience = String(formData.get("audience") ?? "all");
+  const audienceKind = String(formData.get("audienceKind") ?? "all");
+  const audienceTag = String(formData.get("audienceTag") ?? "");
+  const attrKey = String(formData.get("attrKey") ?? "").trim();
+  const attrValue = String(formData.get("attrValue") ?? "").trim();
+  const templateName = String(formData.get("templateName") ?? "").trim();
   const message = String(formData.get("message") ?? "").trim();
+  const scheduleMode = String(formData.get("scheduleMode") ?? "now");
+  const scheduleAtRaw = String(formData.get("scheduleAt") ?? "").trim();
   if (!name || !message) return;
 
   const db = getDb();
@@ -34,15 +50,12 @@ export async function createAndSendCampaign(formData: FormData) {
   });
   if (!channel) return;
 
-  // Resolve audience: all company contacts, or those carrying the named tag.
+  // ── Resolve audience ──
   let contacts;
-  if (audience === "all") {
-    contacts = await db.query.contact.findMany({
-      where: eq(contactTable.companyId, me.companyId),
-    });
-  } else {
+  let audienceMeta: Record<string, string>;
+  if (audienceKind === "tag" && audienceTag) {
     const tagRow = await db.query.tag.findFirst({
-      where: and(eq(tagTable.companyId, me.companyId), eq(tagTable.name, audience)),
+      where: and(eq(tagTable.companyId, me.companyId), eq(tagTable.name, audienceTag)),
     });
     const links = tagRow
       ? await db.query.contactTag.findMany({ where: eq(contactTagTable.tagId, tagRow.id) })
@@ -56,19 +69,53 @@ export async function createAndSendCampaign(formData: FormData) {
           ),
         })
       : [];
+    audienceMeta = { kind: "tag", value: audienceTag };
+  } else if (audienceKind === "attribute" && attrKey) {
+    // Attribute filter: pull company contacts and match on the JSON attribute.
+    // Filtering in JS keeps this portable (attributes is a free-form jsonb map).
+    const all = await db.query.contact.findMany({
+      where: eq(contactTable.companyId, me.companyId),
+    });
+    contacts = all.filter((c) => {
+      const v = attrs(c.attributes)[attrKey];
+      if (v == null) return false;
+      return attrValue === "" ? true : String(v).toLowerCase() === attrValue.toLowerCase();
+    });
+    audienceMeta = {
+      kind: "attribute",
+      value: attrValue ? `${attrKey} = ${attrValue}` : `has ${attrKey}`,
+    };
+  } else {
+    contacts = await db.query.contact.findMany({
+      where: eq(contactTable.companyId, me.companyId),
+    });
+    audienceMeta = { kind: "all", value: "all" };
   }
 
-  const [campaign] = await db
+  // ── Schedule vs send-now ──
+  const scheduleAt =
+    scheduleMode === "later" && scheduleAtRaw ? new Date(scheduleAtRaw) : null;
+  const scheduledForFuture = !!scheduleAt && scheduleAt.getTime() > Date.now();
+
+  const [created] = await db
     .insert(campaignTable)
     .values({
       companyId: me.companyId,
       channelId: channel.id,
       name,
-      audience: { kind: audience === "all" ? "all" : "tag", value: audience },
-      status: "running",
-      stats: { total: contacts.length, sent: 0 },
+      templateName: templateName || null,
+      audience: audienceMeta,
+      scheduleAt: scheduledForFuture ? scheduleAt : null,
+      status: scheduledForFuture ? "scheduled" : "sending",
+      stats: { total: contacts.length, sent: 0, delivered: 0, read: 0, replied: 0 },
     })
     .returning();
+
+  // Scheduled campaigns are left for a dispatcher — do not send inline.
+  if (scheduledForFuture) {
+    revalidatePath("/campaigns");
+    return;
+  }
 
   let sent = 0;
   for (const c of contacts) {
@@ -83,8 +130,8 @@ export async function createAndSendCampaign(formData: FormData) {
 
   await db
     .update(campaignTable)
-    .set({ status: "completed", stats: { total: contacts.length, sent } })
-    .where(eq(campaignTable.id, campaign.id));
+    .set({ status: "completed", stats: { total: contacts.length, sent, delivered: 0, read: 0, replied: 0 } })
+    .where(eq(campaignTable.id, created.id));
 
   revalidatePath("/campaigns");
   revalidatePath("/inbox");
