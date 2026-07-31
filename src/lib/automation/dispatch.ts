@@ -115,8 +115,14 @@ export async function handleErpWebhook(payload: ErpWebhookPayload) {
   const automations = [...webhookAutomations, ...callbackAutomations];
 
   const runs: string[] = [];
-  for (const a of automations) {
+  for (const a of webhookAutomations) {
     const run = await startRun(a.id, contact.id);
+    if (run) runs.push(run.id);
+  }
+  // ACTION_CALLBACK: pass the matched callback id so a multi-entry flow starts
+  // from the trigger node configured for exactly this callback.
+  for (const a of callbackAutomations) {
+    const run = await startRun(a.id, contact.id, { callbackId: callbackKey ?? undefined });
     if (run) runs.push(run.id);
   }
 
@@ -343,4 +349,44 @@ export async function handleInboundMessage(
     if (run) started++;
   }
   return { resumed: 0, started };
+}
+
+/**
+ * A tag was added to a contact (manually in the inbox, or by a flow's Add Tag
+ * node). Fire the company's enabled TAG_ADDED automations whose trigger is
+ * configured for this tag (empty keyword list = any tag). This is the dispatch
+ * seam for Seampify's "When A Tag is Added" trigger, which previously had no
+ * runtime path. Guards against stacking a second concurrent run per automation.
+ */
+export async function handleTagAdded(
+  companyId: string,
+  contactId: string,
+  tagName: string
+) {
+  const db = getDb();
+  const autos = await db.query.automation.findMany({
+    where: and(
+      eq(automationTable.companyId, companyId),
+      eq(automationTable.enabled, true),
+      eq(automationTable.triggerType, "TAG_ADDED")
+    ),
+  });
+  let started = 0;
+  for (const a of autos) {
+    const cfg = (a.triggerConfig ?? {}) as { keywords?: string[] };
+    const keywords = Array.isArray(cfg.keywords) ? cfg.keywords : [];
+    // Empty keyword list = fire on any tag; otherwise only the configured tags.
+    if (keywords.length > 0 && !keywords.includes(tagName)) continue;
+    const active = await db.query.automationRun.findFirst({
+      where: and(
+        eq(automationRunTable.automationId, a.id),
+        eq(automationRunTable.contactId, contactId),
+        inArray(automationRunTable.status, ["running", "waiting"])
+      ),
+    });
+    if (active) continue;
+    const run = await startRun(a.id, contactId, { tag: tagName });
+    if (run) started++;
+  }
+  return started;
 }

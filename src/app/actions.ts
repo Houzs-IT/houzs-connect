@@ -5,15 +5,22 @@ import { and, eq } from "drizzle-orm";
 import { getCurrentMember } from "@/lib/current-member";
 import { getDb } from "@/db/client";
 import {
+  contact,
   contactTag,
   conversation,
   conversationTag,
   message,
   note,
   payment,
+  tag,
 } from "@/db/schema";
 import { recordInbound } from "@/lib/whatsapp/transport";
-import { handleCustomerReply, handleReceipt, handleInboundMessage } from "@/lib/automation/dispatch";
+import {
+  handleCustomerReply,
+  handleReceipt,
+  handleInboundMessage,
+  handleTagAdded,
+} from "@/lib/automation/dispatch";
 
 /** Demo-mode send: records an outbound agent message on the conversation. */
 export async function sendMessage(formData: FormData) {
@@ -103,6 +110,11 @@ export async function toggleConversationTag(formData: FormData) {
       .delete(contactTag)
       .where(and(eq(contactTag.contactId, convo.contactId), eq(contactTag.tagId, tagId)));
   } else {
+    // Only newly-added tags should fire the TAG_ADDED automations, so detect
+    // whether the contact already had this tag before inserting.
+    const already = await db.query.contactTag.findFirst({
+      where: and(eq(contactTag.contactId, convo.contactId), eq(contactTag.tagId, tagId)),
+    });
     await db
       .insert(conversationTag)
       .values({ conversationId, tagId })
@@ -111,6 +123,16 @@ export async function toggleConversationTag(formData: FormData) {
       .insert(contactTag)
       .values({ contactId: convo.contactId, tagId })
       .onConflictDoNothing();
+
+    if (!already) {
+      const [tagRow, contactRow] = await Promise.all([
+        db.query.tag.findFirst({ where: eq(tag.id, tagId) }),
+        db.query.contact.findFirst({ where: eq(contact.id, convo.contactId) }),
+      ]);
+      if (tagRow && contactRow) {
+        await handleTagAdded(contactRow.companyId, contactRow.id, tagRow.name);
+      }
+    }
   }
   revalidatePath(`/inbox/${conversationId}`);
   revalidatePath("/inbox");
