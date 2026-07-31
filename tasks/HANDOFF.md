@@ -51,6 +51,14 @@ is now stable, so only JSX/styles change).
 Everything the owner listed is now built and verified end-to-end in DEMO:
 - **Automation engine + visual builder** — trigger → node graph; react-flow canvas
   (add/move/connect nodes, node inspector, save); nodes incl. AI agent reply.
+  - **`call_rest_api` is LIVE outbound HTTP** (`src/lib/automation/rest.ts`), no longer a
+    demo no-op: vars interpolate into URL/headers/body, http(s) only, 10s timeout, and any
+    failure (bad URL, refused, timeout, non-2xx) is logged on the run while the flow
+    continues. Optional "save response to attribute". Covered by
+    `scripts/smoke-rest-api.mjs` (loopback only — CI never calls a real endpoint).
+    NOTE: enabling a migrated Seampify flow therefore makes REAL POSTs to the owner's
+    Google Apps Script `/exec` endpoints (that is the intent — it is how the Sheet is
+    written — but it is a real side effect the moment a flow is switched on).
 - **Payments — receipt OCR → auto-record** (`src/lib/ocr.ts` + `handleReceipt`):
   customer sends a slip → OCR parses amount/ref/method → Payment (auto-VERIFIED when it
   matches the order total, else PENDING) → `/payments` review. LIVE: swap OCR for a

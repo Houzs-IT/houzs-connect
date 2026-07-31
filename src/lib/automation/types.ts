@@ -82,8 +82,12 @@ export interface FlowNode {
     status?: string;
     unit?: string;
     amount?: number;
+    // call_rest_api
     method?: string;
     url?: string;
+    body?: string;
+    headers?: string; // JSON object text, or "Key: value" lines
+    saveResponseTo?: string; // contact attribute to store the response body in
     rules?: CriteriaRule[];
     timeoutMinutes?: number;
     // trigger
