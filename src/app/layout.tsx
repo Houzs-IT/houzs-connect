@@ -1,13 +1,21 @@
 import type { Metadata } from "next";
-import { IBM_Plex_Sans, IBM_Plex_Mono } from "next/font/google";
+import { Plus_Jakarta_Sans, Manrope, IBM_Plex_Mono } from "next/font/google";
 import "./globals.css";
 
-// Houzs brand type: IBM Plex Sans for UI, IBM Plex Mono for IDs/phones/money.
-// CJK (中文) falls through to Noto Sans SC by glyph coverage (see globals.css stack).
-const plexSans = IBM_Plex_Sans({
+// Houzs brand type — matches the Houzs ERP frontend exactly (its index.html loads
+// Plus Jakarta Sans + Manrope + IBM Plex Mono): Plus Jakarta Sans for UI/body,
+// Manrope for display/headings, IBM Plex Mono for IDs/phones/money. CJK (中文)
+// falls through to Noto Sans SC by glyph coverage (see globals.css stack).
+const jakarta = Plus_Jakarta_Sans({
   subsets: ["latin"],
   weight: ["400", "500", "600", "700"],
-  variable: "--font-plex-sans",
+  variable: "--font-jakarta",
+  display: "swap",
+});
+const manrope = Manrope({
+  subsets: ["latin"],
+  weight: ["400", "500", "600", "700", "800"],
+  variable: "--font-manrope",
   display: "swap",
 });
 const plexMono = IBM_Plex_Mono({
@@ -29,7 +37,7 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={`${plexSans.variable} ${plexMono.variable} h-full antialiased`}
+      className={`${jakarta.variable} ${manrope.variable} ${plexMono.variable} h-full antialiased`}
     >
       <body className="min-h-full">{children}</body>
     </html>

@@ -53,8 +53,10 @@
   --color-warning-soft: #f6efd9;
   --color-info: #16695f;
 
-  --font-sans: var(--font-plex-sans), "Noto Sans SC", ui-sans-serif, system-ui,
+  --font-sans: var(--font-jakarta), "Noto Sans SC", ui-sans-serif, system-ui,
     sans-serif;
+  --font-display: var(--font-manrope), var(--font-jakarta), "Noto Sans SC",
+    ui-sans-serif, system-ui, sans-serif;
   --font-mono: var(--font-plex-mono), ui-monospace, "SFMono-Regular", monospace;
 
   --radius: 0.625rem; /* 10px — card */
@@ -72,6 +74,9 @@
     color: var(--color-ink);
     font-family: var(--font-sans);
     -webkit-font-smoothing: antialiased;
+  }
+  h1, h2, h3, h4, h5, h6 {
+    font-family: var(--font-display);
   }
   /* CJK needs a hair more line-height; never tight tracking below 0.02em. */
   :lang(zh) {
