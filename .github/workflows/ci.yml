@@ -1,0 +1,64 @@
+name: CI
+
+# PR-level gate. Connect otherwise only has deploy-on-main (deploy.yml), so a PR
+# could merge blind. This proves, before merge, that the tree typechecks, lints,
+# the OpenNext/Cloudflare build succeeds on Linux (it cannot be built on the
+# Windows dev machine), and — crucially — that a human-built ACTION_CALLBACK
+# automation actually RUNS end to end when the ERP webhook fires it, asserted
+# against a real Postgres by scripts/smoke-trigger.mjs.
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      # Plain CI service container speaks no TLS -> sslmode=disable (getSql honors it).
+      DATABASE_URL: "postgres://postgres:postgres@localhost:5432/postgres?sslmode=disable"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - name: Install deps
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        run: pnpm exec tsc --noEmit
+
+      - name: Lint
+        run: pnpm run lint
+
+      - name: Trigger smoke test (real Postgres, real engine)
+        run: node scripts/smoke-trigger.mjs
+
+      - name: Build (OpenNext, Linux)
+        # Mirrors deploy.yml's build; the placeholder Hyperdrive URL lets the
+        # build resolve its binding without any real Cloudflare credentials
+        # (deploy — which needs the token — is NOT run here).
+        env:
+          CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE: "postgresql://user:pass@localhost:5432/placeholder"
+        run: pnpm run cf:build

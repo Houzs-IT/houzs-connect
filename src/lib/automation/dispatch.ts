@@ -75,14 +75,44 @@ export async function handleErpWebhook(payload: ErpWebhookPayload) {
     payload: payload as object,
   });
 
-  // Find enabled WEBHOOK automations (optionally filtered by name).
-  const conds = [
+  // The "Action Callback Id" the Sheet/ERP sends: `automation` is the canonical
+  // field, but the live Apps Script sometimes flattens it as `attributes.status`.
+  const callbackKey = payload.automation ?? payload.attributes?.status;
+
+  // (1) WEBHOOK automations — matched by name (unchanged legacy behaviour).
+  const webhookConds = [
     eq(automationTable.companyId, company.id),
     eq(automationTable.enabled, true),
     eq(automationTable.triggerType, "WEBHOOK"),
   ];
-  if (payload.automation) conds.push(eq(automationTable.name, payload.automation));
-  const automations = await db.query.automation.findMany({ where: and(...conds) });
+  if (payload.automation) webhookConds.push(eq(automationTable.name, payload.automation));
+  const webhookAutomations = await db.query.automation.findMany({
+    where: and(...webhookConds),
+  });
+
+  // (2) ACTION_CALLBACK automations — matched by the trigger's configured
+  // callbackId (Seampify's "Action Callback Id Matches: <id>"). JSON-key match is
+  // done in-app since the value lives inside triggerConfig jsonb. keywords is kept
+  // as a fallback for older configs that stored a list instead of a single id.
+  let callbackAutomations: typeof webhookAutomations = [];
+  if (callbackKey) {
+    const enabledCallbackAutos = await db.query.automation.findMany({
+      where: and(
+        eq(automationTable.companyId, company.id),
+        eq(automationTable.enabled, true),
+        eq(automationTable.triggerType, "ACTION_CALLBACK")
+      ),
+    });
+    callbackAutomations = enabledCallbackAutos.filter((a) => {
+      const cfg = (a.triggerConfig ?? {}) as { callbackId?: string; keywords?: string[] };
+      if (cfg.callbackId && cfg.callbackId === callbackKey) return true;
+      return Array.isArray(cfg.keywords) && cfg.keywords.includes(callbackKey);
+    });
+  }
+
+  // A given automation is either WEBHOOK or ACTION_CALLBACK (distinct triggerType),
+  // so the two sets never overlap.
+  const automations = [...webhookAutomations, ...callbackAutomations];
 
   const runs: string[] = [];
   for (const a of automations) {

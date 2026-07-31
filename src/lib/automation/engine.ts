@@ -260,6 +260,46 @@ async function execNode(
       return { next: nextNodeId(ctx.graph, node.id) };
     }
 
+    case "opt_in":
+    case "opt_out": {
+      await db
+        .update(contactTable)
+        .set({ marketingOptIn: node.type === "opt_in" })
+        .where(eq(contactTable.id, ctx.contactId));
+      await logStep(ctx.runId, { node: node.id, type: node.type });
+      return { next: nextNodeId(ctx.graph, node.id) };
+    }
+
+    case "add_to_drip":
+    case "remove_from_drip": {
+      // STUB: record intent onto the contact so a flow can branch on it; a real
+      // drip enrolment engine is future work.
+      if (d.campaignName) {
+        await setContactAttr(
+          ctx.contactId,
+          "drip_campaign",
+          node.type === "add_to_drip" ? String(d.campaignName) : ""
+        );
+      }
+      await logStep(ctx.runId, {
+        node: node.id,
+        type: node.type,
+        campaign: d.campaignName,
+        stub: true,
+      });
+      return { next: nextNodeId(ctx.graph, node.id) };
+    }
+
+    case "google_sheets":
+    case "eval":
+    case "jump_to_automation": {
+      // STUB: config is captured + persisted in the graph and the run continues,
+      // but the side effect is not executed yet (see report). Kept as a
+      // pass-through so a flow built around it does not dead-end.
+      await logStep(ctx.runId, { node: node.id, type: node.type, stub: true });
+      return { next: nextNodeId(ctx.graph, node.id) };
+    }
+
     case "delay":
       await logStep(ctx.runId, { node: node.id, type: node.type, unit: d.unit, amount: d.amount });
       return { pause: "delay" };

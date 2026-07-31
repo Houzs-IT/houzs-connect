@@ -46,6 +46,11 @@ export function getSql(databaseUrl: string): Sql {
 
   const isHyperdrive = /hyperdrive\.local/i.test(databaseUrl);
 
+  // Opt-in escape hatch for a plain, non-TLS Postgres (CI service container, local
+  // `docker run postgres`). Only triggers when the URL explicitly asks for it, so
+  // prod/dev Supabase URLs (which never carry sslmode=disable) keep TLS untouched.
+  const sslDisabled = /[?&]sslmode=disable\b/i.test(databaseUrl);
+
   return isHyperdrive
     ? postgres(databaseUrl, {
         max: 1,
@@ -59,7 +64,8 @@ export function getSql(databaseUrl: string): Sql {
         // terminated origin-side). Still TLS-encrypted, but don't verify the
         // chain: some dev machines run TLS-intercepting AV/proxies that present a
         // self-signed root, which trips a full chain check (SELF_SIGNED_CERT_IN_CHAIN).
-        ssl: { rejectUnauthorized: false },
+        // sslmode=disable turns TLS off entirely for a plain CI/local Postgres.
+        ssl: sslDisabled ? false : { rejectUnauthorized: false },
         prepare: false,
         max: 1,
         idle_timeout: 20,
