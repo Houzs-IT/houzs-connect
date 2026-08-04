@@ -192,11 +192,22 @@ export const channel = connect.table(
     companyId: text("company_id").notNull(),
     displayName: text("display_name").notNull(),
     phone: text("phone").notNull(),
+    // Meta WhatsApp Cloud API phone-number id for THIS channel. This is what
+    // makes the platform multi-tenant: inbound webhooks carry
+    // value.metadata.phone_number_id, which we map here -> channel -> company, so
+    // a message that arrived on company A's number lands in company A's inbox.
+    // Outbound sends use it as the /{phone_number_id}/messages path. NULL for a
+    // DEMO channel that has no live number yet. Unique (NULLs are distinct in PG,
+    // so many DEMO/null channels coexist) so two companies cannot claim one number.
+    phoneNumberId: text("phone_number_id"),
     provider: text("provider").notNull().default("whatsapp"),
     mode: text("mode").notNull().default("DEMO"),
     isDefault: boolean("is_default").notNull().default(false),
   },
-  (t) => ({ companyIdx: index("channel_company_idx").on(t.companyId) })
+  (t) => ({
+    companyIdx: index("channel_company_idx").on(t.companyId),
+    phoneNumberIdKey: uniqueIndex("channel_phone_number_id_key").on(t.phoneNumberId),
+  })
 );
 
 // ─────────────────────────── Contacts / CRM ───────────────────────────

@@ -1,23 +1,24 @@
-// WhatsApp Cloud API (Meta) — the LIVE transport. Activated when WHATSAPP_MODE=LIVE and
-// the env is set (WHATSAPP_TOKEN, WHATSAPP_PHONE_NUMBER_ID). In DEMO these functions are
-// no-ops so the app runs without a Meta account; flip the env to go live with no other
-// code change. Docs: https://developers.facebook.com/docs/whatsapp/cloud-api
+// WhatsApp Cloud API (Meta) — the LIVE transport. Activated when WHATSAPP_MODE=LIVE
+// and WHATSAPP_TOKEN is set. In DEMO these are no-ops so the app runs without a Meta
+// account. MULTI-TENANT: the phone-number id is passed PER CALL (from the sending
+// channel — channel.phoneNumberId), NOT read from env. One Meta Business + one
+// System-User token (WHATSAPP_TOKEN) serves every company's number; the send path
+// just switches the /{phone_number_id}/messages target per channel.
+// Docs: https://developers.facebook.com/docs/whatsapp/cloud-api
 import type { FlowButton } from "@/lib/automation/types";
 
 export function isLive(): boolean {
-  return (
-    process.env.WHATSAPP_MODE === "LIVE" &&
-    !!process.env.WHATSAPP_TOKEN &&
-    !!process.env.WHATSAPP_PHONE_NUMBER_ID
-  );
+  return process.env.WHATSAPP_MODE === "LIVE" && !!process.env.WHATSAPP_TOKEN;
 }
 
 const GRAPH = "https://graph.facebook.com/v21.0";
 
-async function post(payload: Record<string, unknown>): Promise<string | null> {
-  const phoneId = process.env.WHATSAPP_PHONE_NUMBER_ID!;
+async function post(
+  phoneNumberId: string,
+  payload: Record<string, unknown>
+): Promise<string | null> {
   const token = process.env.WHATSAPP_TOKEN!;
-  const res = await fetch(`${GRAPH}/${phoneId}/messages`, {
+  const res = await fetch(`${GRAPH}/${phoneNumberId}/messages`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${token}`,
@@ -35,20 +36,26 @@ async function post(payload: Record<string, unknown>): Promise<string | null> {
   return json?.messages?.[0]?.id ?? null;
 }
 
-/** Send a plain text message. Returns the Meta message id (for status reconciliation). */
-export async function sendText(to: string, body: string): Promise<string | null> {
-  if (!isLive()) return null;
-  return post({ to, type: "text", text: { body } });
+/** Send a plain text message from a specific channel's number. Returns the Meta
+ *  message id (for status reconciliation). */
+export async function sendText(
+  phoneNumberId: string,
+  to: string,
+  body: string
+): Promise<string | null> {
+  if (!isLive() || !phoneNumberId) return null;
+  return post(phoneNumberId, { to, type: "text", text: { body } });
 }
 
 /** Send interactive reply buttons (max 3, per Cloud API limits). */
 export async function sendButtons(
+  phoneNumberId: string,
   to: string,
   body: string,
   buttons: FlowButton[]
 ): Promise<string | null> {
-  if (!isLive()) return null;
-  return post({
+  if (!isLive() || !phoneNumberId) return null;
+  return post(phoneNumberId, {
     to,
     type: "interactive",
     interactive: {
@@ -64,15 +71,16 @@ export async function sendButtons(
   });
 }
 
-/** Send an approved template message. */
+/** Send an approved template message from a specific channel's number. */
 export async function sendTemplate(
+  phoneNumberId: string,
   to: string,
   name: string,
   languageCode = "en",
   components?: unknown[]
 ): Promise<string | null> {
-  if (!isLive()) return null;
-  return post({
+  if (!isLive() || !phoneNumberId) return null;
+  return post(phoneNumberId, {
     to,
     type: "template",
     template: { name, language: { code: languageCode }, ...(components ? { components } : {}) },

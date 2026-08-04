@@ -1,9 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import { and, asc, desc, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { getDb } from "@/db/client";
 import {
   channel as channelTable,
-  company as companyTable,
   contact as contactTable,
   message as messageTable,
 } from "@/db/schema";
@@ -48,22 +47,13 @@ export async function POST(req: NextRequest) {
 
   const db = getDb();
 
-  // Single-tenant resolve: first company + its default channel. Multi-tenant would map
-  // value.metadata.phone_number_id -> Channel.
-  const company = await db.query.company.findFirst({ orderBy: asc(companyTable.createdAt) });
-  const channel = company
-    ? await db.query.channel.findFirst({
-        where: eq(channelTable.companyId, company.id),
-        orderBy: desc(channelTable.isDefault),
-      })
-    : null;
-
   for (const entry of body.entry) {
     for (const change of entry.changes ?? []) {
       const value = change.value;
       if (!value) continue;
 
-      // Delivery/read statuses -> update our message row.
+      // Delivery/read statuses -> update our message row. Keyed by waMessageId, so
+      // it needs no channel/company context.
       for (const s of value.statuses ?? []) {
         const map: Record<string, string> = { sent: "SENT", delivered: "DELIVERED", read: "READ", failed: "FAILED" };
         const status = map[s.status];
@@ -75,7 +65,26 @@ export async function POST(req: NextRequest) {
         }
       }
 
-      if (!company || !channel) continue;
+      // MULTI-TENANT ROUTING. The number that RECEIVED this message identifies which
+      // company owns the conversation: map value.metadata.phone_number_id -> the
+      // channel that carries it -> its company. This replaces the old single-tenant
+      // "first company + default channel" resolve, so a message to company A's number
+      // lands in company A's inbox, scoped to company A's contacts.
+      const phoneNumberId = value.metadata?.phone_number_id;
+      const channel = phoneNumberId
+        ? await db.query.channel.findFirst({
+            where: eq(channelTable.phoneNumberId, phoneNumberId),
+          })
+        : null;
+      if (!channel) {
+        // No channel is bound to this number yet — don't guess a company (that would
+        // cross-tenant-leak the contact). Statuses above are already handled.
+        if (value.messages?.length) {
+          console.warn("WA_INBOUND_NO_CHANNEL", { phoneNumberId });
+        }
+        continue;
+      }
+      const companyId = channel.companyId;
 
       const nameByWaId = new Map((value.contacts ?? []).map((c) => [c.wa_id, c.profile?.name]));
       for (const m of value.messages ?? []) {
@@ -83,7 +92,7 @@ export async function POST(req: NextRequest) {
         const [contact] = await db
           .insert(contactTable)
           .values({
-            companyId: company.id,
+            companyId,
             phone,
             name: nameByWaId.get(m.from) ?? null,
             source: "whatsapp",

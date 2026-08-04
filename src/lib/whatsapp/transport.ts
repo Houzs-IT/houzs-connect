@@ -71,16 +71,20 @@ export async function sendOutbound(
     .set({ lastMessageAt: new Date() })
     .where(eq(conversation.id, conversationId));
 
-  // LIVE: actually send via the Meta Cloud API and stamp the returned message id.
+  // LIVE: send via the Cloud API from the conversation's OWN channel number, so a
+  // reply / automation for company A's customer goes out on company A's WhatsApp
+  // (multi-tenant). Needs the channel to be LIVE and carry a phoneNumberId; a DEMO
+  // channel (or one with no number yet) just records the row above and stops here.
   if (isLive()) {
     const convo = await db.query.conversation.findFirst({
       where: eq(conversation.id, conversationId),
-      with: { contact: true },
+      with: { contact: true, channel: true },
     });
-    if (convo) {
+    const phoneNumberId = convo?.channel?.phoneNumberId;
+    if (convo && phoneNumberId && convo.channel.mode === "LIVE") {
       const waId = interactive
-        ? await sendButtons(convo.contact.phone, body, opts.buttons ?? [])
-        : await sendText(convo.contact.phone, body);
+        ? await sendButtons(phoneNumberId, convo.contact.phone, body, opts.buttons ?? [])
+        : await sendText(phoneNumberId, convo.contact.phone, body);
       if (waId) {
         await db
           .update(message)
