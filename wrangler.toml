@@ -30,9 +30,11 @@ directory = ".open-next/assets"
 binding = "ASSETS"
 
 [vars]
-# DEMO stubs WhatsApp (no Meta account needed). Flip to LIVE + set the Meta
-# secrets (wrangler secret put) to send/receive via the Cloud API.
-WHATSAPP_MODE = "DEMO"
+# LIVE since 2026-08-15: the Meta app, WABA and number are set up and the four
+# WHATSAPP_* secrets are on the Worker, so sends go out over the Cloud API for
+# real. DEMO stubs Meta entirely and only records message rows — put it back to
+# DEMO if you ever need to exercise flows without messaging customers.
+WHATSAPP_MODE = "LIVE"
 
 [observability]
 enabled = true
