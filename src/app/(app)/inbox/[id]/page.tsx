@@ -6,6 +6,8 @@ import { Thread } from "@/components/inbox/Thread";
 import { Composer } from "@/components/inbox/Composer";
 import { ContactPanel } from "@/components/inbox/ContactPanel";
 import { DemoReplyBar } from "@/components/inbox/DemoReplyBar";
+import { WindowTimer } from "@/components/inbox/WindowTimer";
+import { getCurrentMember } from "@/lib/current-member";
 import { attrs, initials, tint } from "@/lib/format";
 
 /**
@@ -22,6 +24,8 @@ export default async function ConversationPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
+  const me = await getCurrentMember();
+  if (!me) notFound();
   const db = getDb();
 
   const convo = await db.query.conversation.findFirst({
@@ -37,7 +41,10 @@ export default async function ConversationPage({
       },
     },
   });
-  if (!convo) notFound();
+  // A conversation id is guessable and the list page's visibility filter does
+  // not protect this route — without the company check any signed-in member
+  // could read another tenant's thread, phone number and order attributes.
+  if (!convo || convo.contact.companyId !== me.companyId) notFound();
 
   // Newest-first off the index, oldest-first on screen.
   const messages = convo.messages.slice().reverse();
@@ -47,8 +54,15 @@ export default async function ConversationPage({
       where: eq(contactField.companyId, convo.contact.companyId),
       orderBy: asc(contactField.createdAt),
     }),
-    db.query.member.findMany({ orderBy: asc(member.name) }),
-    db.query.department.findMany({ orderBy: asc(department.name) }),
+    // Assignment pickers must not offer another company's staff.
+    db.query.member.findMany({
+      where: eq(member.companyId, me.companyId),
+      orderBy: asc(member.name),
+    }),
+    db.query.department.findMany({
+      where: eq(department.companyId, me.companyId),
+      orderBy: asc(department.name),
+    }),
     db.query.tag.findMany({ where: eq(tag.companyId, convo.contact.companyId) }),
   ]);
 
@@ -78,9 +92,7 @@ export default async function ConversationPage({
             <span className="rounded-full border border-[var(--color-border)] bg-[var(--color-surface-2)] px-2.5 py-1 text-[11px] font-medium text-[var(--color-muted)]">
               {convo.status}
             </span>
-            <span className="rounded-full border border-[color-mix(in_srgb,var(--color-success)_35%,transparent)] bg-[color-mix(in_srgb,var(--color-success)_10%,transparent)] px-2.5 py-1 text-[11px] font-medium text-[var(--color-success)]">
-              23h 49m window
-            </span>
+            <WindowTimer expiresAt={convo.windowExpiresAt?.toISOString() ?? null} />
           </div>
         </div>
 

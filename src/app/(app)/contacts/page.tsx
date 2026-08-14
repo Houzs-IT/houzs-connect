@@ -1,7 +1,8 @@
-import { desc } from "drizzle-orm";
+import { desc, eq } from "drizzle-orm";
 import { getDb } from "@/db/client";
 import { contact } from "@/db/schema";
 import { PageChrome } from "@/components/PageChrome";
+import { getCurrentMember } from "@/lib/current-member";
 import { attrs, initials, tint } from "@/lib/format";
 
 /**
@@ -13,10 +14,15 @@ import { attrs, initials, tint } from "@/lib/format";
 const PAGE_SIZE = 200;
 
 export default async function ContactsPage() {
+  const me = await getCurrentMember();
+  if (!me) return null;
   const db = getDb();
+  // Both the count and the rows are scoped to the member's company. Neither was
+  // before, so this page listed every tenant's customers and their phone numbers.
   const [total, contacts] = await Promise.all([
-    db.$count(contact),
+    db.$count(contact, eq(contact.companyId, me.companyId)),
     db.query.contact.findMany({
+      where: eq(contact.companyId, me.companyId),
       orderBy: desc(contact.createdAt),
       limit: PAGE_SIZE,
       with: { tagLinks: { with: { tag: true } } },
