@@ -35,6 +35,7 @@ const SECTIONS: { title: string; items: NavItem[] }[] = [
       { href: "/automations", label: "Automations", Icon: IconAutomation },
       { href: "/payments", label: "Payments", Icon: IconReceipt },
       { href: "/campaigns", label: "Campaigns", Icon: IconCampaign },
+      { href: "/templates", label: "Templates", Icon: IconForm },
       { href: "/forms", label: "WhatsApp Forms", Icon: IconForm },
     ],
   },

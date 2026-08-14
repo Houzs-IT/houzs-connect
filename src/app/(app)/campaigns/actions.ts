@@ -12,8 +12,12 @@ import {
 } from "@/db/schema";
 import { getCurrentMember } from "@/lib/current-member";
 import { getOrCreateConversation, sendOutbound } from "@/lib/whatsapp/transport";
-import { interpolate } from "@/lib/automation/vars";
+import { isLive } from "@/lib/whatsapp/cloud-api";
+import { extractParams, interpolate } from "@/lib/automation/vars";
 import { attrs } from "@/lib/format";
+
+/** Campaign copy is authored in one language today; Meta needs it named. */
+const TEMPLATE_LANG = "en";
 
 /**
  * Create a one-time broadcast campaign and (unless scheduled for later) send it
@@ -92,6 +96,39 @@ export async function createAndSendCampaign(formData: FormData) {
     audienceMeta = { kind: "all", value: "all" };
   }
 
+  // A broadcast is promotional by definition, so it must obey the contact's
+  // opt-out. The `opt_out` automation node and the inbox toggle both write
+  // marketingOptIn — nothing read it until now, so an unsubscribed customer
+  // still received every blast. Meta scores that as a quality signal against
+  // the number, so this is not only a courtesy.
+  const audienceBeforeOptOut = contacts.length;
+  contacts = contacts.filter((c) => c.marketingOptIn);
+  const optedOut = audienceBeforeOptOut - contacts.length;
+
+  // LIVE sends outside the 24-hour window MUST be a template — Meta rejects
+  // free-form text there, and a broadcast is business-initiated by definition.
+  // Fail loudly at creation rather than logging N rejected sends.
+  if (isLive() && !templateName) {
+    await db.insert(campaignTable).values({
+      companyId: me.companyId,
+      channelId: channel.id,
+      name,
+      templateName: null,
+      audience: audienceMeta,
+      status: "failed",
+      stats: {
+        total: audienceBeforeOptOut,
+        sent: 0,
+        delivered: 0,
+        read: 0,
+        replied: 0,
+        error: "No approved template chosen — WhatsApp rejects free-form broadcasts.",
+      },
+    });
+    revalidatePath("/campaigns");
+    return;
+  }
+
   // ── Schedule vs send-now ──
   const scheduleAt =
     scheduleMode === "later" && scheduleAtRaw ? new Date(scheduleAtRaw) : null;
@@ -119,18 +156,39 @@ export async function createAndSendCampaign(formData: FormData) {
 
   let sent = 0;
   for (const c of contacts) {
+    const varCtx = { full_name: c.name, phone: c.phone, attributes: c.attributes };
     const convo = await getOrCreateConversation(channel.id, c.id);
-    await sendOutbound(
-      convo.id,
-      interpolate(message, { full_name: c.name, phone: c.phone, attributes: c.attributes }),
-      { isBot: true, type: "TEMPLATE" }
-    );
+    await sendOutbound(convo.id, interpolate(message, varCtx), {
+      isBot: true,
+      type: "TEMPLATE",
+      // The approved template carries the copy; the {{var}} placeholders the
+      // operator wrote map positionally onto its {{1}}, {{2}}, … parameters.
+      ...(templateName
+        ? {
+            template: {
+              name: templateName,
+              lang: TEMPLATE_LANG,
+              params: extractParams(message, varCtx),
+            },
+          }
+        : {}),
+    });
     sent++;
   }
 
   await db
     .update(campaignTable)
-    .set({ status: "completed", stats: { total: contacts.length, sent, delivered: 0, read: 0, replied: 0 } })
+    .set({
+      status: "completed",
+      stats: {
+        total: audienceBeforeOptOut,
+        sent,
+        delivered: 0,
+        read: 0,
+        replied: 0,
+        ...(optedOut > 0 ? { skippedOptedOut: optedOut } : {}),
+      },
+    })
     .where(eq(campaignTable.id, created.id));
 
   revalidatePath("/campaigns");
