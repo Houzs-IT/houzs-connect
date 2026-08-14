@@ -21,6 +21,30 @@ import {
   handleInboundMessage,
   handleTagAdded,
 } from "@/lib/automation/dispatch";
+import { isLive } from "@/lib/whatsapp/cloud-api";
+
+/**
+ * A signed-in member, and the conversation must be in THEIR company.
+ *
+ * Server actions are reachable by anyone who can POST — the (app) layout's
+ * redirect only guards page rendering, not these. Every mutation below used to
+ * take a conversationId and act on it with no check at all, which meant an
+ * unauthenticated caller could reassign conversations, close them, retag them,
+ * or mark a payment verified. The company check matters too: an id from another
+ * tenant is not this member's to touch.
+ */
+async function authorizeConversation(conversationId: string) {
+  if (!conversationId) return null;
+  const me = await getCurrentMember();
+  if (!me) return null;
+  const db = getDb();
+  const convo = await db.query.conversation.findFirst({
+    where: eq(conversation.id, conversationId),
+    with: { contact: true },
+  });
+  if (!convo || convo.contact.companyId !== me.companyId) return null;
+  return { me, db, convo };
+}
 
 /** Demo-mode send: records an outbound agent message on the conversation. */
 export async function sendMessage(formData: FormData) {
@@ -29,9 +53,9 @@ export async function sendMessage(formData: FormData) {
   const kind = String(formData.get("kind") ?? "reply"); // reply | note
   if (!conversationId || !body) return;
 
-  const db = getDb();
-  const me = await getCurrentMember();
-  if (!me) return;
+  const auth = await authorizeConversation(conversationId);
+  if (!auth) return;
+  const { me, db } = auth;
 
   if (kind === "note") {
     await db.insert(note).values({ conversationId, memberId: me.id, body });
@@ -65,7 +89,9 @@ export async function assignConversation(formData: FormData) {
   if (formData.has("assignedDepartmentId")) set.assignedDepartmentId = departmentId || null;
   if (!Object.keys(set).length) return;
 
-  const db = getDb();
+  const auth = await authorizeConversation(conversationId);
+  if (!auth) return;
+  const { db } = auth;
   await db.update(conversation).set(set).where(eq(conversation.id, conversationId));
   revalidatePath(`/inbox/${conversationId}`);
   revalidatePath("/inbox");
@@ -77,7 +103,9 @@ export async function setConversationStatus(formData: FormData) {
   const status = String(formData.get("status") ?? "OPEN").toUpperCase();
   if (!conversationId || !["OPEN", "CLOSED", "QUEUE", "PENDING"].includes(status)) return;
 
-  const db = getDb();
+  const auth = await authorizeConversation(conversationId);
+  if (!auth) return;
+  const { db } = auth;
   await db
     .update(conversation)
     .set({
@@ -96,11 +124,9 @@ export async function toggleConversationTag(formData: FormData) {
   const remove = formData.get("remove") === "1";
   if (!conversationId || !tagId) return;
 
-  const db = getDb();
-  const convo = await db.query.conversation.findFirst({
-    where: eq(conversation.id, conversationId),
-  });
-  if (!convo) return;
+  const auth = await authorizeConversation(conversationId);
+  if (!auth) return;
+  const { db, convo } = auth;
 
   if (remove) {
     await db
@@ -138,18 +164,27 @@ export async function toggleConversationTag(formData: FormData) {
   revalidatePath("/inbox");
 }
 
+/**
+ * The DEMO simulators below fabricate INBOUND customer activity, which drives
+ * the automation engine — and in LIVE that engine sends real WhatsApp messages
+ * and calls the owner's REST endpoints. They are refused outright once the
+ * Worker is LIVE, on top of the normal auth check.
+ */
+function demoOnly(): boolean {
+  return !isLive();
+}
+
 /** DEMO: simulate the customer tapping an interactive button, driving the automation. */
 export async function demoTap(formData: FormData) {
+  if (!demoOnly()) return;
   const conversationId = String(formData.get("conversationId") ?? "");
   const buttonId = String(formData.get("buttonId") ?? "");
   const buttonLabel = String(formData.get("buttonLabel") ?? "");
   if (!conversationId || !buttonId) return;
 
-  const db = getDb();
-  const convo = await db.query.conversation.findFirst({
-    where: eq(conversation.id, conversationId),
-  });
-  if (!convo) return;
+  const auth = await authorizeConversation(conversationId);
+  if (!auth) return;
+  const { convo } = auth;
   await recordInbound(conversationId, buttonLabel || buttonId, {
     type: "INTERACTIVE",
     interactivePayload: { tapped: buttonId },
@@ -161,9 +196,11 @@ export async function demoTap(formData: FormData) {
 
 /** DEMO: simulate the customer sending a payment receipt -> OCR -> record payment. */
 export async function demoSendReceipt(formData: FormData) {
+  if (!demoOnly()) return;
   const conversationId = String(formData.get("conversationId") ?? "");
   const text = String(formData.get("text") ?? "").trim();
   if (!conversationId || !text) return;
+  if (!(await authorizeConversation(conversationId))) return;
   await recordInbound(conversationId, `[receipt] ${text}`, { type: "IMAGE" });
   await handleReceipt(conversationId, text);
   revalidatePath(`/inbox/${conversationId}`);
@@ -177,7 +214,17 @@ export async function setPaymentStatus(formData: FormData) {
   const status = String(formData.get("status") ?? "");
   if (!paymentId || !["VERIFIED", "REJECTED", "PENDING"].includes(status)) return;
 
+  // Marking money received is exactly the action that must not be reachable
+  // without a session — and only for a payment in the member's own company.
+  const me = await getCurrentMember();
+  if (!me) return;
   const db = getDb();
+  const row = await db.query.payment.findFirst({
+    where: eq(payment.id, paymentId),
+    with: { contact: true },
+  });
+  if (!row || row.contact.companyId !== me.companyId) return;
+
   await db
     .update(payment)
     .set({ status: status as "VERIFIED" | "REJECTED" | "PENDING" })
@@ -187,15 +234,14 @@ export async function setPaymentStatus(formData: FormData) {
 
 /** DEMO: simulate the customer sending a free-text message (drives collect_input). */
 export async function demoCustomerText(formData: FormData) {
+  if (!demoOnly()) return;
   const conversationId = String(formData.get("conversationId") ?? "");
   const text = String(formData.get("text") ?? "").trim();
   if (!conversationId || !text) return;
 
-  const db = getDb();
-  const convo = await db.query.conversation.findFirst({
-    where: eq(conversation.id, conversationId),
-  });
-  if (!convo) return;
+  const auth = await authorizeConversation(conversationId);
+  if (!auth) return;
+  const { convo } = auth;
   await recordInbound(conversationId, text, { type: "TEXT" });
   await handleInboundMessage(convo.contactId, { text });
   revalidatePath(`/inbox/${conversationId}`);

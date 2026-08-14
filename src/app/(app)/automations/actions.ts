@@ -25,8 +25,29 @@ import {
 } from "@/lib/automation/dispatch";
 import { startRun } from "@/lib/automation/engine";
 import { getOrCreateConversation } from "@/lib/whatsapp/transport";
+import { getCurrentMember } from "@/lib/current-member";
 
 const MAX_VERSIONS = 10;
+
+/**
+ * A signed-in member, and the automation must belong to their company.
+ *
+ * None of these actions checked anything. Publishing an automation makes it
+ * fire on live customer events — sending WhatsApp messages and POSTing to the
+ * owner's Google Apps Script endpoints — so "anyone who can POST can enable a
+ * flow" was the most dangerous hole in the app.
+ */
+async function authorizeAutomation(automationId: string) {
+  if (!automationId) return null;
+  const me = await getCurrentMember();
+  if (!me) return null;
+  const db = getDb();
+  const row = await db.query.automation.findFirst({
+    where: eq(automation.id, automationId),
+  });
+  if (!row || row.companyId !== me.companyId) return null;
+  return { me, db, automation: row };
+}
 
 /**
  * Self-apply the version-history table at runtime. Connect ensures its `connect`
@@ -109,7 +130,9 @@ export async function saveAutomationGraph(
   graph: FlowGraph,
   opts: SaveOptions = {}
 ) {
-  const db = getDb();
+  const auth = await authorizeAutomation(automationId);
+  if (!auth) return { ok: false, version: null };
+  const { db } = auth;
 
   const set: Record<string, unknown> = {
     graph,
@@ -154,7 +177,9 @@ export async function saveAutomationGraph(
 
 /** Toggle an automation active/inactive. */
 export async function setAutomationEnabled(automationId: string, enabled: boolean) {
-  const db = getDb();
+  const auth = await authorizeAutomation(automationId);
+  if (!auth) return;
+  const { db } = auth;
   await db
     .update(automation)
     .set({ enabled, status: enabled ? "PUBLISHED" : "DRAFT" })
@@ -167,6 +192,7 @@ export async function setAutomationEnabled(automationId: string, enabled: boolea
 export async function listAutomationVersions(
   automationId: string
 ): Promise<AutomationVersionSnapshot[]> {
+  if (!(await authorizeAutomation(automationId))) return [];
   await ensureAutomationVersionTable();
   const db = getDb();
   const rows = await db
@@ -198,6 +224,9 @@ export async function restoreAutomationVersion(
   automationId: string,
   versionId: string
 ) {
+  if (!(await authorizeAutomation(automationId))) {
+    return { ok: false as const, error: "not found" };
+  }
   await ensureAutomationVersionTable();
   const db = getDb();
   const snap = await db.query.automationVersion.findFirst({
@@ -259,11 +288,10 @@ const TEST_CONTACT_ATTRS: Record<string, string> = {
  * so the test always produces a visible result.
  */
 export async function testRunAutomation(automationId: string) {
+  const authed = await authorizeAutomation(automationId);
+  if (!authed) return;
   const db = getDb();
-  const auto = await db.query.automation.findFirst({
-    where: eq(automation.id, automationId),
-  });
-  if (!auto) return;
+  const auto = authed.automation;
   const company = await db.query.company.findFirst({
     where: eq(companyTable.id, auto.companyId),
   });
