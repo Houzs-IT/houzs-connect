@@ -19,6 +19,8 @@ interface CloudflareEnv {
   WHATSAPP_TOKEN?: string;
   WHATSAPP_PHONE_NUMBER_ID?: string;
   WHATSAPP_VERIFY_TOKEN?: string;
+  /** WhatsApp Business Account id — needed to list/create message templates. */
+  WHATSAPP_WABA_ID?: string;
 
   // ERP org sync (see src/lib/sync/erp-org.ts + app/api/admin/sync-org).
   // ERP_API_BASE defaults to https://erp.houzscentury.com when unset.

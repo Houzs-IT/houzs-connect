@@ -2,7 +2,7 @@ import { and, desc, eq, ne, sql } from "drizzle-orm";
 import { getDb } from "@/db/client";
 import { conversation, message } from "@/db/schema";
 import type { FlowButton } from "@/lib/automation/types";
-import { isLive, sendButtons, sendText } from "./cloud-api";
+import { isLive, sendButtons, sendTemplate, sendText } from "./cloud-api";
 
 /**
  * WhatsApp transport. DEMO mode records messages in the DB (no Meta). LIVE mode
@@ -36,11 +36,27 @@ export async function getOrCreateConversation(
   return created;
 }
 
+/** An approved WhatsApp template to send instead of free-form text.
+ *  `params` fill the template's {{1}}, {{2}}, … body placeholders IN ORDER. */
+export interface TemplateSend {
+  name: string;
+  lang?: string;
+  params?: string[];
+}
+
 interface OutboundOptions {
   isBot?: boolean;
   sentByMemberId?: string;
   buttons?: FlowButton[];
   type?: "TEXT" | "INTERACTIVE" | "TEMPLATE";
+  /**
+   * Send as an approved template rather than free-form text. REQUIRED for any
+   * business-initiated message — outside the 24-hour customer-service window
+   * Meta rejects plain text, which is every delivery reminder, reschedule and
+   * balance-collection message this system exists to send. `body` is still
+   * recorded on the message row so the inbox shows what the customer received.
+   */
+  template?: TemplateSend;
 }
 
 /** Send an outbound message on a conversation (DEMO: just record it). */
@@ -56,7 +72,7 @@ export async function sendOutbound(
     .values({
       conversationId,
       direction: "OUT",
-      type: opts.type ?? (interactive ? "INTERACTIVE" : "TEXT"),
+      type: opts.type ?? (opts.template ? "TEMPLATE" : interactive ? "INTERACTIVE" : "TEXT"),
       body,
       isBot: opts.isBot ?? true,
       sentByMemberId: opts.sentByMemberId ?? null,
@@ -78,15 +94,30 @@ export async function sendOutbound(
       with: { contact: true },
     });
     if (convo) {
-      const waId = interactive
-        ? await sendButtons(convo.contact.phone, body, opts.buttons ?? [])
-        : await sendText(convo.contact.phone, body);
-      if (waId) {
-        await db
-          .update(message)
-          .set({ waMessageId: waId })
-          .where(eq(message.id, msg.id));
-      }
+      const waId = opts.template
+        ? await sendTemplate(
+            convo.contact.phone,
+            opts.template.name,
+            opts.template.lang ?? "en",
+            opts.template.params?.length
+              ? [
+                  {
+                    type: "body",
+                    parameters: opts.template.params.map((text) => ({ type: "text", text })),
+                  },
+                ]
+              : undefined
+          )
+        : interactive
+          ? await sendButtons(convo.contact.phone, body, opts.buttons ?? [])
+          : await sendText(convo.contact.phone, body);
+      // No id back means Meta refused it (bad template, closed window, bad
+      // number). The row must say so — a message that reads SENT in the inbox
+      // while the customer got nothing is worse than no message at all.
+      await db
+        .update(message)
+        .set(waId ? { waMessageId: waId } : { status: "FAILED" })
+        .where(eq(message.id, msg.id));
     }
   }
   return msg;
