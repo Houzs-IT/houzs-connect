@@ -36,7 +36,7 @@ export default async function AppLayout({
 
   return (
     <div className="flex h-screen overflow-hidden">
-      <Sidebar unread={unread} />
+      <Sidebar unread={unread} live={process.env.WHATSAPP_MODE === "LIVE"} />
       <div className="flex min-w-0 flex-1 flex-col">{children}</div>
     </div>
   );

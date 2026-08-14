@@ -6,6 +6,7 @@ import {
   company as companyTable,
   contact as contactTable,
   message as messageTable,
+  webhookEvent,
 } from "@/db/schema";
 import { getOrCreateConversation, recordInbound } from "@/lib/whatsapp/transport";
 import { handleInboundMessage } from "@/lib/automation/dispatch";
@@ -41,15 +42,55 @@ interface WaValue {
 }
 
 export async function POST(req: NextRequest) {
-  const body = (await req.json().catch(() => null)) as {
-    entry?: { changes?: { value?: WaValue }[] }[];
-  } | null;
-  if (!body?.entry) return NextResponse.json({ ok: true });
+  const raw = await req.text().catch(() => "");
+  const body = (() => {
+    try {
+      return JSON.parse(raw) as { entry?: { changes?: { value?: WaValue }[] }[] } | null;
+    } catch {
+      return null;
+    }
+  })();
 
   const db = getDb();
 
-  // Single-tenant resolve: first company + its default channel. Multi-tenant would map
-  // value.metadata.phone_number_id -> Channel.
+  // Record EVERY delivery before interpreting it. Without this the only way to
+  // tell "Meta never called us" from "Meta called and we dropped it" was to
+  // guess — the handler used to return 200 and write nothing on any payload it
+  // could not resolve to a channel. System Logs reads these rows.
+  const logged = await db
+    .insert(webhookEvent)
+    .values({
+      source: "whatsapp",
+      eventType: body?.entry?.[0]?.changes?.[0]?.value?.messages?.length
+        ? "message"
+        : body?.entry?.[0]?.changes?.[0]?.value?.statuses?.length
+          ? "status"
+          : "unknown",
+      payload: (body ?? { unparseable: raw.slice(0, 2000) }) as object,
+      processed: false,
+    })
+    .returning({ id: webhookEvent.id })
+    .catch(() => [] as { id: string }[]);
+  const eventId = logged[0]?.id ?? null;
+
+  /** Stamp the outcome onto the row so the log says what we DID with it. */
+  const finish = async (note: string, processed: boolean) => {
+    if (!eventId) return;
+    await db
+      .update(webhookEvent)
+      .set({ processed, eventType: note })
+      .where(eq(webhookEvent.id, eventId))
+      .catch(() => {});
+  };
+
+  if (!body?.entry) {
+    await finish("ignored:no-entry", false);
+    return NextResponse.json({ ok: true });
+  }
+
+  // Single-tenant resolve: first company + its default channel. Routing by
+  // value.metadata.phone_number_id is what a second WABA needs, and there is
+  // already a branch for it (feat/multi-tenant-channels) — not tonight's change.
   const company = await db.query.company.findFirst({ orderBy: asc(companyTable.createdAt) });
   const channel = company
     ? await db.query.channel.findFirst({
@@ -58,6 +99,16 @@ export async function POST(req: NextRequest) {
       })
     : null;
 
+  if (!company || !channel) {
+    // The silent drop that made this undiagnosable. Now it is a log line.
+    await finish(
+      company ? "dropped:no-channel-for-company" : "dropped:no-company",
+      false
+    );
+    return NextResponse.json({ ok: true });
+  }
+
+  let handled = 0;
   for (const entry of body.entry) {
     for (const change of entry.changes ?? []) {
       const value = change.value;
@@ -74,8 +125,6 @@ export async function POST(req: NextRequest) {
             .where(eq(messageTable.waMessageId, s.id));
         }
       }
-
-      if (!company || !channel) continue;
 
       const nameByWaId = new Map((value.contacts ?? []).map((c) => [c.wa_id, c.profile?.name]));
       for (const m of value.messages ?? []) {
@@ -103,8 +152,10 @@ export async function POST(req: NextRequest) {
           interactivePayload: buttonId ? { tapped: buttonId } : undefined,
         });
         await handleInboundMessage(contact.id, buttonId ? { buttonId } : { text });
+        handled++;
       }
     }
   }
+  await finish(handled > 0 ? `handled:${handled}-message(s)` : "handled:status-only", true);
   return NextResponse.json({ ok: true });
 }

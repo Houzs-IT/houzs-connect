@@ -41,7 +41,10 @@ const SECTIONS: { title: string; items: NavItem[] }[] = [
   },
   {
     title: "System",
-    items: [{ href: "/settings", label: "Settings", Icon: IconSettings }],
+    items: [
+      { href: "/logs", label: "System Logs", Icon: IconReceipt },
+      { href: "/settings", label: "Settings", Icon: IconSettings },
+    ],
   },
 ];
 
@@ -97,7 +100,7 @@ function NavRow({
   );
 }
 
-export function Sidebar({ unread }: { unread?: number }) {
+export function Sidebar({ unread, live }: { unread?: number; live?: boolean }) {
   const path = usePathname();
   return (
     <aside className="relative flex w-[236px] shrink-0 flex-col bg-[var(--color-rail)] text-[var(--color-rail-ink)]">
@@ -142,8 +145,16 @@ export function Sidebar({ unread }: { unread?: number }) {
         ))}
       </nav>
 
-      <div className="px-5 py-4 font-mono text-[10px] text-[var(--color-rail-faint)]">
-        DEMO MODE · WhatsApp stubbed
+      {/* Read from WHATSAPP_MODE, never hardcoded — this line said "DEMO MODE"
+          for the first hour the number was actually live, which is exactly the
+          kind of label an operator trusts and should not have to second-guess. */}
+      <div className="flex items-center gap-2 px-5 py-4 font-mono text-[10px] text-[var(--color-rail-faint)]">
+        <span
+          className={`h-1.5 w-1.5 rounded-full ${
+            live ? "bg-[var(--color-success)]" : "bg-[var(--color-rail-faint)]"
+          }`}
+        />
+        {live ? "LIVE · sending via WhatsApp" : "DEMO MODE · WhatsApp stubbed"}
       </div>
     </aside>
   );
