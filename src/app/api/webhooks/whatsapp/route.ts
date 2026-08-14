@@ -30,9 +30,17 @@ export async function GET(req: NextRequest) {
 
 interface WaValue {
   metadata?: { phone_number_id?: string };
-  contacts?: { wa_id: string; profile?: { name?: string } }[];
+  // A sender is identified by wa_id (a phone number) OR, since WhatsApp
+  // usernames shipped, by user_id ("MY.3816205081852835") with NO phone number
+  // anywhere in the payload. Both shapes arrive on the same webhook.
+  contacts?: {
+    wa_id?: string;
+    user_id?: string;
+    profile?: { name?: string; username?: string };
+  }[];
   messages?: Array<{
-    from: string;
+    from?: string;
+    from_user_id?: string;
     id: string;
     type: string;
     text?: { body: string };
@@ -126,15 +134,27 @@ export async function POST(req: NextRequest) {
         }
       }
 
-      const nameByWaId = new Map((value.contacts ?? []).map((c) => [c.wa_id, c.profile?.name]));
+      const nameById = new Map(
+        (value.contacts ?? [])
+          .map((c) => [c.wa_id ?? c.user_id, c.profile?.name ?? c.profile?.username] as const)
+          .filter(([id]) => !!id) as [string, string | undefined][]
+      );
       for (const m of value.messages ?? []) {
-        const phone = m.from.replace(/[^\d]/g, "");
+        // `from` is a phone number; `from_user_id` is a WhatsApp username id and
+        // is ALL we get for a username sender. Reading m.from blindly threw here
+        // and took the whole delivery down — Meta then retried it four times.
+        const senderId = m.from ?? m.from_user_id;
+        if (!senderId) continue;
+        // Keep a phone number as digits (that is the key contacts are stored by
+        // and the value Cloud API takes back as `to`); keep a user id verbatim,
+        // because stripping its non-digits would destroy the identifier.
+        const phone = m.from ? m.from.replace(/[^\d]/g, "") : senderId;
         const [contact] = await db
           .insert(contactTable)
           .values({
             companyId: company.id,
             phone,
-            name: nameByWaId.get(m.from) ?? null,
+            name: nameById.get(senderId) ?? null,
             source: "whatsapp",
           })
           .onConflictDoUpdate({
