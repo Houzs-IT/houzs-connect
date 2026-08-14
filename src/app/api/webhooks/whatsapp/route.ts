@@ -6,8 +6,10 @@ import {
   company as companyTable,
   contact as contactTable,
   message as messageTable,
+  payment as paymentTable,
   webhookEvent,
 } from "@/db/schema";
+import { attrs } from "@/lib/format";
 import { getOrCreateConversation, recordInbound } from "@/lib/whatsapp/transport";
 import { handleInboundMessage } from "@/lib/automation/dispatch";
 
@@ -44,6 +46,10 @@ interface WaValue {
     id: string;
     type: string;
     text?: { body: string };
+    // A customer sending a payment slip arrives as an image: no text, just a
+    // media id to fetch from the Graph API (plus an optional caption).
+    image?: { id?: string; mime_type?: string; caption?: string };
+    document?: { id?: string; mime_type?: string; filename?: string; caption?: string };
     interactive?: { button_reply?: { id: string; title: string }; list_reply?: { id: string; title: string } };
   }>;
   statuses?: Array<{ id: string; status: string }>;
@@ -165,12 +171,45 @@ export async function POST(req: NextRequest) {
         const convo = await getOrCreateConversation(channel.id, contact.id);
 
         const buttonId = m.interactive?.button_reply?.id ?? m.interactive?.list_reply?.id;
-        const text = m.text?.body ?? m.interactive?.button_reply?.title ?? m.interactive?.list_reply?.title ?? "";
+        const media = m.image ?? m.document;
+        const isMedia = m.type === "image" || m.type === "document";
+        const text =
+          m.text?.body ??
+          m.interactive?.button_reply?.title ??
+          m.interactive?.list_reply?.title ??
+          media?.caption ??
+          (isMedia ? "[attachment]" : "");
 
         await recordInbound(convo.id, text, {
-          type: buttonId ? "INTERACTIVE" : "TEXT",
-          interactivePayload: buttonId ? { tapped: buttonId } : undefined,
+          type: isMedia ? (m.type === "document" ? "DOCUMENT" : "IMAGE") : buttonId ? "INTERACTIVE" : "TEXT",
+          interactivePayload: buttonId
+            ? { tapped: buttonId }
+            : media?.id
+              ? { mediaId: media.id, mimeType: media.mime_type }
+              : undefined,
         });
+
+        if (isMedia) {
+          // A customer sending an image is, in this business, almost always a
+          // payment slip — that is the whole balance-collection flow. We cannot
+          // read the amount off it: runOcr() parses TEXT, and what arrives here
+          // is a Graph API media id. Rather than drop it (which is what used to
+          // happen — the image became an empty text message and no payment row
+          // was ever created), record a PENDING payment carrying the media id so
+          // it surfaces on /payments for a human to verify.
+          await db.insert(paymentTable).values({
+            contactId: contact.id,
+            conversationId: convo.id,
+            amount: null,
+            method: null,
+            referenceNo: null,
+            orderRef: (attrs(contact.attributes).ref_1 as string) ?? null,
+            receiptMediaUrl: media?.id ? `whatsapp-media:${media.id}` : null,
+            ocrRawText: media?.caption ?? null,
+            status: "PENDING",
+          });
+        }
+
         await handleInboundMessage(contact.id, buttonId ? { buttonId } : { text });
         handled++;
       }
