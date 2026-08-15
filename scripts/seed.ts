@@ -34,6 +34,19 @@ import {
 } from "../prisma/seed-data";
 
 async function main() {
+  // Refuse to seed a database whose app is wired to the real WhatsApp Cloud API.
+  // Seeded contacts are ordinary contacts: they appear in the inbox, in campaign
+  // audiences and in automation triggers, so on a LIVE deployment they are four
+  // strangers one click away from receiving demo traffic. Set SEED_FORCE=1 only
+  // if you have accepted that.
+  if (process.env.WHATSAPP_MODE === "LIVE" && process.env.SEED_FORCE !== "1") {
+    console.error(
+      "Refusing to seed: WHATSAPP_MODE=LIVE. Demo contacts in a live inbox can be messaged for real.\n" +
+        "Re-run with SEED_FORCE=1 if that is genuinely what you want."
+    );
+    process.exit(1);
+  }
+
   const { db, sql } = scriptDb();
   console.log("Seeding Houzs Connect demo data…");
 
@@ -144,12 +157,25 @@ async function main() {
     });
   }
 
-  // Sample contacts + conversations
+  // Sample contacts + conversations.
+  //
+  // The numbers below are deliberately UNROUTABLE. The originals were
+  // well-formed Malaysian mobiles (601xxxxxxxx), which was harmless while this
+  // app stubbed WhatsApp — and stopped being harmless the moment
+  // WHATSAPP_MODE=LIVE, because a seeded contact is indistinguishable from a
+  // customer to the composer, to a campaign, and to an automation. On 15/08 four
+  // test messages ("d s a", "dsa da s", "hi iiiiiiiiiiiiiiiii") went out to
+  // those numbers and Meta returned message ids for them, which it only does for
+  // recipients that are real WhatsApp accounts.
+  //
+  // 6015550xxxxx keeps the shape (country code, 11 digits, renders as a plausible
+  // demo row) while sitting in a range that is not issued to subscribers, so a
+  // send fails at Meta instead of reaching a stranger.
   const sampleContacts = [
-    { name: "Wong", phone: "60124055395", agent: "syu", tags: ["scheduling"], attrs: { ref_1: "znt5961", sales_person: "WEIPIN", delivery_date_1: "2026/07/31", house_type: "Condo", disposal: "sofa", address_state: "Penang", brand_1: "ZANOTTI", amount: "1200" } },
-    { name: "Esther Lee", phone: "60122959833", agent: "sya", tags: ["balance collection"], attrs: { ref_1: "znt6012", sales_person: "Peter", amount: "850" } },
-    { name: "Janice", phone: "60178192899", agent: "azza", tags: [], attrs: { ref_1: "znt6033", delivery_date_1: "2026/08/02" } },
-    { name: "TEOH CHOON KHIM", phone: "60124015732", agent: "syu", tags: ["scheduling", "vip"], attrs: { ref_1: "znt6041" } },
+    { name: "Wong", phone: "601555000001", agent: "syu", tags: ["scheduling"], attrs: { ref_1: "znt5961", sales_person: "WEIPIN", delivery_date_1: "2026/07/31", house_type: "Condo", disposal: "sofa", address_state: "Penang", brand_1: "ZANOTTI", amount: "1200" } },
+    { name: "Esther Lee", phone: "601555000002", agent: "sya", tags: ["balance collection"], attrs: { ref_1: "znt6012", sales_person: "Peter", amount: "850" } },
+    { name: "Janice", phone: "601555000003", agent: "azza", tags: [], attrs: { ref_1: "znt6033", delivery_date_1: "2026/08/02" } },
+    { name: "TEOH CHOON KHIM", phone: "601555000004", agent: "syu", tags: ["scheduling", "vip"], attrs: { ref_1: "znt6041" } },
   ];
 
   for (const c of sampleContacts) {

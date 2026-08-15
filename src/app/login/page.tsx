@@ -122,7 +122,7 @@ export default function LoginPage() {
             style={{ animationDelay: "0ms" }}
           >
             <span className="h-px w-10 bg-brand" />
-            <span className="text-[11px] font-semibold uppercase tracking-[0.18em] text-brand">
+            <span className="text-[11px] font-semibold uppercase tracking-brand text-brand">
               Houzs Century
             </span>
           </div>
@@ -174,11 +174,16 @@ export default function LoginPage() {
             <div className="relative">
               <div className="mb-1 flex items-center gap-2">
                 <span className="h-px w-5 bg-brand" />
-                <span className="text-[10px] font-semibold uppercase tracking-[0.18em] text-brand">
+                <span className="text-[10px] font-semibold uppercase tracking-brand text-brand">
                   Sign In
                 </span>
               </div>
-              <h1 className="font-display text-[25px] font-extrabold leading-tight tracking-tight text-ink">
+              {/* 700, not 800: the ERP's `font-extrabold` headings resolve to real
+                  700 outlines (its 800 @font-face points at the same 400-700
+                  variable file), and IBM Plex Sans ships no 800 through
+                  next/font — so 800 here would synthesise a fake bold the ERP
+                  never shows. */}
+              <h1 className="font-display text-[25px] font-bold leading-tight tracking-tight text-ink">
                 Houzs Century Chat
               </h1>
               <p className="mt-1.5 text-[12.5px] text-muted">
@@ -229,14 +234,15 @@ export default function LoginPage() {
                 <button
                   type="submit"
                   disabled={pending}
-                  className="inline-flex h-9 w-full items-center justify-center gap-1.5 rounded-md border border-accent bg-accent px-4 text-[13px] font-semibold tracking-wide text-white shadow-sm transition-all duration-150 hover:bg-accent-ink disabled:border-accent/40 disabled:bg-accent/40"
+                  title={pending ? "Checking your Houzs ERP account…" : undefined}
+                  className="inline-flex h-9 w-full items-center justify-center gap-1.5 rounded-md border border-accent bg-accent px-4 text-[13px] font-semibold tracking-wide text-white shadow-sm transition-all duration-150 hover:bg-accent-ink disabled:cursor-not-allowed disabled:border-accent/40 disabled:bg-accent/40"
                 >
                   {pending ? "Signing in…" : "Sign In"}
                 </button>
               </form>
             </div>
           </div>
-          <div className="mt-5 text-center text-[10px] uppercase tracking-[0.18em] text-[#6f786d] lg:text-left">
+          <div className="mt-5 text-center text-[10px] uppercase tracking-brand text-[#6f786d] lg:text-left">
             {year} Houzs Century — authorized staff only
           </div>
         </div>

@@ -429,22 +429,39 @@ export async function startRun(
 }
 
 /** Resume a waiting run with the customer's reply (button id or free text). */
-export async function resumeRun(runId: string, input: { buttonId?: string; text?: string }) {
+/**
+ * Feed a customer reply into one waiting run.
+ *
+ * Returns whether the run actually MOVED. That return value is load-bearing:
+ * callers use it to decide whether the reply has been dealt with, and a run can
+ * be `waiting` for something this reply cannot satisfy — most importantly
+ * `waitingFor: "delay"`, which neither branch below matches and which nothing in
+ * the app ever resumes. Reporting those as handled is what silently muted the
+ * contact (see handleCustomerReply).
+ */
+export async function resumeRun(
+  runId: string,
+  input: { buttonId?: string; text?: string }
+): Promise<boolean> {
   const db = getDb();
   const run = await db.query.automationRun.findFirst({
     where: eq(automationRun.id, runId),
   });
-  if (!run || run.status !== "waiting" || !run.cursorNodeId) return;
+  if (!run || run.status !== "waiting" || !run.cursorNodeId) return false;
   const ctx = await buildCtx(runId);
-  if (!ctx) return;
+  if (!ctx) return false;
 
   const context = (run.context as { waitingFor?: string; saveTo?: string } | null) ?? {};
   const cursor = run.cursorNodeId;
 
   if (context.waitingFor === "button" && input.buttonId != null) {
     await advance(ctx, nextNodeId(ctx.graph, cursor, input.buttonId));
-  } else if (context.waitingFor === "text" && input.text != null) {
+    return true;
+  }
+  if (context.waitingFor === "text" && input.text != null) {
     if (context.saveTo) await setContactAttr(ctx.contactId, context.saveTo, input.text);
     await advance(ctx, nextNodeId(ctx.graph, cursor));
+    return true;
   }
+  return false;
 }

@@ -1,16 +1,10 @@
 import { Suspense } from "react";
-import { desc } from "drizzle-orm";
-import { getDb } from "@/db/client";
-import { conversation } from "@/db/schema";
 import { getCurrentMember } from "@/lib/current-member";
-import { getVisibility, conversationVisibilityWhere } from "@/lib/access";
 import { Topbar } from "@/components/Topbar";
 import { ConversationList } from "@/components/inbox/ConversationList";
 import { ConversationListSkeleton } from "@/components/inbox/ConversationListSkeleton";
 import { LiveRefresh } from "@/components/inbox/LiveRefresh";
-
-/** How many conversations the rail loads at once — newest first. */
-const LIST_LIMIT = 200;
+import { fetchConversations } from "./actions";
 
 /**
  * The conversation rail. This is the inbox's expensive query — one row per
@@ -21,42 +15,16 @@ const LIST_LIMIT = 200;
  * layout, so a blocking layout fetch would still freeze the previous screen for
  * its full duration. Suspending inside the layout is what lets the Topbar and
  * the thread pane paint first.
+ *
+ * The query itself lives in ./actions so that "Load more" fetches through the
+ * exact same code path — a second copy of it would be free to drift.
  */
 async function ConversationRail() {
   const me = await getCurrentMember();
   if (!me) return null;
-  const db = getDb();
 
-  const allMembers = await db.query.member.findMany({
-    columns: { id: true, managerId: true },
-  });
-  const vis = getVisibility(me, allMembers);
-
-  const convos = await db.query.conversation.findMany({
-    where: conversationVisibilityWhere(vis),
-    orderBy: [desc(conversation.lastMessageAt), desc(conversation.createdAt)],
-    limit: LIST_LIMIT,
-    with: {
-      contact: true,
-      assignedAgent: true,
-      tagLinks: { with: { tag: true } },
-      messages: { orderBy: (m, { desc }) => desc(m.createdAt), limit: 1 },
-    },
-  });
-
-  const items = convos.map((c) => ({
-    id: c.id,
-    name: c.contact.name ?? c.contact.phone,
-    phone: c.contact.phone,
-    status: c.status,
-    unread: c.unreadCount,
-    lastMessage: c.messages[0]?.body ?? "",
-    lastAt: c.messages[0]?.createdAt ?? c.lastMessageAt,
-    agent: c.assignedAgent?.name ?? null,
-    tags: c.tagLinks.map((t) => ({ name: t.tag.name, color: t.tag.color })),
-  }));
-
-  return <ConversationList items={items} />;
+  const { items, hasMore } = await fetchConversations(0);
+  return <ConversationList items={items} hasMore={hasMore} />;
 }
 
 export default async function InboxLayout({

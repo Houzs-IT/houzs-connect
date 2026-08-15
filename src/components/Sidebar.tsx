@@ -116,7 +116,7 @@ export function Sidebar({ unread, live }: { unread?: number; live?: boolean }) {
           alt="Houzs Century"
           className="h-9 w-auto max-w-[150px] object-contain brightness-0 invert"
         />
-        <span className="font-mono text-[9.5px] font-semibold uppercase tracking-[0.18em] text-[var(--color-brand-bright)]">
+        <span className="font-mono text-[9.5px] font-semibold uppercase tracking-brand text-[var(--color-brand-bright)]">
           Chat
         </span>
       </div>

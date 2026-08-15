@@ -13,8 +13,8 @@ export interface Series {
 
 /**
  * Multi-series line chart over evenly-spaced buckets (e.g. days). Draws a soft
- * baseline grid, one polyline per series, and dots at each vertex. Used by
- * Message Analytics and Calling Analytics.
+ * baseline grid, one polyline per series, and dots at each vertex. Used by the
+ * Message Analytics seven-day series.
  */
 export function LineChart({
   series,
@@ -98,9 +98,10 @@ export function LineChart({
 }
 
 /**
- * Simple vertical bar chart for a small set of labelled values (tags reach,
- * calling-activity buckets). Bars use a single colour token; values are shown
- * beneath each bar.
+ * Simple vertical bar chart for a small set of labelled values. Bars use a
+ * single colour token; values are shown beneath each bar. Currently unused —
+ * its only caller was the Calling Analytics tab, which was removed because
+ * every figure on it was invented and Connect has no call data to replace them.
  */
 export function BarChart({
   data,

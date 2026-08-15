@@ -1,32 +1,76 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { initials, relTime, tint } from "@/lib/format";
 import { IconSearch } from "@/components/icons";
+import { SlaTimer } from "./SlaTimer";
+import { fetchConversations } from "@/app/(app)/inbox/actions";
 
-type Item = {
+export type ConversationListItem = {
   id: string;
   name: string;
   phone: string;
   status: string;
   unread: number;
   lastMessage: string;
-  lastAt: Date | string | null;
+  lastAt: string | null;
+  /** Set only while the newest message is inbound — see fetchConversations. */
+  waitingSince: string | null;
   agent: string | null;
   tags: { name: string; color: string }[];
 };
 
 const TABS = ["All", "Unread", "Open", "Closed", "Queue"] as const;
 
-export function ConversationList({ items }: { items: Item[] }) {
+export function ConversationList({
+  items,
+  hasMore,
+}: {
+  items: ConversationListItem[];
+  hasMore: boolean;
+}) {
   const params = useParams();
   const activeId = params?.id as string | undefined;
   const [tab, setTab] = useState<(typeof TABS)[number]>("All");
   const [q, setQ] = useState("");
+  const [older, setOlder] = useState<ConversationListItem[]>([]);
+  const [loading, setLoading] = useState(false);
+  // null until the rail has paged once, so the server's answer stands until
+  // then. It cannot be seeded into state: LiveRefresh re-renders this component
+  // every few seconds, and a `useState(hasMore)` would freeze the first value.
+  const [moreAfterPaging, setMoreAfterPaging] = useState<boolean | null>(null);
 
-  const filtered = items.filter((c) => {
+  const all = useMemo(() => {
+    // Offset paging can hand back a row twice: a conversation moves up the
+    // order the moment it gets a message, and one already paged in can be
+    // pushed back across the offset. First copy wins, so the newest page's
+    // version of a row beats the stale one held in `older`.
+    const seen = new Set<string>();
+    const out: ConversationListItem[] = [];
+    for (const c of [...items, ...older]) {
+      if (seen.has(c.id)) continue;
+      seen.add(c.id);
+      out.push(c);
+    }
+    return out;
+  }, [items, older]);
+
+  const canLoadMore = moreAfterPaging ?? hasMore;
+
+  async function loadMore() {
+    setLoading(true);
+    try {
+      const res = await fetchConversations(all.length);
+      setOlder((prev) => [...prev, ...res.items]);
+      setMoreAfterPaging(res.hasMore);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  const filtered = all.filter((c) => {
     if (q && !`${c.name} ${c.phone}`.toLowerCase().includes(q.toLowerCase()))
       return false;
     if (tab === "Unread") return c.unread > 0;
@@ -102,6 +146,7 @@ export function ConversationList({ items }: { items: Item[] }) {
                   {c.lastMessage || "—"}
                 </p>
                 <div className="mt-1.5 flex flex-wrap items-center gap-1">
+                  {c.waitingSince && <SlaTimer since={c.waitingSince} />}
                   {c.tags.map((t) => (
                     <span
                       key={t.name}
@@ -129,6 +174,27 @@ export function ConversationList({ items }: { items: Item[] }) {
             </Link>
           );
         })}
+
+        {canLoadMore && (
+          <div className="p-3">
+            <button
+              type="button"
+              onClick={loadMore}
+              disabled={loading}
+              title={loading ? "Loading the next page of conversations…" : undefined}
+              className="w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] px-3 py-2 text-[12.5px] font-medium text-[var(--color-muted)] transition-colors hover:bg-[var(--color-surface-dim)] hover:text-[var(--color-ink)] disabled:cursor-not-allowed disabled:text-[var(--color-faint)]"
+            >
+              {loading ? "Loading…" : "Load more"}
+            </button>
+            {/* The filters above only ever see what is loaded, so an empty
+                result is not proof the conversation does not exist. */}
+            {q && (
+              <p className="mt-1.5 text-center text-[10px] text-[var(--color-faint)]">
+                Searching the {all.length} loaded so far.
+              </p>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );

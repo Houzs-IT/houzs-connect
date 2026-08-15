@@ -53,11 +53,51 @@
   --color-warning-soft: #f6efd9;
   --color-info: #16695f;
 
-  --font-sans: var(--font-jakarta), "Noto Sans SC", ui-sans-serif, system-ui,
-    sans-serif;
-  --font-display: var(--font-manrope), var(--font-jakarta), "Noto Sans SC",
-    ui-sans-serif, system-ui, sans-serif;
-  --font-mono: var(--font-plex-mono), ui-monospace, "SFMono-Regular", monospace;
+  /* ── Type ──────────────────────────────────────────────────────────────
+     One face with the Houzs ERP: IBM Plex Sans for body, display AND the
+     `mono` role. That is not a shortcut — it is what the ERP does. Its
+     tailwind.config.js points `body` (:95), `display` (:104), `mono` (:119)
+     and `money` (:122) at the SAME IBM Plex Sans stack, under the owner's
+     2026-08-01 ruling quoted there ("需要换成全站列表统一字体"). The tail of
+     each stack below is that file's stack, verbatim.
+
+     KNOWN DIVERGENCE, deliberate: the ERP resolves un-classed text through
+     `--font-system` (vendor/design-system/tokens.css:162), which is still the
+     bare OS stack — a leftover from the superseded 2026-07-24 ruling that the
+     2026-08-01 change never cleaned up. Connect follows the ERP's INTENT and
+     its dominant rendered face (~1370 class sites carry font-mono /
+     font-money / font-display, i.e. IBM Plex Sans) rather than that residue.
+
+     Also deliberate: "Noto Sans SC" is named but NOT bundled. The ERP
+     self-hosts ~120 Noto SC unicode-range chunks; pulling those into a
+     Cloudflare Worker build for an English UI is not worth the weight, so CJK
+     resolves to a locally-installed Noto Sans SC or the OS face. */
+  --font-sans: var(--font-plex-sans), "Noto Sans SC", system-ui, -apple-system,
+    BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-display: var(--font-sans);
+  --font-mono: var(--font-sans);
+
+  /* True fixed-width. The ERP's equivalent alias is `docno` (IBM Plex Mono,
+     tailwind.config.js:143) — same face, same stack, named for the SCM doc
+     numbers it dresses there. Connect has no doc numbers; what it has is raw
+     webhook JSON and env-var names, which need real monospace for the same
+     reason. IBM Plex Mono's dotted zero is fine HERE and wrong for IDs and
+     counts — that distinction is the whole point of keeping two aliases. */
+  --font-code: var(--font-plex-mono), ui-monospace, "SFMono-Regular",
+    "Cascadia Mono", "Segoe UI Mono", Consolas, monospace;
+
+  /* Tailwind's preflight dresses bare <code>/<kbd>/<pre> from this token. It
+     defaults to --font-mono, which is now proportional, so point it at the
+     code alias instead — otherwise a JSON payload renders un-aligned. */
+  --default-mono-font-family: var(--font-code);
+
+  /* The ERP extends Tailwind's letterSpacing with these two
+     (tailwind.config.js:146-149) — `brand` is its ALL-CAPS eyebrow tracking
+     (431 uses), and `wider` is deliberately 0.06em, NOT Tailwind's stock
+     0.05em (312 uses). `tracking-wide` is left at Tailwind's default in both
+     products, so it already matched. */
+  --tracking-brand: 0.18em;
+  --tracking-wider: 0.06em;
 
   --radius: 0.625rem; /* 10px — card */
 
@@ -73,10 +113,27 @@
     background: var(--color-canvas);
     color: var(--color-ink);
     font-family: var(--font-sans);
+    /* Rendering posture copied from the ERP root rule
+       (frontend/src/index.css:22-25) — without optimizeLegibility the same
+       face kerns visibly differently between the two products. */
     -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    font-feature-settings: normal;
+    text-rendering: optimizeLegibility;
   }
   h1, h2, h3, h4, h5, h6 {
     font-family: var(--font-display);
+  }
+
+  /* NUMERALS — the reason the two products' zeros did not line up.
+     Mirrors frontend/src/index.css:89-92: anything wearing the `mono` role is
+     a run of digits (IDs, phone numbers, counts, timestamps, amounts), so it
+     opts into tabular figures explicitly rather than trusting the family to be
+     fixed-width. Sits in `base` so an explicit font-variant-numeric utility at
+     a call site still wins. `.font-code` is genuinely monospaced and needs no
+     help. */
+  .font-mono {
+    font-variant-numeric: tabular-nums;
   }
   /* CJK needs a hair more line-height; never tight tracking below 0.02em. */
   :lang(zh) {

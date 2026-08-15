@@ -303,10 +303,21 @@ export async function handleCustomerReply(
     ),
     orderBy: desc(automationRunTable.updatedAt),
   });
+  // Count runs that actually MOVED, not runs that happened to be sitting in
+  // `waiting`. handleInboundMessage treats a non-zero result as "this reply has
+  // been dealt with" and skips every NEW_INCOMING_MESSAGE automation.
+  //
+  // A run parked on a Delay node is `waiting` forever — resumeRun matches
+  // neither the button nor the text branch for it, and nothing in this app ever
+  // wakes it (there is no cron, no queue, no [triggers] in wrangler.toml). With
+  // the old `return waiting.length`, one such run meant that contact's every
+  // future message counted as handled: they were silently muted for good, with
+  // nothing on screen to show it.
+  let advanced = 0;
   for (const run of waiting) {
-    await resumeRun(run.id, input);
+    if (await resumeRun(run.id, input)) advanced++;
   }
-  return waiting.length;
+  return advanced;
 }
 
 /**

@@ -57,3 +57,12 @@ enabled = true
 [[hyperdrive]]
 binding = "HYPERDRIVE"
 id = "8da3d98a8fc94f6f938fc06689f9c611"
+# LOCAL EMULATION ONLY — never used in production, which connects through the
+# `id` above. wrangler refuses to start its platform proxy when a Hyperdrive
+# binding has no local string, and `cf:build` / `deploy` both start that proxy
+# just to read env vars. Without this line neither command can run on a machine
+# that has no local Postgres, which is every machine this app is deployed from.
+# Not a secret: it is the conventional localhost dev URL, and real local work
+# goes through DATABASE_URL in .dev.vars (see .dev.vars.example), which
+# resolveDatabaseUrl() prefers.
+localConnectionString = "postgresql://postgres:postgres@localhost:5432/postgres"

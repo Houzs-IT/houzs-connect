@@ -9,7 +9,6 @@ import {
   contactTag,
   conversation,
   conversationTag,
-  message,
   note,
   payment,
   quickReply,
@@ -62,17 +61,20 @@ export async function sendMessage(formData: FormData) {
   if (kind === "note") {
     await db.insert(note).values({ conversationId, memberId: me.id, body });
   } else {
-    await db.insert(message).values({
-      conversationId,
-      direction: "OUT",
-      type: "TEXT",
-      body,
+    // Go through sendOutbound, which is the only path that actually reaches
+    // Meta. This used to insert the row here and stop: every reply an operator
+    // typed was written to our own database, rendered in the thread with a tick,
+    // stamped SENT by us — and never sent. Nothing was ever handed to WhatsApp,
+    // which is also why no delivery status ever came back for one (Meta had
+    // never heard of the message). Automations looked fine throughout because
+    // they always called sendOutbound.
+    await sendOutbound(conversationId, body, {
+      isBot: false,
       sentByMemberId: me.id,
-      status: "SENT",
     });
     await db
       .update(conversation)
-      .set({ lastMessageAt: new Date(), unreadCount: 0 })
+      .set({ unreadCount: 0 })
       .where(eq(conversation.id, conversationId));
   }
   revalidatePath(`/inbox/${conversationId}`);

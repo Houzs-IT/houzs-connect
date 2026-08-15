@@ -12,8 +12,36 @@
     {
       "idx": 1,
       "version": "7",
+      "when": 1785500000000,
+      "tag": "0001_automation_version",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
       "when": 1785600000000,
       "tag": "0002_erp_org_sync",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1786760759000,
+      "tag": "0003_contact_blocked_updated",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1786847159000,
+      "tag": "0004_template_binding",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1786860000000,
+      "tag": "0005_conversation_member",
       "breakpoints": true
     }
   ]

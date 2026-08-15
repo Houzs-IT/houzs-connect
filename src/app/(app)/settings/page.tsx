@@ -1,7 +1,9 @@
-import { asc } from "drizzle-orm";
+import { notFound } from "next/navigation";
+import { asc, eq } from "drizzle-orm";
 import { getDb } from "@/db/client";
 import { contactField, member, quickReply, tag } from "@/db/schema";
 import { PageChrome } from "@/components/PageChrome";
+import { getCurrentMember } from "@/lib/current-member";
 import {
   addContactField,
   addQuickReply,
@@ -43,12 +45,35 @@ function DeleteBtn({ action, id }: { action: (fd: FormData) => void; id: string 
 }
 
 export default async function SettingsPage() {
+  const me = await getCurrentMember();
+  if (!me) notFound();
   const db = getDb();
+
+  // Every one of these four was unfiltered, and the ERP org sync deliberately
+  // fans one ERP user out to one member row PER GRANTED COMPANY — so the org
+  // chart listed the same person once per company ("Bernard … Sales Department"
+  // directly above "Bernard … — —") and the count read 112 for a company with
+  // roughly half that many staff. Tags, fields and quick replies had the same
+  // hole, which is worse than a wrong number: the /bank quick reply carries a
+  // live account number, and an unscoped read would hand it to another tenant.
   const [members, fields, tags, quickReplies] = await Promise.all([
-    db.query.member.findMany({ orderBy: asc(member.name), with: { manager: true, department: true } }),
-    db.query.contactField.findMany({ orderBy: asc(contactField.name) }),
-    db.query.tag.findMany({ orderBy: asc(tag.name) }),
-    db.query.quickReply.findMany({ orderBy: asc(quickReply.shortcut) }),
+    db.query.member.findMany({
+      where: eq(member.companyId, me.companyId),
+      orderBy: asc(member.name),
+      with: { manager: true, department: true },
+    }),
+    db.query.contactField.findMany({
+      where: eq(contactField.companyId, me.companyId),
+      orderBy: asc(contactField.name),
+    }),
+    db.query.tag.findMany({
+      where: eq(tag.companyId, me.companyId),
+      orderBy: asc(tag.name),
+    }),
+    db.query.quickReply.findMany({
+      where: eq(quickReply.companyId, me.companyId),
+      orderBy: asc(quickReply.shortcut),
+    }),
   ]);
 
   const cards = [

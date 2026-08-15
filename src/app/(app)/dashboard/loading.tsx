@@ -12,13 +12,12 @@ export default function DashboardLoading() {
     "Marketing",
     "Live Reporting",
     "Message Analytics",
-    "Calling Analytics",
   ];
 
   return (
     <PageSkeleton
       title="Dashboard"
-      subtitle="Spend, delivery, support & message analytics"
+      subtitle="Conversations, delivery and message analytics"
     >
       <div className="p-6">
         <div className="mb-5 flex flex-wrap gap-1 border-b border-[var(--color-border)]">
@@ -45,7 +44,6 @@ export default function DashboardLoading() {
         <div className="mt-6 grid grid-cols-1 gap-4 lg:grid-cols-2">
           <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-5">
             <Skel className="mb-4 h-[15px] w-48" />
-            <Skel className="mb-4 -mt-3 h-[13px] w-56" />
             <div className="skeleton-stagger flex flex-col gap-3">
               {[70, 88, 54, 40].map((pct, i) => (
                 <div

@@ -7,11 +7,14 @@
   whole tab shell.
 */
 
-/** "live" / "demo" / "derived" provenance badge. */
-export function Pill({ kind }: { kind: "real" | "demo" | "derived" }) {
+/**
+ * Provenance badge. There is no "demo" kind on purpose — every figure on this
+ * dashboard is read from the database, and a card with nothing to read says so
+ * in words instead of showing an invented number.
+ */
+export function Pill({ kind }: { kind: "real" | "derived" }) {
   const map = {
     real: { t: "live", c: "var(--color-success)" },
-    demo: { t: "demo", c: "var(--color-warning)" },
     derived: { t: "derived", c: "var(--color-faint)" },
   } as const;
   const { t, c } = map[kind];
@@ -37,7 +40,10 @@ export function Stat({
   return (
     <div className="animate-rise rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
       <div className="text-[12px] font-medium text-[var(--color-muted)]">{label}</div>
-      <div className="mt-1 text-[26px] font-semibold tracking-tight text-[var(--color-ink)]">
+      {/* tabular-nums: a KPI that ticks must not shift width digit-to-digit.
+          Same treatment the ERP gives its stat values (frontend/src/pages/
+          FleetHealth.tsx:828). */}
+      <div className="mt-1 text-[26px] font-semibold tabular-nums tracking-tight text-[var(--color-ink)]">
         {value}
       </div>
       {hint && <div className="mt-0.5 text-[11px] text-[var(--color-faint)]">{hint}</div>}
@@ -92,6 +98,20 @@ export function BarRow({
         {value}
       </span>
     </div>
+  );
+}
+
+/**
+ * What a card shows when there is genuinely nothing to read yet. Never a zero
+ * and never a sample figure — an operator has to be able to trust that a number
+ * on this page came from the database.
+ */
+export function NoData({ children }: { children: React.ReactNode }) {
+  return (
+    <p className="text-[12.5px] leading-relaxed text-[var(--color-muted)]">
+      <span className="font-medium text-[var(--color-ink)]">No data yet.</span>{" "}
+      {children}
+    </p>
   );
 }
 

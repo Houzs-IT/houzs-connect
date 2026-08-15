@@ -85,7 +85,7 @@ export default async function WebhookDeliveriesPage() {
                     <summary className="cursor-pointer text-[11px] text-[var(--color-faint)] hover:text-[var(--color-muted)]">
                       Technical details
                     </summary>
-                    <pre className="mt-1.5 max-h-52 overflow-auto whitespace-pre-wrap break-all rounded-lg bg-[var(--color-surface-2)] p-2.5 font-mono text-[11px] leading-relaxed text-[var(--color-muted)]">
+                    <pre className="mt-1.5 max-h-52 overflow-auto whitespace-pre-wrap break-all rounded-lg bg-[var(--color-surface-2)] p-2.5 font-code text-[11px] leading-relaxed text-[var(--color-muted)]">
                       {JSON.stringify(e.payload, null, 2)}
                     </pre>
                   </details>

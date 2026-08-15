@@ -1,40 +1,48 @@
-import { and, count, desc, eq, gte, isNotNull, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, gte, isNotNull, sql } from "drizzle-orm";
 import { getDb } from "@/db/client";
 import {
+  automation,
   automationRun,
+  contact,
   contactTag,
   conversation,
   member,
   message,
   tag,
-  webhookEvent,
 } from "@/db/schema";
 import { relTime } from "@/lib/format";
 import { Skel } from "@/components/skeleton";
 import { LineChart } from "./charts";
-import { BarRow, Card, Legend, Pill } from "./ui";
-import { maxReach, pctOf, reportWindow } from "./util";
+import { BarRow, Card, Legend, NoData, Pill, Stat } from "./ui";
+import { humanDuration, maxReach, pctOf, reportWindow } from "./util";
 
 /*
   Streamed dashboard sections.
 
   The page's cheap counters (a couple of aggregate round-trips) resolve before
   the first byte, so the shell, the tab strip and every KPI tile paint straight
-  away. The four sections below are the ones that actually scan rows — a
-  grouped per-agent aggregate, tag reach across the contact↔tag join, the merged
-  activity feed, and the seven-day message series — so each one gets its own
-  `<Suspense>` boundary and streams in behind a skeleton the same size as the
+  away. The sections below are the ones that actually scan rows — a grouped
+  per-agent aggregate, tag reach across the contact↔tag join, the activity feed,
+  the seven-day message series and the reply-speed sample — so each one gets its
+  own `<Suspense>` boundary and streams in behind a skeleton the same size as the
   card it replaces.
 
   Each section owns its query. They are siblings under separate boundaries, so
   they still run concurrently — this is a fan-out, not a waterfall.
+
+  EVERY query here is scoped to one company. `conversation` and `message` carry
+  no company_id of their own, so they are scoped through
+  conversation → contact → company, the same join the inbox and the message log
+  use.
 */
 
 // ─────────────────────── Support · per-agent load ───────────────────────
 
 export async function AgentLoadSection({
+  companyId,
   unassignedOpen,
 }: {
+  companyId: string;
   unassignedOpen: number;
 }) {
   const db = getDb();
@@ -48,9 +56,13 @@ export async function AgentLoadSection({
         ),
       })
       .from(conversation)
-      .where(isNotNull(conversation.assignedAgentId))
+      .innerJoin(contact, eq(contact.id, conversation.contactId))
+      .where(and(eq(contact.companyId, companyId), isNotNull(conversation.assignedAgentId)))
       .groupBy(conversation.assignedAgentId),
-    db.select({ id: member.id, name: member.name }).from(member),
+    db
+      .select({ id: member.id, name: member.name })
+      .from(member)
+      .where(eq(member.companyId, companyId)),
   ]);
 
   const nameById = new Map(membersList.map((m) => [m.id, m.name]));
@@ -64,7 +76,7 @@ export async function AgentLoadSection({
     .slice(0, 8);
 
   return (
-    <Card title="Assigned agents" meta={<Pill kind="real" />}>
+    <Card title="Who is handling the chats" meta={<Pill kind="real" />}>
       {agents.length === 0 && unassignedOpen === 0 ? (
         <p className="text-[12px] text-[var(--color-faint)]">
           No conversations assigned yet.
@@ -81,7 +93,7 @@ export async function AgentLoadSection({
           ))}
           {unassignedOpen > 0 && (
             <div className="flex items-center justify-between text-[13px]">
-              <span className="text-[var(--color-faint)]">Unassigned</span>
+              <span className="text-[var(--color-faint)]">Nobody assigned</span>
               <span className="font-mono text-[12px] text-[var(--color-muted)]">
                 {unassignedOpen} open
               </span>
@@ -95,7 +107,7 @@ export async function AgentLoadSection({
 
 export function AgentLoadSkeleton() {
   return (
-    <Card title="Assigned agents" meta={<Pill kind="real" />}>
+    <Card title="Who is handling the chats" meta={<Pill kind="real" />}>
       <div className="skeleton-stagger flex flex-col gap-2.5">
         {Array.from({ length: 5 }, (_, i) => (
           <div
@@ -107,6 +119,110 @@ export function AgentLoadSkeleton() {
             <Skel className="h-[13px] w-28" />
           </div>
         ))}
+      </div>
+    </Card>
+  );
+}
+
+// ─────────────────────── Support · reply speed ───────────────────────
+
+/** Messages read to measure reply speed. Seven days of one company's traffic. */
+const REPLY_SAMPLE_LIMIT = 5000;
+
+/**
+ * How long a customer waits for an answer — measured, not estimated.
+ *
+ * For each conversation that received a customer message in the window, this
+ * pairs that first inbound message with the first outbound message that
+ * followed it. The gap is what the customer actually experienced, so an
+ * automation's reply counts exactly as much as a person's (and the card says
+ * so). Conversations nobody has answered yet contribute no gap — they are
+ * reported separately rather than quietly dragging the average down or, worse,
+ * being counted as instant.
+ */
+export async function ReplySpeedSection({ companyId }: { companyId: string }) {
+  const db = getDb();
+  const { since } = reportWindow();
+
+  const rows = await db
+    .select({
+      conversationId: message.conversationId,
+      direction: message.direction,
+      createdAt: message.createdAt,
+    })
+    .from(message)
+    .innerJoin(conversation, eq(conversation.id, message.conversationId))
+    .innerJoin(contact, eq(contact.id, conversation.contactId))
+    .where(and(eq(contact.companyId, companyId), gte(message.createdAt, since)))
+    .orderBy(asc(message.createdAt))
+    .limit(REPLY_SAMPLE_LIMIT);
+
+  const firstInboundAt = new Map<string, number>();
+  const answered = new Set<string>();
+  const waits: number[] = [];
+
+  for (const r of rows) {
+    const at = new Date(r.createdAt).getTime();
+    if (r.direction === "IN") {
+      if (!firstInboundAt.has(r.conversationId)) firstInboundAt.set(r.conversationId, at);
+      continue;
+    }
+    const asked = firstInboundAt.get(r.conversationId);
+    if (asked == null || answered.has(r.conversationId)) continue;
+    answered.add(r.conversationId);
+    waits.push((at - asked) / 1000);
+  }
+
+  const measured = waits.length;
+  const stillWaiting = firstInboundAt.size - measured;
+  const average = measured ? waits.reduce((a, b) => a + b, 0) / measured : 0;
+  const longest = measured ? Math.max(...waits) : 0;
+
+  return (
+    <Card title="How fast customers get an answer" meta={<Pill kind="real" />}>
+      {measured === 0 ? (
+        <NoData>
+          Nobody has written in over the last seven days, so there is no waiting
+          time to measure.
+        </NoData>
+      ) : (
+        <>
+          <div className="grid grid-cols-3 gap-3">
+            <Stat label="Average wait" value={humanDuration(average)} />
+            <Stat label="Longest wait" value={humanDuration(longest)} />
+            <Stat label="Chats measured" value={measured} />
+          </div>
+          <p className="mt-3 text-[11px] leading-relaxed text-[var(--color-faint)]">
+            Last 7 days, Malaysian time. Measured from the customer&apos;s first
+            message to the first reply they received, whether that reply came
+            from the team or from an automation.
+            {stillWaiting > 0 &&
+              ` ${stillWaiting} ${stillWaiting === 1 ? "chat is" : "chats are"} still waiting for a first reply.`}
+          </p>
+        </>
+      )}
+    </Card>
+  );
+}
+
+export function ReplySpeedSkeleton() {
+  return (
+    <Card title="How fast customers get an answer" meta={<Pill kind="real" />}>
+      <div className="skeleton-stagger grid grid-cols-3 gap-3">
+        {Array.from({ length: 3 }, (_, i) => (
+          <div
+            key={i}
+            className="rounded-xl border border-[var(--color-border)] p-4"
+            style={{ "--i": i } as React.CSSProperties}
+          >
+            <Skel className="h-[12px] w-20" />
+            <Skel className="mt-2 h-[24px] w-16" />
+          </div>
+        ))}
+      </div>
+      <div className="mt-3 flex flex-col gap-1.5">
+        <Skel className="h-[11px] w-full" />
+        <Skel className="h-[11px] w-2/3" />
       </div>
     </Card>
   );
@@ -132,9 +248,11 @@ export async function TagReachSection({ companyId }: { companyId: string }) {
     .limit(6);
 
   return (
-    <Card title="Tag reach" meta={<Pill kind="real" />}>
+    <Card title="Contacts per tag" meta={<Pill kind="real" />}>
       {rows.length === 0 ? (
-        <p className="text-[12px] text-[var(--color-faint)]">No tags yet.</p>
+        <p className="text-[12px] text-[var(--color-faint)]">
+          No tags yet — add them under Settings.
+        </p>
       ) : (
         <div className="flex flex-col gap-3">
           {rows.map((t) => (
@@ -154,7 +272,7 @@ export async function TagReachSection({ companyId }: { companyId: string }) {
 
 export function TagReachSkeleton() {
   return (
-    <Card title="Tag reach" meta={<Pill kind="real" />}>
+    <Card title="Contacts per tag" meta={<Pill kind="real" />}>
       <div className="skeleton-stagger flex flex-col gap-3">
         {[92, 74, 58, 44, 30, 20].map((pct, i) => (
           <div
@@ -176,9 +294,18 @@ export function TagReachSkeleton() {
 
 // ─────────────────────── Live reporting · activity feed ───────────────────────
 
-export async function ActivitySection() {
+/**
+ * The two feeds that can be attributed to a company: messages (through their
+ * conversation's contact) and automation runs (through the automation).
+ *
+ * Inbound webhook deliveries used to be merged in here too. They are not: the
+ * `webhook_event` table has no company_id, so on a shared deployment this card
+ * was showing another company's traffic to whoever opened the dashboard. They
+ * still have a page of their own under System Logs → Webhooks.
+ */
+export async function ActivitySection({ companyId }: { companyId: string }) {
   const db = getDb();
-  const [msgs, runs, hooks] = await Promise.all([
+  const [msgs, runs] = await Promise.all([
     db
       .select({
         id: message.id,
@@ -187,27 +314,23 @@ export async function ActivitySection() {
         createdAt: message.createdAt,
       })
       .from(message)
+      .innerJoin(conversation, eq(conversation.id, message.conversationId))
+      .innerJoin(contact, eq(contact.id, conversation.contactId))
+      .where(eq(contact.companyId, companyId))
       .orderBy(desc(message.createdAt))
-      .limit(8),
+      .limit(10),
     db
       .select({
         id: automationRun.id,
         status: automationRun.status,
+        name: automation.name,
         createdAt: automationRun.createdAt,
       })
       .from(automationRun)
+      .innerJoin(automation, eq(automation.id, automationRun.automationId))
+      .where(eq(automation.companyId, companyId))
       .orderBy(desc(automationRun.createdAt))
-      .limit(6),
-    db
-      .select({
-        id: webhookEvent.id,
-        source: webhookEvent.source,
-        eventType: webhookEvent.eventType,
-        createdAt: webhookEvent.createdAt,
-      })
-      .from(webhookEvent)
-      .orderBy(desc(webhookEvent.createdAt))
-      .limit(6),
+      .limit(8),
   ]);
 
   const items = [
@@ -220,14 +343,8 @@ export async function ActivitySection() {
     ...runs.map((r) => ({
       id: `r-${r.id}`,
       kind: "Automation",
-      text: `Automation run · ${r.status}`,
+      text: `${r.name} · ${RUN_STATUS[r.status] ?? r.status}`,
       ts: new Date(r.createdAt).getTime(),
-    })),
-    ...hooks.map((w) => ({
-      id: `w-${w.id}`,
-      kind: "Webhook",
-      text: `${w.source}${w.eventType ? ` · ${w.eventType}` : ""}`,
-      ts: new Date(w.createdAt).getTime(),
     })),
   ]
     .sort((a, b) => b.ts - a.ts)
@@ -235,9 +352,11 @@ export async function ActivitySection() {
     .map((a) => ({ id: a.id, kind: a.kind, text: a.text, at: relTime(new Date(a.ts)) }));
 
   return (
-    <Card title="Recent activity" meta={<Pill kind="real" />}>
+    <Card title="Latest activity" meta={<Pill kind="real" />}>
       {items.length === 0 ? (
-        <p className="text-[12px] text-[var(--color-faint)]">No recent activity.</p>
+        <p className="text-[12px] text-[var(--color-faint)]">
+          Nothing has happened yet.
+        </p>
       ) : (
         <ul className="flex flex-col">
           {items.map((a) => (
@@ -245,7 +364,7 @@ export async function ActivitySection() {
               key={a.id}
               className="flex items-center gap-3 border-b border-[var(--color-border)] py-2.5 text-[13px] last:border-0"
             >
-              <span className="w-16 shrink-0 text-[11px] uppercase tracking-wide text-[var(--color-faint)]">
+              <span className="w-20 shrink-0 text-[11px] uppercase tracking-wide text-[var(--color-faint)]">
                 {a.kind}
               </span>
               <span className="min-w-0 flex-1 truncate text-[var(--color-ink)]">
@@ -262,9 +381,17 @@ export async function ActivitySection() {
   );
 }
 
+/** automation_run.status is free-form text written by the engine. */
+const RUN_STATUS: Record<string, string> = {
+  running: "still running",
+  waiting: "waiting for the customer",
+  completed: "finished",
+  failed: "failed",
+};
+
 export function ActivitySkeleton() {
   return (
-    <Card title="Recent activity" meta={<Pill kind="real" />}>
+    <Card title="Latest activity" meta={<Pill kind="real" />}>
       <ul className="skeleton-stagger flex flex-col">
         {Array.from({ length: 8 }, (_, i) => (
           <li
@@ -272,7 +399,7 @@ export function ActivitySkeleton() {
             className="flex items-center gap-3 border-b border-[var(--color-border)] py-2.5 last:border-0"
             style={{ "--i": i } as React.CSSProperties}
           >
-            <Skel className="h-[11px] w-16 shrink-0" />
+            <Skel className="h-[11px] w-20 shrink-0" />
             <Skel className="h-[14px] min-w-0 flex-1" />
             <Skel className="h-[11px] w-12 shrink-0" />
           </li>
@@ -284,13 +411,17 @@ export function ActivitySkeleton() {
 
 // ─────────────────────── Message analytics · 7-day series ───────────────────────
 
-export async function MessagesSeriesSection() {
+export async function MessagesSeriesSection({ companyId }: { companyId: string }) {
   const db = getDb();
   const { since, days } = reportWindow();
 
   // Bucket in Postgres: seven rows back instead of every outbound message of
   // the week. Only OUT rows are charted, so only OUT rows are read.
-  const dayExpr = sql<string>`to_char(date_trunc('day', ${message.createdAt} at time zone 'UTC'), 'YYYY-MM-DD')`;
+  //
+  // The buckets are Malaysian days. `created_at` is a timestamptz and the Worker
+  // runs on UTC, so without the conversion a day on this chart ran 08:00→08:00
+  // and the owner's morning sends landed in yesterday's column.
+  const dayExpr = sql<string>`to_char(date_trunc('day', ${message.createdAt} at time zone 'Asia/Kuala_Lumpur'), 'YYYY-MM-DD')`;
   const rows = await db
     .select({
       day: dayExpr,
@@ -301,14 +432,22 @@ export async function MessagesSeriesSection() {
       ),
     })
     .from(message)
-    .where(and(eq(message.direction, "OUT"), gte(message.createdAt, since)))
+    .innerJoin(conversation, eq(conversation.id, message.conversationId))
+    .innerJoin(contact, eq(contact.id, conversation.contactId))
+    .where(
+      and(
+        eq(contact.companyId, companyId),
+        eq(message.direction, "OUT"),
+        gte(message.createdAt, since)
+      )
+    )
     .groupBy(dayExpr);
 
   const byDay = new Map(rows.map((r) => [r.day, r]));
   const series = days.map((d) => byDay.get(d.key));
 
   return (
-    <Card title="Messages over time (7 days)" meta={<Pill kind="real" />}>
+    <Card title="Messages sent (last 7 days)" meta={<Pill kind="real" />}>
       <LineChart
         labels={days.map((d) => d.label)}
         series={[
@@ -343,7 +482,7 @@ export async function MessagesSeriesSection() {
 /** Matches the chart's fixed 132px plot box plus the legend row beneath it. */
 export function MessagesSeriesSkeleton() {
   return (
-    <Card title="Messages over time (7 days)" meta={<Pill kind="real" />}>
+    <Card title="Messages sent (last 7 days)" meta={<Pill kind="real" />}>
       <div className="skeleton-stagger flex h-[132px] items-end gap-2 px-1 pb-[18px]">
         {[46, 68, 54, 82, 61, 39, 72].map((h, i) => (
           <div
