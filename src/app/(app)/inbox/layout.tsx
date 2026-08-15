@@ -7,6 +7,7 @@ import { getVisibility, conversationVisibilityWhere } from "@/lib/access";
 import { Topbar } from "@/components/Topbar";
 import { ConversationList } from "@/components/inbox/ConversationList";
 import { ConversationListSkeleton } from "@/components/inbox/ConversationListSkeleton";
+import { LiveRefresh } from "@/components/inbox/LiveRefresh";
 
 /** How many conversations the rail loads at once — newest first. */
 const LIST_LIMIT = 200;
@@ -68,6 +69,8 @@ export default async function InboxLayout({
 
   return (
     <>
+      {/* Poll for new customer messages — no WebSockets in this app yet. */}
+      <LiveRefresh seconds={5} />
       <Topbar title="Inbox" subtitle="Shared team inbox" current={me} />
       <div className="flex min-h-0 flex-1">
         <Suspense fallback={<ConversationListSkeleton />}>

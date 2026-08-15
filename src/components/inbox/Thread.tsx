@@ -1,6 +1,46 @@
-import { clockTime } from "@/lib/format";
+import { clockTime, stamp } from "@/lib/format";
 import { IconCheck } from "@/components/icons";
 import { demoTap } from "@/app/actions";
+
+/**
+ * What Meta says happened to an outbound message — the tick every WhatsApp user
+ * already reads without being taught. This used to be a single grey check on
+ * every outbound message regardless of status, so a FAILED send looked exactly
+ * like a delivered one.
+ */
+function DeliveryState({ status }: { status: string }) {
+  if (status === "FAILED") {
+    return (
+      <span title="WhatsApp refused this message — it never reached the customer." className="font-semibold text-[var(--color-danger)]">
+        failed
+      </span>
+    );
+  }
+  if (status === "READ") {
+    return (
+      <span title="Read by the customer" className="flex text-[var(--color-info,#3b82f6)]">
+        <IconCheck width={12} height={12} />
+        <IconCheck width={12} height={12} className="-ml-[7px]" />
+      </span>
+    );
+  }
+  if (status === "DELIVERED") {
+    return (
+      <span title="Delivered to the customer's phone" className="flex">
+        <IconCheck width={12} height={12} />
+        <IconCheck width={12} height={12} className="-ml-[7px]" />
+      </span>
+    );
+  }
+  if (status === "QUEUED") {
+    return <span title="Waiting to be sent">·</span>;
+  }
+  return (
+    <span title="Sent to WhatsApp">
+      <IconCheck width={12} height={12} />
+    </span>
+  );
+}
 
 type Msg = {
   id: string;
@@ -56,8 +96,8 @@ export function Thread({
                       : "text-[var(--color-faint)]"
                   }`}
                 >
-                  {clockTime(m.createdAt)}
-                  {out && <IconCheck width={12} height={12} />}
+                  <span title={stamp(m.createdAt)}>{clockTime(m.createdAt)}</span>
+                  {out && <DeliveryState status={m.status} />}
                 </div>
               </div>
 

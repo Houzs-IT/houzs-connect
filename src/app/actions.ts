@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { and, eq } from "drizzle-orm";
+import { and, asc, eq } from "drizzle-orm";
 import { getCurrentMember } from "@/lib/current-member";
 import { getDb } from "@/db/client";
 import {
@@ -12,9 +12,11 @@ import {
   message,
   note,
   payment,
+  quickReply,
   tag,
 } from "@/db/schema";
-import { recordInbound } from "@/lib/whatsapp/transport";
+import { recordInbound, sendOutbound } from "@/lib/whatsapp/transport";
+import { countPlaceholders, listTemplates, templateConfig } from "@/lib/whatsapp/templates";
 import {
   handleCustomerReply,
   handleReceipt,
@@ -75,6 +77,73 @@ export async function sendMessage(formData: FormData) {
   }
   revalidatePath(`/inbox/${conversationId}`);
   revalidatePath("/inbox");
+}
+
+/**
+ * Send an approved template on a conversation.
+ *
+ * Outside the 24-hour window this is the ONLY thing WhatsApp will deliver, so
+ * it is not an advanced feature — it is how every reminder, reschedule and
+ * balance-collection message gets out. `params` fill the template's {{1}},
+ * {{2}}, … in order; `preview` is the resolved copy we store on the message row
+ * so the inbox shows what the customer actually received.
+ */
+export async function sendTemplateMessage(formData: FormData): Promise<void> {
+  const conversationId = String(formData.get("conversationId") ?? "");
+  const templateName = String(formData.get("templateName") ?? "").trim();
+  const language = String(formData.get("language") ?? "en").trim() || "en";
+  const preview = String(formData.get("preview") ?? "").trim();
+  const paramsRaw = String(formData.get("params") ?? "");
+  if (!conversationId || !templateName) return;
+
+  const auth = await authorizeConversation(conversationId);
+  if (!auth) return;
+
+  const params = paramsRaw
+    ? paramsRaw.split("\n").map((s) => s.trim()).filter(Boolean)
+    : [];
+
+  await sendOutbound(conversationId, preview || `[template: ${templateName}]`, {
+    isBot: false,
+    sentByMemberId: auth.me.id,
+    type: "TEMPLATE",
+    template: { name: templateName, lang: language, params },
+  });
+
+  revalidatePath(`/inbox/${conversationId}`);
+  revalidatePath("/inbox");
+}
+
+/** The approved templates an agent may send, for the composer's picker. */
+export async function listSendableTemplates(): Promise<
+  { name: string; language: string; body: string; placeholders: number }[]
+> {
+  const me = await getCurrentMember();
+  if (!me) return [];
+  const cfg = templateConfig();
+  if (!cfg) return [];
+  const res = await listTemplates(cfg);
+  if (!res.ok) return [];
+  return res.templates
+    .filter((t) => t.status === "APPROVED")
+    .map((t) => ({
+      name: t.name,
+      language: t.language,
+      body: t.body,
+      placeholders: countPlaceholders(t.body),
+    }));
+}
+
+/** Quick replies for the "/" shortcut and the + menu. */
+export async function listQuickReplies(): Promise<{ shortcut: string; body: string }[]> {
+  const me = await getCurrentMember();
+  if (!me) return [];
+  const db = getDb();
+  const rows = await db.query.quickReply.findMany({
+    where: eq(quickReply.companyId, me.companyId),
+    orderBy: asc(quickReply.shortcut),
+  });
+  return rows.map((r) => ({ shortcut: r.shortcut, body: r.body }));
 }
 
 /** Assign a conversation to an agent and/or department. */
