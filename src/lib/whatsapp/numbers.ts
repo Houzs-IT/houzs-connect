@@ -253,14 +253,25 @@ export function nextStep(n: WabaNumber): string | null {
   if (n.connection === "BANNED") {
     return "Meta has banned this number. It cannot be recovered here — appeal in WhatsApp Manager.";
   }
-  if (n.codeVerification === "EXPIRED") {
-    return "The verification code expired before it was entered. Send a new one.";
-  }
-  if (n.codeVerification === "NOT_VERIFIED") {
-    return "This number has not proved ownership yet. Send a verification code.";
-  }
-  if (n.connection === "PENDING") {
-    return "Verified, but not registered for Cloud API yet — register it with a six-digit PIN to start sending.";
+  // Ownership questions only apply to a number that is not already serving.
+  //
+  // `code_verification_status` tracks the SIM-ownership code flow, and it goes
+  // EXPIRED whenever a code was requested and never entered — which outlives
+  // the registration it was part of. On a CONNECTED number it is a leftover,
+  // not a fault: delivery is decided by `status`, `quality_rating` and
+  // `messaging_limit_tier`, all of which are healthy by definition here.
+  // Reading it first told the owner of a live production number, sending at
+  // TIER_250 on GREEN quality, to go re-verify it.
+  if (n.connection !== "CONNECTED") {
+    if (n.codeVerification === "EXPIRED") {
+      return "The verification code expired before it was entered. Send a new one.";
+    }
+    if (n.codeVerification === "NOT_VERIFIED") {
+      return "This number has not proved ownership yet. Send a verification code.";
+    }
+    if (n.connection === "PENDING") {
+      return "Verified, but not registered for Cloud API yet — register it with a six-digit PIN to start sending.";
+    }
   }
   if (n.connection === "FLAGGED") {
     return "Meta flagged this number for message quality. It still sends, but the limit tier will drop if it stays flagged.";
