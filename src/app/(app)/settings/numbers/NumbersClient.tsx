@@ -56,8 +56,15 @@ function connectionTone(s: string | null): Tone {
   return "mute";
 }
 
-function verificationTone(s: string | null): Tone {
+/**
+ * `connection` is passed in because the same verification value means different
+ * things either side of registration. On a CONNECTED number an EXPIRED code is
+ * a spent artifact of some earlier request; painting it red made a healthy
+ * production number look broken.
+ */
+function verificationTone(s: string | null, connection: string | null): Tone {
   if (s === "VERIFIED") return "good";
+  if (connection === "CONNECTED") return "mute";
   if (s === "EXPIRED") return "bad";
   if (s === "NOT_VERIFIED") return "warn";
   return "mute";
@@ -368,10 +375,14 @@ function NumberActions({ n, managerUrl }: { n: WabaNumber; managerUrl: string | 
 
   const verified = n.codeVerification === "VERIFIED";
   const connected = n.connection === "CONNECTED";
+  // A connected number is registered and sending; re-running ownership
+  // verification on it is at best pointless and at worst disruptive, so the
+  // controls are not offered however its code_verification_status reads.
+  const needsVerifying = !connected && !verified;
 
   return (
     <div className="mt-3 space-y-3 border-t border-[var(--color-border)] pt-3">
-      {!verified && (
+      {needsVerifying && (
         <div className="flex flex-wrap items-end gap-2">
           <div>
             <label className={labelCls}>
@@ -539,7 +550,7 @@ function NumberCard({ n, managerUrl }: { n: WabaNumber; managerUrl: string | nul
         <Badge text={n.connection ?? "unknown"} tone={connectionTone(n.connection)} />
         <Badge
           text={`verification: ${n.codeVerification ?? "unknown"}`}
-          tone={verificationTone(n.codeVerification)}
+          tone={verificationTone(n.codeVerification, n.connection)}
         />
         {n.nameStatus && <Badge text={`name: ${n.nameStatus}`} tone="mute" />}
         <Badge text={`quality: ${n.qualityRating ?? "not rated"}`} tone="mute" />
