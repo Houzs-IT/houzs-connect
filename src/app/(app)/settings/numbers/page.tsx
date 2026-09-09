@@ -45,7 +45,11 @@ export default async function NumbersPage() {
             </p>
           </div>
         ) : (
-          <NumbersClient numbers={view.numbers} activeId={view.activeId} />
+          <NumbersClient
+            numbers={view.numbers}
+            activeId={view.activeId}
+            managerUrl={view.managerUrl}
+          />
         )}
       </div>
     </PageChrome>

@@ -201,12 +201,45 @@ export async function registerNumber(
   });
 }
 
-/** Release a number from Cloud API. Same 72-hour rate limit as register. */
+/**
+ * Release a number from Cloud API. Same 72-hour rate limit as register.
+ *
+ * This is NOT deletion, and the difference matters to anyone clicking it:
+ * deregistering stops the number sending and receiving through this app, but
+ * leaves it on the WABA with its message history, and re-registering brings it
+ * back. It is the reversible half of "stop using this number".
+ */
 export async function deregisterNumber(
   cfg: WabaConfig,
   phoneId: string
 ): Promise<GraphResult<{ success?: boolean }>> {
   return graph(`${GRAPH}/${phoneId}/deregister`, cfg.token, { method: "POST" });
+}
+
+/**
+ * Where to finish a deletion, because the API cannot do it.
+ *
+ * Meta is explicit: "You can't delete a business phone number via the API. To
+ * delete a business phone number, use WhatsApp Manager instead." It also asks
+ * for the account password at that screen, which is the real reason — a number
+ * and its entire message history going away should not be reachable by an API
+ * token that leaked.
+ *
+ * So this app deregisters (which it CAN do) and hands the person a link to the
+ * exact page for the irreversible half, rather than shipping a Delete button
+ * that quietly does something weaker than it says.
+ *
+ * Two further limits worth knowing before clicking through: a number that has
+ * sent paid messages in the last 30 days cannot be deleted at all, and deletion
+ * takes the message history with it.
+ */
+export function whatsAppManagerNumbersUrl(wabaId: string): string {
+  return `https://business.facebook.com/wa/manage/phone-numbers/?waba_id=${encodeURIComponent(wabaId)}`;
+}
+
+/** The WABA id, for links only — never the token. */
+export function wabaIdForLinks(): string | null {
+  return process.env.WHATSAPP_WABA_ID || null;
 }
 
 /**

@@ -11,6 +11,8 @@ import {
   requestCode,
   verifyCode,
   wabaConfig,
+  wabaIdForLinks,
+  whatsAppManagerNumbersUrl,
   type CodeMethod,
   type WabaNumber,
 } from "@/lib/whatsapp/numbers";
@@ -35,22 +37,41 @@ export interface NumbersView {
   numbers: WabaNumber[];
   /** The id this app sends from, whether or not it is on the list above. */
   activeId: string | null;
+  /** Deep link to WhatsApp Manager — the only place a number can be deleted. */
+  managerUrl: string | null;
   error?: string;
 }
 
 /** Every number on the WABA, with the active sender marked. */
 export async function fetchNumbers(): Promise<NumbersView> {
   const activeId = activePhoneNumberId();
+  const wabaId = wabaIdForLinks();
+  const managerUrl = wabaId ? whatsAppManagerNumbersUrl(wabaId) : null;
   if (!(await requireAdmin())) {
-    return { configured: true, permitted: false, numbers: [], activeId: null };
+    return {
+      configured: true,
+      permitted: false,
+      numbers: [],
+      activeId: null,
+      managerUrl: null,
+    };
   }
   const cfg = wabaConfig();
-  if (!cfg) return { configured: false, permitted: true, numbers: [], activeId };
+  if (!cfg) {
+    return { configured: false, permitted: true, numbers: [], activeId, managerUrl };
+  }
   const res = await listNumbers(cfg);
   if (!res.ok) {
-    return { configured: true, permitted: true, numbers: [], activeId, error: res.error };
+    return {
+      configured: true,
+      permitted: true,
+      numbers: [],
+      activeId,
+      managerUrl,
+      error: res.error,
+    };
   }
-  return { configured: true, permitted: true, numbers: res.data, activeId };
+  return { configured: true, permitted: true, numbers: res.data, activeId, managerUrl };
 }
 
 export interface ActionResult {
