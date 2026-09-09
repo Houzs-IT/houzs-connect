@@ -13,6 +13,8 @@
 //
 // Docs: https://developers.facebook.com/docs/whatsapp/business-management-api/message-templates
 
+import { graph } from "./graph";
+
 const GRAPH = "https://graph.facebook.com/v21.0";
 
 export type TemplateCategory = "UTILITY" | "MARKETING" | "AUTHENTICATION";
@@ -171,52 +173,6 @@ export function countPlaceholders(body: string): number {
   let m: RegExpExecArray | null;
   while ((m = re.exec(body)) !== null) max = Math.max(max, Number(m[1]));
   return max;
-}
-
-interface GraphError {
-  error?: { message?: string; error_user_msg?: string; code?: number };
-}
-
-async function graph<T>(
-  url: string,
-  token: string,
-  init?: RequestInit
-): Promise<{ ok: true; data: T } | { ok: false; error: string }> {
-  let res: Response;
-  try {
-    res = await fetch(url, {
-      ...init,
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json",
-        ...(init?.headers ?? {}),
-      },
-      signal: AbortSignal.timeout(20_000),
-    });
-  } catch (e) {
-    const err = e as { name?: string; message?: string };
-    return {
-      ok: false,
-      error: err?.name === "TimeoutError" ? "Meta did not respond in time." : (err?.message ?? "Network error"),
-    };
-  }
-  const text = await res.text().catch(() => "");
-  let json: unknown = null;
-  try {
-    json = text ? JSON.parse(text) : null;
-  } catch {
-    // Non-JSON body — fall through to the raw text as the error.
-  }
-  if (!res.ok) {
-    const g = json as GraphError | null;
-    // error_user_msg is the human-readable one Meta shows in its own UI; the
-    // generic `message` is usually "(#100) Invalid parameter", which helps nobody.
-    return {
-      ok: false,
-      error: g?.error?.error_user_msg || g?.error?.message || text.slice(0, 300) || `HTTP ${res.status}`,
-    };
-  }
-  return { ok: true, data: (json ?? {}) as T };
 }
 
 interface RawComponent {

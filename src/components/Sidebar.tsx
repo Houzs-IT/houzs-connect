@@ -11,6 +11,7 @@ import {
   IconForm,
   IconSettings,
   IconReceipt,
+  IconPhone,
 } from "./icons";
 
 type NavItem = {
@@ -43,6 +44,7 @@ const SECTIONS: { title: string; items: NavItem[] }[] = [
     title: "System",
     items: [
       { href: "/logs", label: "System Logs", Icon: IconReceipt },
+      { href: "/settings/numbers", label: "Phone Numbers", Icon: IconPhone },
       { href: "/settings", label: "Settings", Icon: IconSettings },
     ],
   },
