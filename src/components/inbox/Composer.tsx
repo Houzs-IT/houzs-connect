@@ -1,13 +1,38 @@
 "use client";
 
 // The reply composer, with the "+" menu Seampify has: quick replies, templates,
-// and the attachment/emoji/contact entries that are not wired yet but must not
-// pretend to be. A control that looks live and does nothing is worse than one
-// that says what it needs.
+// attachments, emoji and contact cards. The one entry still disabled says what
+// it needs — a control that looks live and does nothing is worse than one that
+// admits it.
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { sendMessage, sendTemplateMessage, listQuickReplies, listSendableTemplates } from "@/app/actions";
+import {
+  listInboxContacts,
+  sendAttachment,
+  sendContactCard,
+  sendVoiceNote,
+} from "@/app/(app)/inbox/media-actions";
 import { IconPaperclip, IconSend } from "@/components/icons";
+import { EmojiPicker } from "@/components/inbox/EmojiPicker";
+import {
+  ATTACHMENT_ACCEPT,
+  checkAttachment,
+  formatBytes,
+  MAX_CAPTION_CHARS,
+  MAX_DOCUMENT_BYTES,
+  MAX_IMAGE_BYTES,
+  resolveMimeType,
+} from "@/lib/whatsapp/media-limits";
+import {
+  detectVoiceSupport,
+  formatDuration,
+  MAX_VOICE_SECONDS,
+  micErrorMessage,
+  VOICE_SUPPORT_UNKNOWN,
+  VOICE_UPLOAD_MIME,
+  type VoiceSupport,
+} from "@/lib/whatsapp/voice";
 
 interface QuickReply {
   shortcut: string;
@@ -19,24 +44,120 @@ interface Template {
   body: string;
   placeholders: number;
 }
+interface ContactOption {
+  id: string;
+  name: string | null;
+  phone: string;
+  email: string | null;
+}
+
+/** The + menu entries that do something — `null` is the one still unbuilt. */
+type MenuAction = "attach" | "emoji" | "quick" | "contact" | "template" | null;
+
+/** What the composer will accept, spelled out for the operator up front. */
+const LIMITS_HINT = `JPEG or PNG up to ${formatBytes(
+  MAX_IMAGE_BYTES
+)} · PDF, Word, Excel, PowerPoint or text up to ${formatBytes(MAX_DOCUMENT_BYTES)}`;
+
+/**
+ * Whether THIS browser can record a WhatsApp voice note — read without tripping
+ * over server rendering.
+ *
+ * The answer exists only in the browser, and a client component is rendered on
+ * the server first. That rules out a useState initialiser (server and client
+ * would disagree and hydration would tear) and it must not be pushed in with a
+ * setState inside an effect. useSyncExternalStore is the one hook that takes a
+ * deliberately different server answer: the server renders "not known yet", and
+ * React re-renders with the real answer the moment it hydrates.
+ */
+let cachedVoiceSupport: VoiceSupport | null = null;
+function readVoiceSupport(): VoiceSupport {
+  // Memoised: useSyncExternalStore compares snapshots by reference, so a fresh
+  // object per call would re-render forever.
+  cachedVoiceSupport ??= detectVoiceSupport();
+  return cachedVoiceSupport;
+}
+const serverVoiceSupport = () => VOICE_SUPPORT_UNKNOWN;
+/** Nothing to subscribe to — the answer cannot change while the page is open. */
+const subscribeVoiceSupport = () => () => {};
 
 /** Fill {{1}}, {{2}}, … so the operator sees what the customer will read. */
 function renderPreview(body: string, params: string[]): string {
   return body.replace(/\{\{\s*(\d+)\s*\}\}/g, (_m, n) => params[Number(n) - 1] || `{{${n}}}`);
 }
 
-export function Composer({ conversationId }: { conversationId: string }) {
+export function Composer({
+  conversationId,
+  windowExpiresAt = null,
+}: {
+  conversationId: string;
+  /**
+   * When Meta's 24-hour customer-service window shuts, ISO, or null if the
+   * customer has never written to us.
+   *
+   * Outside that window WhatsApp refuses every free-form message — the send
+   * looks fine in our UI and the customer receives nothing. The operator has to
+   * be told before they type, not after, so the reply box says so and only the
+   * template path stays available.
+   */
+  windowExpiresAt?: string | null;
+}) {
+  // Re-checked on a timer rather than read once: a composer sitting open across
+  // the deadline must stop inviting a reply the moment it passes.
+  const [windowOpen, setWindowOpen] = useState(
+    () => !!windowExpiresAt && new Date(windowExpiresAt).getTime() > Date.now()
+  );
+  useEffect(() => {
+    const id = setInterval(
+      () => setWindowOpen(!!windowExpiresAt && new Date(windowExpiresAt).getTime() > Date.now()),
+      15_000
+    );
+    return () => clearInterval(id);
+  }, [windowExpiresAt]);
   const [kind, setKind] = useState<"reply" | "note">("reply");
   const [menuOpen, setMenuOpen] = useState(false);
-  const [panel, setPanel] = useState<null | "quick" | "template">(null);
+  const [panel, setPanel] = useState<
+    null | "quick" | "template" | "emoji" | "attach" | "contact" | "voice"
+  >(null);
   const [quickReplies, setQuickReplies] = useState<QuickReply[]>([]);
   const [templates, setTemplates] = useState<Template[]>([]);
   const [loading, setLoading] = useState(false);
   const [chosen, setChosen] = useState<Template | null>(null);
   const [params, setParams] = useState<string[]>([]);
   const [draft, setDraft] = useState("");
+  // Attachment + contact-card state. `busy` covers both — only one panel is
+  // ever open, and both hold the operator until Meta answers.
+  const [file, setFile] = useState<File | null>(null);
+  const [caption, setCaption] = useState("");
+  const [contacts, setContacts] = useState<ContactOption[]>([]);
+  const [contactQuery, setContactQuery] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const formRef = useRef<HTMLFormElement>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+  const textRef = useRef<HTMLTextAreaElement>(null);
+  const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const note = kind === "note";
+
+  // ── Voice notes ────────────────────────────────────────────────────────────
+  const voiceSupport = useSyncExternalStore(
+    subscribeVoiceSupport,
+    readVoiceSupport,
+    serverVoiceSupport
+  );
+  const [voiceState, setVoiceState] = useState<"idle" | "starting" | "recording" | "ready">("idle");
+  /** Ticked by an interval, never computed in render — a clock read while
+   *  rendering makes the output depend on when React happened to run. */
+  const [elapsedMs, setElapsedMs] = useState(0);
+  const [clip, setClip] = useState<{ blob: Blob; url: string; ms: number } | null>(null);
+  const recorderRef = useRef<MediaRecorder | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const chunksRef = useRef<BlobPart[]>([]);
+  /** Set by Cancel so onstop throws the audio away instead of offering it. */
+  const discardRef = useRef(false);
+  const tickRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const startedAtRef = useRef(0);
+  const clipUrlRef = useRef<string | null>(null);
 
   async function openQuick() {
     setMenuOpen(false);
@@ -58,14 +179,345 @@ export function Composer({ conversationId }: { conversationId: string }) {
     }
   }
 
-  const menuItems = [
-    { label: "Attachments", onClick: null, hint: "needs media upload" },
-    { label: "Emoji", onClick: null, hint: "not built yet" },
-    { label: "Quick Reply", onClick: openQuick, hint: null },
-    { label: "Send Contact", onClick: null, hint: "not built yet" },
-    { label: "Send Template Message", onClick: openTemplates, hint: null },
-    { label: "Send Buttons / Flows", onClick: null, hint: "needs a Flow builder" },
+  // ── Attachments ────────────────────────────────────────────────────────────
+
+  function openAttachment() {
+    setMenuOpen(false);
+    setError(null);
+    setFile(null);
+    setCaption("");
+    fileRef.current?.click();
+  }
+
+  /**
+   * Check the file HERE, before a byte moves. Meta answers an unsupported or
+   * oversized upload with "(#100) Invalid parameter", which tells the operator
+   * nothing; the server re-runs the identical check because this one is only a
+   * courtesy.
+   */
+  function onFilePicked(e: React.ChangeEvent<HTMLInputElement>) {
+    const picked = e.target.files?.[0] ?? null;
+    // Clear the input so picking the SAME file again still fires onChange.
+    e.target.value = "";
+    if (!picked) return;
+    setCaption("");
+    setPanel("attach");
+    const check = checkAttachment({
+      name: picked.name,
+      type: resolveMimeType(picked.name, picked.type),
+      size: picked.size,
+    });
+    if (!check.ok) {
+      setFile(null);
+      setError(check.error);
+      return;
+    }
+    setError(null);
+    setFile(picked);
+  }
+
+  async function submitAttachment() {
+    if (!file || busy) return;
+    setBusy(true);
+    setError(null);
+    const fd = new FormData();
+    fd.set("conversationId", conversationId);
+    fd.set("caption", caption);
+    fd.set("file", file);
+    const res = await sendAttachment(fd);
+    setBusy(false);
+    if (!res.ok) {
+      setError(res.error ?? "The attachment could not be sent.");
+      return;
+    }
+    setFile(null);
+    setCaption("");
+    setPanel(null);
+  }
+
+  // ── Voice notes ────────────────────────────────────────────────────────────
+  //
+  // Record → review → send. The review step is not politeness: this composer
+  // talks to real customers, and a recording cannot be unsent once Meta has it.
+
+  /** Let go of the microphone and the timer. Safe to call twice. */
+  function releaseRecorder() {
+    if (tickRef.current) {
+      clearInterval(tickRef.current);
+      tickRef.current = null;
+    }
+    streamRef.current?.getTracks().forEach((t) => t.stop());
+    streamRef.current = null;
+    recorderRef.current = null;
+  }
+
+  /** Throw away the pending recording and the blob URL holding it in memory. */
+  function dropClip() {
+    if (clipUrlRef.current) {
+      URL.revokeObjectURL(clipUrlRef.current);
+      clipUrlRef.current = null;
+    }
+    setClip(null);
+  }
+
+  function stopVoice() {
+    const rec = recorderRef.current;
+    if (tickRef.current) {
+      clearInterval(tickRef.current);
+      tickRef.current = null;
+    }
+    // onstop assembles the blob; releasing the mic there keeps one owner of it.
+    if (rec && rec.state !== "inactive") rec.stop();
+    else releaseRecorder();
+  }
+
+  function cancelVoice() {
+    discardRef.current = true;
+    stopVoice();
+    dropClip();
+    setVoiceState("idle");
+    setElapsedMs(0);
+    setError(null);
+    setPanel(null);
+  }
+
+  async function startVoice() {
+    // "starting" is a real state: getUserMedia can sit on the browser's own
+    // permission prompt for as long as the operator ignores it, and a second
+    // click during that must not open a second microphone.
+    if (busy || voiceState === "starting" || voiceState === "recording") return;
+    setPanel("voice");
+    setError(null);
+    dropClip();
+
+    // Nothing is recorded when the result could not be a voice note — a wrong
+    // container still "sends", it just arrives as a file to download.
+    if (!voiceSupport.ok) {
+      setVoiceState("idle");
+      setError(voiceSupport.reason);
+      return;
+    }
+
+    setVoiceState("starting");
+    let stream: MediaStream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    } catch (e) {
+      // A denied microphone is remembered by the browser, so this is the only
+      // place the operator will ever be told why the button stopped working.
+      setVoiceState("idle");
+      setError(micErrorMessage(e));
+      return;
+    }
+
+    let recorder: MediaRecorder;
+    try {
+      recorder = new MediaRecorder(stream, { mimeType: voiceSupport.recorderMime });
+    } catch (e) {
+      stream.getTracks().forEach((t) => t.stop());
+      setVoiceState("idle");
+      setError(
+        `This browser reported that it supports ${voiceSupport.recorderMime} but would not start a recorder for it: ${
+          e instanceof Error ? e.message : String(e)
+        }`
+      );
+      return;
+    }
+
+    chunksRef.current = [];
+    discardRef.current = false;
+
+    recorder.ondataavailable = (ev: BlobEvent) => {
+      if (ev.data.size > 0) chunksRef.current.push(ev.data);
+    };
+    recorder.onerror = () => {
+      releaseRecorder();
+      setVoiceState("idle");
+      setError("The browser stopped the recording with an error. Nothing was sent.");
+    };
+    recorder.onstop = () => {
+      const parts = chunksRef.current;
+      chunksRef.current = [];
+      const ms = Date.now() - startedAtRef.current;
+      releaseRecorder();
+      if (discardRef.current) {
+        setVoiceState("idle");
+        return;
+      }
+      const blob = new Blob(parts, { type: VOICE_UPLOAD_MIME });
+      if (blob.size === 0) {
+        setVoiceState("idle");
+        setError("Nothing was captured from the microphone, so there is nothing to send.");
+        return;
+      }
+      const url = URL.createObjectURL(blob);
+      clipUrlRef.current = url;
+      setClip({ blob, url, ms });
+      setVoiceState("ready");
+    };
+
+    streamRef.current = stream;
+    recorderRef.current = recorder;
+    startedAtRef.current = Date.now();
+    setElapsedMs(0);
+    recorder.start();
+    setVoiceState("recording");
+    tickRef.current = setInterval(() => {
+      const ms = Date.now() - startedAtRef.current;
+      setElapsedMs(ms);
+      // A mic left open by a distracted operator ends by itself.
+      if (ms >= MAX_VOICE_SECONDS * 1000) stopVoice();
+    }, 250);
+  }
+
+  async function submitVoice() {
+    if (!clip || busy) return;
+    setBusy(true);
+    setError(null);
+    const fd = new FormData();
+    fd.set("conversationId", conversationId);
+    fd.set("durationMs", String(clip.ms));
+    fd.set("audio", clip.blob, "voice-note.ogg");
+    const res = await sendVoiceNote(fd);
+    setBusy(false);
+    if (!res.ok) {
+      // Keep the recording: the failure may be temporary and re-recording it
+      // from memory is not the same message.
+      setError(res.error ?? "The voice note could not be sent.");
+      return;
+    }
+    dropClip();
+    setVoiceState("idle");
+    setElapsedMs(0);
+    setPanel(null);
+  }
+
+  /**
+   * Leaving the thread mid-recording must not leave the microphone open — the
+   * browser's recording indicator would stay lit with nothing behind it.
+   */
+  useEffect(() => {
+    return () => {
+      if (tickRef.current) clearInterval(tickRef.current);
+      streamRef.current?.getTracks().forEach((t) => t.stop());
+      if (clipUrlRef.current) URL.revokeObjectURL(clipUrlRef.current);
+    };
+  }, []);
+
+  /** Why the microphone is unavailable right now, or null when it is not. */
+  const voiceBlocked = note
+    ? "A private note stays inside Connect and is never sent, and there is nowhere here to store audio. Switch to Reply to record a voice note."
+    : !windowOpen
+      ? "The 24-hour reply window is closed. WhatsApp refuses a voice note exactly as it refuses a typed message — send an approved template instead."
+      : voiceSupport.ok
+        ? null
+        : voiceSupport.reason;
+
+  // ── Emoji ──────────────────────────────────────────────────────────────────
+
+  /** Drop the character at the caret, not at the end of the draft. */
+  function insertEmoji(emoji: string) {
+    const el = textRef.current;
+    if (!el) {
+      setDraft((d) => d + emoji);
+      return;
+    }
+    const start = el.selectionStart ?? draft.length;
+    const end = el.selectionEnd ?? start;
+    setDraft(draft.slice(0, start) + emoji + draft.slice(end));
+    const caret = start + emoji.length;
+    // After React has re-rendered the controlled textarea, put the caret back
+    // where the operator was typing.
+    requestAnimationFrame(() => {
+      el.focus();
+      el.setSelectionRange(caret, caret);
+    });
+  }
+
+  // ── Contact cards ──────────────────────────────────────────────────────────
+
+  async function loadContacts(q: string) {
+    setLoading(true);
+    setContacts(await listInboxContacts(q));
+    setLoading(false);
+  }
+
+  async function openContacts() {
+    setMenuOpen(false);
+    setPanel("contact");
+    setError(null);
+    if (contacts.length === 0 && !contactQuery) await loadContacts("");
+  }
+
+  /** Debounced so a typed name is one query, not one per keystroke. */
+  function onContactQuery(q: string) {
+    setContactQuery(q);
+    if (searchTimer.current) clearTimeout(searchTimer.current);
+    searchTimer.current = setTimeout(() => void loadContacts(q), 250);
+  }
+
+  async function submitContact(contactId: string) {
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    const fd = new FormData();
+    fd.set("conversationId", conversationId);
+    fd.set("contactId", contactId);
+    const res = await sendContactCard(fd);
+    setBusy(false);
+    if (!res.ok) {
+      setError(res.error ?? "The contact could not be sent.");
+      return;
+    }
+    setPanel(null);
+  }
+
+  /**
+   * The + menu is DATA ONLY — ids and labels, no handlers.
+   *
+   * Handlers used to live on these objects, but `openAttachment` reads a ref
+   * (the hidden file input), which taints the array as ref-derived; iterating it
+   * in render is then a react-hooks/refs error. Dispatching by id keeps the
+   * rendered value plain strings.
+   */
+  const menuItems: {
+    id: MenuAction;
+    label: string;
+    hint: string | null;
+    /** Why a disabled entry is disabled — shown on hover, not just implied. */
+    why: string | null;
+  }[] = [
+    { id: "attach", label: "Attachments", hint: null, why: null },
+    { id: "emoji", label: "Emoji", hint: null, why: null },
+    { id: "quick", label: "Quick Reply", hint: null, why: null },
+    { id: "contact", label: "Send Contact", hint: null, why: null },
+    { id: "template", label: "Send Template Message", hint: null, why: null },
+    {
+      id: null,
+      label: "Send Buttons / Flows",
+      hint: "needs a Flow builder",
+      why: "Not available yet. Interactive buttons and WhatsApp Flows have to be built and submitted to Meta first, and Connect has no Flow builder — so there is nothing to send.",
+    },
   ];
+
+  function onMenuSelect(id: MenuAction) {
+    switch (id) {
+      case "attach":
+        return openAttachment();
+      case "emoji":
+        setMenuOpen(false);
+        setPanel("emoji");
+        return;
+      case "quick":
+        return void openQuick();
+      case "contact":
+        return void openContacts();
+      case "template":
+        return void openTemplates();
+      default:
+        return;
+    }
+  }
 
   return (
     <div className="relative shrink-0 border-t border-[var(--color-border)] bg-[var(--color-surface)] px-4 pb-4 pt-3">
@@ -179,6 +631,216 @@ export function Composer({ conversationId }: { conversationId: string }) {
         </Panel>
       )}
 
+      {/* ── Attachment ── */}
+      {panel === "attach" && (
+        <Panel
+          title="Send an attachment"
+          onClose={() => {
+            setPanel(null);
+            setFile(null);
+            setError(null);
+          }}
+        >
+          {file ? (
+            <div className="px-1 pb-1">
+              <div className="mb-2 flex items-center gap-2 rounded-lg bg-[var(--color-surface-2)] px-2.5 py-2">
+                <span className="min-w-0 flex-1 truncate text-[12.5px] text-[var(--color-ink)]">
+                  {file.name}
+                </span>
+                <span className="flex-none text-[11px] text-[var(--color-faint)]">
+                  {formatBytes(file.size)}
+                </span>
+              </div>
+              <input
+                value={caption}
+                onChange={(e) => setCaption(e.target.value)}
+                maxLength={MAX_CAPTION_CHARS}
+                placeholder="Caption (optional)"
+                className="mb-2 w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] px-2.5 py-1.5 text-[12.5px] outline-none focus:border-[var(--color-accent)]"
+              />
+              {error && <Problem>{error}</Problem>}
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => fileRef.current?.click()}
+                  disabled={busy}
+                  title={busy ? "Waiting for WhatsApp to accept the upload." : undefined}
+                  className="rounded-lg border border-[var(--color-border)] px-3 py-1.5 text-[12.5px] text-[var(--color-muted)] disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Change
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void submitAttachment()}
+                  disabled={busy}
+                  title={busy ? "Waiting for WhatsApp to accept the upload." : undefined}
+                  className="flex-1 rounded-lg bg-[var(--color-accent)] px-3 py-1.5 text-[12.5px] font-medium text-white disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {busy ? "Uploading to WhatsApp…" : "Send attachment"}
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="px-1 pb-1">
+              {error && <Problem>{error}</Problem>}
+              <button
+                type="button"
+                onClick={() => fileRef.current?.click()}
+                className="w-full rounded-lg border border-dashed border-[var(--color-border)] px-3 py-4 text-[12.5px] text-[var(--color-muted)] hover:bg-[var(--color-surface-2)]"
+              >
+                Choose a file
+              </button>
+            </div>
+          )}
+          <p className="px-1.5 pb-1 pt-2 text-[10.5px] text-[var(--color-faint)]">{LIMITS_HINT}</p>
+        </Panel>
+      )}
+
+      {/* ── Voice note ── */}
+      {panel === "voice" && (
+        <Panel title="Voice note" onClose={cancelVoice}>
+          <div className="px-1 pb-1">
+            {error && <Problem>{error}</Problem>}
+
+            {voiceState === "starting" && (
+              <Empty>Waiting for the browser to hand over the microphone…</Empty>
+            )}
+
+            {voiceState === "recording" && (
+              <div className="flex items-center gap-2.5 rounded-lg bg-[var(--color-surface-2)] px-2.5 py-2">
+                <span className="h-2.5 w-2.5 flex-none animate-pulse rounded-full bg-[var(--color-danger)]" />
+                <span className="flex-1 text-[12.5px] text-[var(--color-ink)]">
+                  Recording <span className="font-mono">{formatDuration(elapsedMs)}</span>
+                </span>
+                <button
+                  type="button"
+                  onClick={cancelVoice}
+                  className="rounded-lg border border-[var(--color-border)] px-3 py-1.5 text-[12.5px] text-[var(--color-muted)]"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={stopVoice}
+                  className="rounded-lg bg-[var(--color-accent)] px-3 py-1.5 text-[12.5px] font-medium text-white"
+                >
+                  Stop
+                </button>
+              </div>
+            )}
+
+            {voiceState === "ready" && clip && (
+              <>
+                <div className="mb-2 flex items-center gap-2 rounded-lg bg-[var(--color-surface-2)] px-2.5 py-2">
+                  <span className="min-w-0 flex-1 truncate text-[12.5px] text-[var(--color-ink)]">
+                    Voice note <span className="font-mono">{formatDuration(clip.ms)}</span>
+                  </span>
+                  <span className="flex-none text-[11px] text-[var(--color-faint)]">
+                    {formatBytes(clip.blob.size)}
+                  </span>
+                </div>
+                {/* Listen before it goes out. Nothing here is sent until Send is
+                    pressed, and a sent voice note cannot be recalled. */}
+                <audio src={clip.url} controls className="mb-2 w-full" />
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={cancelVoice}
+                    disabled={busy}
+                    className="rounded-lg border border-[var(--color-border)] px-3 py-1.5 text-[12.5px] text-[var(--color-muted)] disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    Discard
+                  </button>
+                  {/* Blocked for the same reasons the microphone is: the reply
+                      window can shut while a recording is sitting here, and
+                      sending then means an upload Meta will refuse. */}
+                  <button
+                    type="button"
+                    onClick={() => void submitVoice()}
+                    disabled={busy || !!voiceBlocked}
+                    title={
+                      voiceBlocked ??
+                      (busy ? "Waiting for WhatsApp to accept the recording." : undefined)
+                    }
+                    className="flex-1 rounded-lg bg-[var(--color-accent)] px-3 py-1.5 text-[12.5px] font-medium text-white disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {busy ? "Uploading to WhatsApp…" : "Send voice note"}
+                  </button>
+                </div>
+              </>
+            )}
+
+            {voiceState === "idle" && !error && (
+              <Empty>The microphone is closed. Press the microphone again to record.</Empty>
+            )}
+
+            <p className="px-0.5 pb-1 pt-2 text-[10.5px] leading-relaxed text-[var(--color-faint)]">
+              Recorded as Ogg/Opus — the only audio WhatsApp plays as a voice note — and stopped
+              automatically after {MAX_VOICE_SECONDS / 60} minutes.
+            </p>
+          </div>
+        </Panel>
+      )}
+
+      {/* ── Emoji ── */}
+      {panel === "emoji" && (
+        <Panel title="Emoji" onClose={() => setPanel(null)}>
+          <EmojiPicker onPick={insertEmoji} />
+        </Panel>
+      )}
+
+      {/* ── Contact card ── */}
+      {panel === "contact" && (
+        <Panel
+          title="Send a contact"
+          onClose={() => {
+            setPanel(null);
+            setError(null);
+          }}
+        >
+          <input
+            value={contactQuery}
+            onChange={(e) => onContactQuery(e.target.value)}
+            placeholder="Search by name or number…"
+            className="mb-1.5 w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] px-2.5 py-1.5 text-[12.5px] outline-none focus:border-[var(--color-accent)]"
+          />
+          {error && <Problem>{error}</Problem>}
+          {busy && <Empty>Sending the contact card…</Empty>}
+          {loading && <Empty>Loading contacts…</Empty>}
+          {!loading && contacts.length === 0 && (
+            <Empty>
+              {contactQuery ? "No contact matches that." : "No contacts in this company yet."}
+            </Empty>
+          )}
+          {!loading &&
+            contacts.map((c) => (
+              <button
+                key={c.id}
+                type="button"
+                disabled={busy}
+                title={busy ? "Sending the contact card — one at a time." : undefined}
+                onClick={() => void submitContact(c.id)}
+                className="flex w-full flex-col gap-0.5 rounded-lg px-2.5 py-2 text-left hover:bg-[var(--color-surface-2)] disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <span className="text-[12.5px] text-[var(--color-ink)]">
+                  {c.name ?? c.phone}
+                </span>
+                <span className="text-[11.5px] text-[var(--color-muted)]">{c.phone}</span>
+              </button>
+            ))}
+        </Panel>
+      )}
+
+      {/* The picker itself: kept out of the message form so it is never
+          serialised with a reply. */}
+      <input
+        ref={fileRef}
+        type="file"
+        accept={ATTACHMENT_ACCEPT}
+        onChange={onFilePicked}
+        className="hidden"
+      />
+
       {/* ── + menu ── */}
       {menuOpen && (
         <>
@@ -188,8 +850,9 @@ export function Composer({ conversationId }: { conversationId: string }) {
               <button
                 key={m.label}
                 type="button"
-                disabled={!m.onClick}
-                onClick={() => m.onClick?.()}
+                disabled={!m.id}
+                title={m.why ?? undefined}
+                onClick={() => onMenuSelect(m.id)}
                 className="flex w-full items-center justify-between gap-2 px-3 py-2.5 text-left text-[13px] text-[var(--color-ink)] hover:bg-[var(--color-surface-2)] disabled:cursor-not-allowed disabled:text-[var(--color-faint)] disabled:hover:bg-transparent"
               >
                 {m.label}
@@ -201,7 +864,10 @@ export function Composer({ conversationId }: { conversationId: string }) {
       )}
 
       <div className="mb-2 flex items-center gap-4 text-[12.5px] font-medium">
+        {/* type="button" is load-bearing: these sit a few lines above a real
+            <form>, and an untyped <button> defaults to submit. */}
         <button
+          type="button"
           onClick={() => setKind("reply")}
           className={`border-b-2 pb-1 transition-colors ${
             !note
@@ -212,6 +878,7 @@ export function Composer({ conversationId }: { conversationId: string }) {
           Reply
         </button>
         <button
+          type="button"
           onClick={() => setKind("note")}
           className={`border-b-2 pb-1 transition-colors ${
             note
@@ -222,6 +889,16 @@ export function Composer({ conversationId }: { conversationId: string }) {
           Private note
         </button>
       </div>
+
+      {/* An internal note is ours, so the window never applies to it. */}
+      {!windowOpen && !note && (
+        <div className="mb-2 rounded-lg border border-[color-mix(in_srgb,var(--color-warning)_40%,transparent)] bg-[color-mix(in_srgb,var(--color-warning)_8%,transparent)] px-3 py-2 text-[12px] leading-relaxed text-[var(--color-ink)]">
+          <strong>The 24-hour reply window is closed.</strong> WhatsApp will
+          refuse a typed message to this customer — it would look sent here and
+          never arrive. Use <em>+ → Send Template Message</em>, or wait for them
+          to write to you, which reopens the window for 24 hours.
+        </div>
+      )}
 
       <form
         ref={formRef}
@@ -247,6 +924,7 @@ export function Composer({ conversationId }: { conversationId: string }) {
           <IconPaperclip width={16} height={16} />
         </button>
         <textarea
+          ref={textRef}
           name="body"
           rows={1}
           value={draft}
@@ -261,8 +939,13 @@ export function Composer({ conversationId }: { conversationId: string }) {
             }
             setDraft(v);
           }}
+          disabled={!windowOpen && !note}
           placeholder={
-            note ? "Write an internal note (not sent to customer)…" : "Type a message · / for quick replies"
+            note
+              ? "Write an internal note (not sent to customer)…"
+              : windowOpen
+                ? "Type a message · / for quick replies"
+                : "Reply window closed — send an approved template instead"
           }
           className="max-h-32 min-h-[24px] flex-1 resize-none bg-transparent py-1 text-[13.5px] text-[var(--color-ink)] outline-none placeholder:text-[var(--color-faint)]"
           onKeyDown={(e) => {
@@ -272,9 +955,36 @@ export function Composer({ conversationId }: { conversationId: string }) {
             }
           }}
         />
+        {/* Seampify's microphone. type="button" again — it sits inside the
+            message form and an untyped button would submit it. */}
+        <button
+          type="button"
+          onClick={() => (voiceState === "recording" ? stopVoice() : void startVoice())}
+          disabled={!!voiceBlocked || busy}
+          aria-label={voiceState === "recording" ? "Stop recording" : "Record a voice note"}
+          title={
+            voiceBlocked ??
+            (voiceState === "recording"
+              ? `Stop recording (${MAX_VOICE_SECONDS / 60} minutes maximum)`
+              : "Record a voice note")
+          }
+          className={`grid h-9 w-9 shrink-0 place-items-center rounded-lg transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
+            voiceState === "recording"
+              ? "animate-pulse bg-[var(--color-danger)] text-white"
+              : "text-[var(--color-muted)] hover:bg-[var(--color-surface)] hover:text-[var(--color-ink)]"
+          }`}
+        >
+          <IconMic width={17} height={17} />
+        </button>
         <button
           type="submit"
-          className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-[var(--color-accent)] text-white transition-opacity hover:opacity-90"
+          disabled={!windowOpen && !note}
+          title={
+            !windowOpen && !note
+              ? "The 24-hour reply window is closed — WhatsApp would refuse this message."
+              : "Send"
+          }
+          className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-[var(--color-accent)] text-white transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
           aria-label="Send"
         >
           <IconSend width={17} height={17} />
@@ -310,6 +1020,40 @@ function Panel({
   );
 }
 
+/**
+ * The microphone. Local rather than in components/icons.tsx — that file is a
+ * shared surface and this is the only screen that records anything.
+ */
+function IconMic(p: React.SVGProps<SVGSVGElement>) {
+  return (
+    <svg
+      width={20}
+      height={20}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.7}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      {...p}
+    >
+      <rect x="9" y="2" width="6" height="12" rx="3" />
+      <path d="M5 11a7 7 0 0 0 14 0" />
+      <path d="M12 18v3" />
+      <path d="M8.5 21h7" />
+    </svg>
+  );
+}
+
 function Empty({ children }: { children: React.ReactNode }) {
   return <p className="px-2.5 py-6 text-center text-[12px] text-[var(--color-faint)]">{children}</p>;
+}
+
+/** Whatever went wrong, in the operator's words — Meta's or ours. */
+function Problem({ children }: { children: React.ReactNode }) {
+  return (
+    <p className="mb-2 rounded-lg bg-[color-mix(in_srgb,#dc2626_10%,transparent)] px-2.5 py-2 text-[12px] leading-relaxed text-[#b91c1c]">
+      {children}
+    </p>
+  );
 }

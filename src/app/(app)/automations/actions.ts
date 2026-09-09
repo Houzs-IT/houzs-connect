@@ -2,11 +2,13 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, asc, desc, eq, sql } from "drizzle-orm";
 import { getDb } from "@/db/client";
 import {
   automation,
+  automationRun as automationRunTable,
   automationVersion,
+  channel as channelTable,
   company as companyTable,
   contact as contactTable,
 } from "@/db/schema";
@@ -175,10 +177,193 @@ export async function saveAutomationGraph(
   return { ok: true, version: row?.version ?? null };
 }
 
-/** Toggle an automation active/inactive. */
+// ── Create / rename / duplicate / delete ───────────────────────────
+//
+// The list page could open and save an automation but could not make one,
+// rename one, copy one or throw one away — the owner had no way to start
+// anything without someone writing a row into the database for him.
+
+const CREATABLE_TRIGGER_TYPES = new Set([
+  "NEW_INCOMING_MESSAGE",
+  "ACTION_CALLBACK",
+  "WEBHOOK",
+  "TAG_ADDED",
+]);
+
+/**
+ * Create an empty automation (Draft, switched off) with its trigger already
+ * configured, then open it in the builder.
+ *
+ * It is seeded with the single trigger node the engine needs as an entry point;
+ * `startRun` bails out when a graph has no trigger, so an automation created
+ * with an empty graph could never run at all.
+ */
+export async function createAutomation(formData: FormData) {
+  const me = await getCurrentMember();
+  if (!me) return;
+
+  const name = String(formData.get("name") ?? "").trim();
+  if (!name) return;
+  const triggerTypeRaw = String(formData.get("triggerType") ?? "NEW_INCOMING_MESSAGE");
+  const triggerType = CREATABLE_TRIGGER_TYPES.has(triggerTypeRaw)
+    ? triggerTypeRaw
+    : "NEW_INCOMING_MESSAGE";
+  const callbackId = String(formData.get("callbackId") ?? "").trim();
+  const description = String(formData.get("description") ?? "").trim();
+
+  const db = getDb();
+  // Prefer the company's default WhatsApp number; fall back to its first one.
+  const ch = await db.query.channel.findFirst({
+    where: and(
+      eq(channelTable.companyId, me.companyId),
+      eq(channelTable.isDefault, true)
+    ),
+  });
+  const fallback =
+    ch ??
+    (await db.query.channel.findFirst({
+      where: eq(channelTable.companyId, me.companyId),
+      orderBy: asc(channelTable.displayName),
+    }));
+  if (!fallback) return;
+
+  const event = triggerType as TriggerEvent;
+  const graph: FlowGraph = {
+    nodes: [
+      {
+        id: `n_trigger_${Math.random().toString(36).slice(2, 8)}`,
+        type: "trigger",
+        data: { event, callbackId, keywords: [] },
+        x: 80,
+        y: 120,
+      },
+    ],
+    edges: [],
+  };
+
+  const [row] = await db
+    .insert(automation)
+    .values({
+      companyId: me.companyId,
+      channelId: fallback.id,
+      name,
+      description: description || null,
+      triggerType,
+      triggerConfig: { event, callbackId, keywords: [] },
+      status: "DRAFT",
+      enabled: false,
+      graph: graph as unknown as object,
+    })
+    .returning();
+  if (!row) return;
+
+  await snapshotVersion(
+    row.id,
+    row.version,
+    "Created",
+    row.status,
+    row.triggerType,
+    row.triggerConfig,
+    graph
+  );
+
+  revalidatePath("/automations");
+  redirect(`/automations/${row.id}`);
+}
+
+/** Rename an automation and edit the note shown under its name. */
+export async function renameAutomation(
+  automationId: string,
+  name: string,
+  description: string
+) {
+  const auth = await authorizeAutomation(automationId);
+  if (!auth) return { ok: false as const, error: "not found" };
+  const clean = name.trim();
+  if (!clean) return { ok: false as const, error: "A name is required" };
+  await auth.db
+    .update(automation)
+    .set({ name: clean, description: description.trim() || null })
+    .where(eq(automation.id, automationId));
+  revalidatePath(`/automations/${automationId}`);
+  revalidatePath("/automations");
+  return { ok: true as const };
+}
+
+/**
+ * Copy an automation, graph and all, as a switched-off Draft. The copy is never
+ * live even when the original is — duplicating a flow must not double every
+ * message a customer receives.
+ */
+export async function duplicateAutomation(automationId: string) {
+  const auth = await authorizeAutomation(automationId);
+  if (!auth) return { ok: false as const, error: "not found" };
+  const src = auth.automation;
+  const graph = asGraph(src.graph);
+
+  const [row] = await auth.db
+    .insert(automation)
+    .values({
+      companyId: src.companyId,
+      channelId: src.channelId,
+      name: `${src.name} (copy)`,
+      description: src.description,
+      triggerType: src.triggerType,
+      triggerConfig: (src.triggerConfig ?? {}) as object,
+      status: "DRAFT",
+      enabled: false,
+      graph: graph as unknown as object,
+    })
+    .returning();
+  if (!row) return { ok: false as const, error: "could not copy" };
+
+  await snapshotVersion(
+    row.id,
+    row.version,
+    `Copied from ${src.name}`,
+    row.status,
+    row.triggerType,
+    row.triggerConfig,
+    graph
+  );
+
+  revalidatePath("/automations");
+  return { ok: true as const, id: row.id };
+}
+
+/**
+ * Delete an automation and everything hanging off it. `automation_run` and
+ * `automation_version` reference the automation by a plain text column with no
+ * database cascade, so both are cleared here — otherwise every delete leaves
+ * orphan rows behind forever.
+ */
+export async function deleteAutomation(automationId: string) {
+  const auth = await authorizeAutomation(automationId);
+  if (!auth) return { ok: false as const, error: "not found" };
+  await ensureAutomationVersionTable();
+  const { db } = auth;
+  await db
+    .delete(automationVersion)
+    .where(eq(automationVersion.automationId, automationId));
+  await db
+    .delete(automationRunTable)
+    .where(eq(automationRunTable.automationId, automationId));
+  await db.delete(automation).where(eq(automation.id, automationId));
+  revalidatePath("/automations");
+  return { ok: true as const };
+}
+
+/**
+ * Publish (Live) or unpublish (Draft) an automation.
+ *
+ * This existed and was authorised, but nothing in the app ever called it —
+ * there was no publish control anywhere, which is why every imported flow was
+ * still stuck in Draft. The button is now on the automations list and in the
+ * builder toolbar, both behind a confirmation that names the trigger.
+ */
 export async function setAutomationEnabled(automationId: string, enabled: boolean) {
   const auth = await authorizeAutomation(automationId);
-  if (!auth) return;
+  if (!auth) return { ok: false as const, error: "not found" };
   const { db } = auth;
   await db
     .update(automation)
@@ -186,6 +371,7 @@ export async function setAutomationEnabled(automationId: string, enabled: boolea
     .where(eq(automation.id, automationId));
   revalidatePath(`/automations/${automationId}`);
   revalidatePath("/automations");
+  return { ok: true as const, enabled };
 }
 
 /** The last 10 saved snapshots for the history dialog (newest first). */

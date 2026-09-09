@@ -48,6 +48,13 @@ import {
   restoreAutomationVersion,
   saveAutomationGraph,
 } from "@/app/(app)/automations/actions";
+import {
+  findFlowGaps,
+  summariseSends,
+  triggerSentence,
+  type NodeProbe,
+} from "@/app/(app)/automations/copy";
+import { ActionConfirm } from "@/components/ActionConfirm";
 
 // ────────────────────────────── shared shapes ──────────────────────────────
 
@@ -394,9 +401,11 @@ function NodePalette({
                 {items.map((n) => (
                   <button
                     key={n.type}
+                    type="button"
                     disabled={disabled}
+                    title={disabled ? "Exit the snapshot preview to edit this flow." : n.hint}
                     onClick={() => onAdd(n.type)}
-                    className="flex items-start gap-2 rounded-md px-2 py-1.5 text-left hover:bg-[var(--color-surface-2)] disabled:opacity-50"
+                    className="flex items-start gap-2 rounded-md px-2 py-1.5 text-left hover:bg-[var(--color-surface-2)] disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     <span
                       className="mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded text-[11px] leading-none text-white"
@@ -525,18 +534,21 @@ function HistoryDialog({
                   </div>
                   <div className="mt-2 flex gap-1.5">
                     <button
+                      type="button"
                       onClick={() => onPreview(r.graph, r.version)}
                       className="rounded-md border border-[var(--color-border)] px-2.5 py-1 text-[11.5px] text-[var(--color-ink)] hover:bg-[var(--color-surface-2)]"
                     >
                       Preview
                     </button>
                     <button
+                      type="button"
                       disabled={busy === r.id}
+                      title={busy === r.id ? "Restoring this snapshot…" : undefined}
                       onClick={() => {
                         setBusy(r.id);
                         onRestore(r.id);
                       }}
-                      className="rounded-md bg-[var(--color-accent)] px-2.5 py-1 text-[11.5px] font-medium text-white disabled:opacity-60"
+                      className="rounded-md bg-[var(--color-accent)] px-2.5 py-1 text-[11.5px] font-medium text-white disabled:cursor-not-allowed disabled:opacity-60"
                     >
                       {busy === r.id ? "Restoring…" : "Restore"}
                     </button>
@@ -555,6 +567,8 @@ function HistoryDialog({
 
 interface CanvasProps {
   automationId: string;
+  /** Shown in the publish confirmation, so it names the flow being switched on. */
+  automationName?: string;
   graph: FlowGraph;
   initialEnabled: boolean;
   initialTriggerEvent?: TriggerEvent;
@@ -589,9 +603,45 @@ function FlowCanvasInner(props: CanvasProps) {
   const [live, setLive] = useState(props.initialEnabled);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [preview, setPreview] = useState<number | null>(null);
+  const [confirm, setConfirm] = useState<"publish" | "unpublish" | null>(null);
   const preSnapshot = useRef<{ nodes: Node[]; edges: Edge[] } | null>(null);
 
   const readOnly = preview != null;
+
+  // What this flow will do to real people, counted off the canvas as it stands
+  // right now — the publish confirmation is only useful if it describes the
+  // graph being published, not the one that was loaded.
+  const probes: NodeProbe[] = useMemo(
+    () =>
+      nodes.map((n) => {
+        const hc = n.data as HcData;
+        return {
+          t: hc.nodeType,
+          m: typeof hc.memberId === "string" ? hc.memberId : null,
+          d: typeof hc.departmentId === "string" ? hc.departmentId : null,
+        };
+      }),
+    [nodes]
+  );
+  const sends = useMemo(() => summariseSends(probes), [probes]);
+  const gaps = useMemo(() => findFlowGaps(probes), [probes]);
+  const gapCount = gaps.reduce((n, g) => n + g.count, 0);
+  const stopCount = gaps
+    .filter((g) => g.severity === "stops")
+    .reduce((n, g) => n + g.count, 0);
+
+  const triggerData = nodes.find(
+    (n) => (n.data as HcData).nodeType === "trigger"
+  )?.data as HcData | undefined;
+  const sentence = triggerSentence(
+    triggerData?.event ?? "NEW_INCOMING_MESSAGE",
+    props.automationName ?? "this automation",
+    {
+      event: triggerData?.event,
+      callbackId: triggerData?.callbackId,
+      keywords: triggerData?.keywords,
+    }
+  );
 
   const deleteEdge = useCallback(
     (id: string) => {
@@ -748,7 +798,17 @@ function FlowCanvasInner(props: CanvasProps) {
       <div className="flex min-w-0 flex-1 flex-col">
         {/* toolbar */}
         <div className="flex items-center gap-2 border-b border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2">
-          <div className="flex overflow-hidden rounded-full border border-[var(--color-border)] text-[11.5px]">
+          {/* A status read-out, not a switch — it is shaped like the segmented
+              toggles elsewhere in the app, so it says so on hover. Draft/Live is
+              decided by which Save button you press. */}
+          <div
+            title={
+              live
+                ? "This automation is live. Use “Save as draft” to take it off."
+                : "This automation is a draft. Use “Publish live” to switch it on."
+            }
+            className="flex overflow-hidden rounded-full border border-[var(--color-border)] text-[11.5px]"
+          >
             <span
               className={`px-2.5 py-1 ${
                 live
@@ -780,16 +840,38 @@ function FlowCanvasInner(props: CanvasProps) {
               History
             </button>
             <button
-              onClick={() => doSave(false)}
+              type="button"
+              // "Save as draft" on a LIVE automation silently switched it off —
+              // saveAutomationGraph writes enabled:false for publish:false. That
+              // is a customer-visible change, so it asks first.
+              onClick={() => (live ? setConfirm("unpublish") : doSave(false))}
               disabled={pending || readOnly}
-              className="rounded-lg border border-[var(--color-border)] px-3 py-1.5 text-[12.5px] text-[var(--color-ink)] hover:bg-[var(--color-surface-2)] disabled:opacity-60"
+              title={
+                readOnly
+                  ? "You are previewing an old snapshot — exit the preview to edit and save."
+                  : pending
+                    ? "Saving…"
+                    : undefined
+              }
+              className="rounded-lg border border-[var(--color-border)] px-3 py-1.5 text-[12.5px] text-[var(--color-ink)] hover:bg-[var(--color-surface-2)] disabled:cursor-not-allowed disabled:opacity-60"
             >
               {pending && saved == null ? "Saving…" : "Save as draft"}
             </button>
             <button
-              onClick={() => doSave(true)}
+              type="button"
+              // Draft → Live is the moment real customers start receiving these
+              // messages. Re-saving an already-live flow does not change that,
+              // so only the transition is gated.
+              onClick={() => (live ? doSave(true) : setConfirm("publish"))}
               disabled={pending || readOnly}
-              className="rounded-lg bg-[var(--color-accent)] px-3 py-1.5 text-[12.5px] font-medium text-white disabled:opacity-60"
+              title={
+                readOnly
+                  ? "You are previewing an old snapshot — exit the preview to edit and publish."
+                  : pending
+                    ? "Saving…"
+                    : undefined
+              }
+              className="rounded-lg bg-[var(--color-accent)] px-3 py-1.5 text-[12.5px] font-medium text-white disabled:cursor-not-allowed disabled:opacity-60"
             >
               {live ? "Save & keep live" : "Publish live"}
             </button>
@@ -813,6 +895,74 @@ function FlowCanvasInner(props: CanvasProps) {
             Saved {saved === "live" ? "and published live" : "as draft"} · snapshot added to history.
           </div>
         )}
+
+        {/* Draft → Live sends real WhatsApp messages to real customers, so the
+            transition names the trigger and counts what the flow will do. */}
+        <ActionConfirm
+          open={confirm === "publish"}
+          title="Save and publish to real customers?"
+          confirmLabel="Yes, publish live"
+          busyLabel="Publishing…"
+          busy={pending}
+          onCancel={() => setConfirm(null)}
+          onConfirm={() => {
+            setConfirm(null);
+            doSave(true);
+          }}
+        >
+          <p className="text-[var(--color-ink)]">
+            This saves the flow as it is on the canvas and switches it on. From
+            then it runs <strong className="font-semibold">{sentence}</strong>.
+          </p>
+          <ul className="mt-3 flex list-disc flex-col gap-1 pl-4">
+            <li>
+              {sends.messageSteps}{" "}
+              {sends.messageSteps === 1 ? "step sends" : "steps send"} a WhatsApp
+              message to the customer.
+            </li>
+            {sends.apiSteps > 0 && (
+              <li>
+                {sends.apiSteps}{" "}
+                {sends.apiSteps === 1 ? "step calls" : "steps call"} an outside
+                system (ERP / Google Script) for real.
+              </li>
+            )}
+            <li>Nobody approves each message before it goes out.</li>
+          </ul>
+          {gapCount > 0 && (
+            <p className="mt-3 rounded-lg bg-[var(--color-surface-2)] px-2.5 py-2 text-[11.5px] text-[var(--color-faint)]">
+              {gapCount} step{gapCount === 1 ? "" : "s"} on this canvas do not do
+              the real thing yet
+              {stopCount > 0
+                ? `, and ${stopCount} of them stop the flow dead so nothing wired after them ever runs.`
+                : "."}{" "}
+              Click the step to read what it actually does.
+            </p>
+          )}
+        </ActionConfirm>
+
+        <ActionConfirm
+          open={confirm === "unpublish"}
+          title="Saving as a draft switches this automation off"
+          confirmLabel="Save as draft and switch off"
+          busyLabel="Saving…"
+          busy={pending}
+          danger
+          onCancel={() => setConfirm(null)}
+          onConfirm={() => {
+            setConfirm(null);
+            doSave(false);
+          }}
+        >
+          <p>
+            This automation is live right now. Saving it as a draft also stops it
+            running {sentence}, and customers stop receiving its messages.
+          </p>
+          <p className="mt-2">
+            To keep your edits live instead, press Cancel and use “Save &amp; keep
+            live”.
+          </p>
+        </ActionConfirm>
 
         <div className="relative min-h-0 flex-1">
           <ReactFlow
@@ -1213,6 +1363,11 @@ function Inspector({
             <option value="days">days</option>
           </select>
         </Field>
+        <Note>
+          The run pauses here and there is no scheduler to wake it up yet, so
+          anything wired after this node will not run. Put Delay at the end of a
+          branch until the timer is built.
+        </Note>
       </>
     );
   }
@@ -1232,7 +1387,7 @@ function Inspector({
             onChange={(e) => patch({ headers: e.target.value })}
             rows={2}
             placeholder={'{"Authorization": "Bearer ..."}  or  Key: value per line'}
-            className="w-full resize-none rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] p-2 font-mono text-[11.5px] outline-none focus:border-[var(--color-accent)]"
+            className="w-full resize-none rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] p-2 font-code text-[11.5px] outline-none focus:border-[var(--color-accent)]"
           />
         </Field>
         <Field label="Body">
@@ -1341,7 +1496,7 @@ function VarTextarea({
             key={v}
             type="button"
             onClick={() => insert(v)}
-            className="rounded border border-[var(--color-border)] px-1.5 py-0.5 font-mono text-[10px] text-[var(--color-muted)] hover:bg-[var(--color-surface-2)]"
+            className="rounded border border-[var(--color-border)] px-1.5 py-0.5 font-code text-[10px] text-[var(--color-muted)] hover:bg-[var(--color-surface-2)]"
           >
             {v}
           </button>

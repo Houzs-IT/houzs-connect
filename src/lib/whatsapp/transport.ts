@@ -1,8 +1,15 @@
 import { and, desc, eq, ne, sql } from "drizzle-orm";
-import { getDb } from "@/db/client";
+import { getDb, type DB } from "@/db/client";
 import { conversation, message } from "@/db/schema";
 import type { FlowButton } from "@/lib/automation/types";
-import { isLive, sendButtons, sendTemplate, sendText } from "./cloud-api";
+import { isLive, sendButtons, sendTemplate, sendText, type SendOutcome } from "./cloud-api";
+import type { AttachmentKind } from "./media-limits";
+import {
+  mediaConfig,
+  sendContactsMessage,
+  sendMediaMessage,
+  type WaContactCard,
+} from "./media";
 
 /**
  * WhatsApp transport. DEMO mode records messages in the DB (no Meta). LIVE mode
@@ -30,7 +37,12 @@ export async function getOrCreateConversation(
       contactId,
       status: "OPEN",
       lastMessageAt: new Date(),
-      windowExpiresAt: new Date(Date.now() + 24 * 3600 * 1000),
+      // NOT opened here. The 24-hour customer-service window is Meta's, and only
+      // a message FROM the customer starts it (recordInbound sets it). Opening it
+      // on creation meant a contact we had merely added — one who has never
+      // written to us — showed "23h 50m window", telling the operator they could
+      // reply in free text when Meta will refuse every one of those sends.
+      windowExpiresAt: null,
     })
     .returning();
   return created;
@@ -60,12 +72,43 @@ interface OutboundOptions {
 }
 
 /** Send an outbound message on a conversation (DEMO: just record it). */
+/**
+ * Whether we are allowed to message this conversation's contact at all.
+ *
+ * The Contacts page has a Block toggle, but nothing consulted it — blocking a
+ * contact changed a column and nothing else, so a campaign, an automation or a
+ * typed reply still reached them. That gap has teeth right now: `scripts/seed.ts`
+ * put four demo contacts in this database on well-formed Malaysian mobile
+ * numbers, and with WHATSAPP_MODE=LIVE the only thing standing between a test
+ * click and a stranger's phone is this check.
+ *
+ * Returns the reason when the send must not happen, `null` when it may.
+ */
+async function blockedReason(
+  db: DB,
+  conversationId: string
+): Promise<string | null> {
+  const convo = await db.query.conversation.findFirst({
+    where: eq(conversation.id, conversationId),
+    with: { contact: true },
+  });
+  if (!convo) return "This conversation no longer exists.";
+  if (convo.contact.blocked) {
+    return `${convo.contact.name ?? convo.contact.phone} is blocked — unblock them on the Contacts page to message them.`;
+  }
+  return null;
+}
+
 export async function sendOutbound(
   conversationId: string,
   body: string,
   opts: OutboundOptions = {}
 ) {
   const db = getDb();
+  // Before the row is written, not after: a blocked contact should leave no
+  // trace of a message that was never meant to exist.
+  const blocked = await blockedReason(db, conversationId);
+  if (blocked) return null;
   const interactive = !!(opts.buttons && opts.buttons.length > 0);
   const [msg] = await db
     .insert(message)
@@ -94,6 +137,10 @@ export async function sendOutbound(
       with: { contact: true },
     });
     if (convo) {
+      // Meta's refusal text lands here instead of only in console.error. Losing
+      // it is what made a whole day of undelivered messages undiagnosable: the
+      // row said FAILED and nothing said why.
+      const outcome: SendOutcome = {};
       const waId = opts.template
         ? await sendTemplate(
             convo.contact.phone,
@@ -106,21 +153,169 @@ export async function sendOutbound(
                     parameters: opts.template.params.map((text) => ({ type: "text", text })),
                   },
                 ]
-              : undefined
+              : undefined,
+            outcome
           )
         : interactive
           ? await sendButtons(convo.contact.phone, body, opts.buttons ?? [])
-          : await sendText(convo.contact.phone, body);
+          : await sendText(convo.contact.phone, body, outcome);
       // No id back means Meta refused it (bad template, closed window, bad
       // number). The row must say so — a message that reads SENT in the inbox
       // while the customer got nothing is worse than no message at all.
       await db
         .update(message)
-        .set(waId ? { waMessageId: waId } : { status: "FAILED" })
+        .set(
+          waId
+            ? { waMessageId: waId }
+            : {
+                status: "FAILED",
+                // interactivePayload is jsonb and is null on a plain outbound
+                // text, so the reason rides there rather than behind a new
+                // column and a migration on the hot send path.
+                interactivePayload: { kind: "send_error", reason: outcome.error ?? "Meta refused the message and gave no reason." },
+              }
+        )
         .where(eq(message.id, msg.id));
     }
   }
   return msg;
+}
+
+/** An image or document already uploaded to Meta, ready to be sent. */
+export interface OutboundMedia {
+  kind: AttachmentKind;
+  /** The id Meta returned from {phone-number-id}/media. */
+  mediaId: string;
+  mimeType: string;
+  fileName: string;
+  caption?: string;
+  sentByMemberId?: string;
+}
+
+/** What the thread shows for an attachment: the caption, plus what was sent. */
+function mediaBody(m: OutboundMedia): string {
+  const label = m.kind === "IMAGE" ? "image" : "document";
+  const tag = `[${label}] ${m.fileName}`;
+  const caption = m.caption?.trim();
+  return caption ? `${caption}\n${tag}` : tag;
+}
+
+/**
+ * Send an attachment an operator picked in the composer.
+ *
+ * Same shape as sendOutbound: record the row first so the inbox never loses a
+ * send, then (LIVE only) call Graph and stamp the returned id — or mark the row
+ * FAILED, because a message that reads SENT while the customer got nothing is
+ * worse than no message at all. Unlike sendOutbound this also RETURNS the
+ * failure text: a human is standing at the composer waiting to be told why.
+ *
+ * We store the media id, not the bytes — Meta hosts the file for 30 days and
+ * this app has no blob store. That mirrors what the inbound webhook already
+ * records for customer images (`whatsapp-media:<id>`).
+ */
+export async function sendOutboundMedia(
+  conversationId: string,
+  m: OutboundMedia
+): Promise<{ ok: boolean; error?: string }> {
+  const db = getDb();
+  const blocked = await blockedReason(db, conversationId);
+  if (blocked) return { ok: false, error: blocked };
+  const [msg] = await db
+    .insert(message)
+    .values({
+      conversationId,
+      direction: "OUT",
+      type: m.kind,
+      body: mediaBody(m),
+      mediaUrl: `whatsapp-media:${m.mediaId}`,
+      isBot: false,
+      sentByMemberId: m.sentByMemberId ?? null,
+      status: "SENT",
+      interactivePayload: {
+        kind: "media",
+        mediaId: m.mediaId,
+        mimeType: m.mimeType,
+        fileName: m.fileName,
+      },
+    })
+    .returning();
+  // An operator replying clears the unread badge, same as a typed reply does.
+  await db
+    .update(conversation)
+    .set({ lastMessageAt: new Date(), unreadCount: 0 })
+    .where(eq(conversation.id, conversationId));
+
+  if (!isLive()) return { ok: true };
+  const cfg = mediaConfig();
+  if (!cfg) return { ok: true };
+
+  const convo = await db.query.conversation.findFirst({
+    where: eq(conversation.id, conversationId),
+    with: { contact: true },
+  });
+  if (!convo) return { ok: true };
+
+  const res = await sendMediaMessage(cfg, convo.contact.phone, m.kind, m.mediaId, {
+    fileName: m.fileName,
+    caption: m.caption,
+  });
+  await db
+    .update(message)
+    .set(res.ok ? { waMessageId: res.data } : { status: "FAILED" })
+    .where(eq(message.id, msg.id));
+  return res.ok ? { ok: true } : { ok: false, error: res.error };
+}
+
+/**
+ * Send one or more contact cards (WhatsApp's `contacts` message type).
+ *
+ * `body` is the plain-text summary stored on the row so the thread reads
+ * sensibly; the cards themselves go on interactivePayload. MessageType has no
+ * CONTACT member (db/schema.ts is owned elsewhere), so the row is typed TEXT —
+ * the payload is what says otherwise.
+ */
+export async function sendOutboundContacts(
+  conversationId: string,
+  cards: WaContactCard[],
+  opts: { body: string; sentByMemberId?: string }
+): Promise<{ ok: boolean; error?: string }> {
+  const db = getDb();
+  const blocked = await blockedReason(db, conversationId);
+  if (blocked) return { ok: false, error: blocked };
+  const [msg] = await db
+    .insert(message)
+    .values({
+      conversationId,
+      direction: "OUT",
+      type: "TEXT",
+      body: opts.body,
+      isBot: false,
+      sentByMemberId: opts.sentByMemberId ?? null,
+      status: "SENT",
+      interactivePayload: { kind: "contacts", contacts: cards },
+    })
+    .returning();
+  await db
+    .update(conversation)
+    .set({ lastMessageAt: new Date(), unreadCount: 0 })
+    .where(eq(conversation.id, conversationId));
+
+  if (!isLive()) return { ok: true };
+  const cfg = mediaConfig();
+  if (!cfg) return { ok: true };
+
+  const convo = await db.query.conversation.findFirst({
+    where: eq(conversation.id, conversationId),
+    with: { contact: true },
+  });
+  if (!convo) return { ok: true };
+
+  const res = await sendContactsMessage(cfg, convo.contact.phone, cards);
+  await db
+    .update(message)
+    .set(res.ok ? { waMessageId: res.data } : { status: "FAILED" })
+    .where(eq(message.id, msg.id));
+  return res.ok ? { ok: true } : { ok: false, error: res.error };
 }
 
 /** Record an inbound message (real WA webhook in LIVE; simulator in DEMO). */

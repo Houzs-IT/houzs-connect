@@ -67,6 +67,33 @@ export function attrs(a: unknown): Record<string, string> {
 }
 
 /** Deterministic avatar tint from a string (no Math.random for stability). */
+/**
+ * How to show whatever WhatsApp gave us as this contact's identifier.
+ *
+ * `contact.phone` is not always a phone number. Since WhatsApp usernames
+ * shipped, a customer can reach us with only a user id like
+ * "MY.3816205081852835" and no phone number anywhere in the webhook — the
+ * handler stores it verbatim in the same column, because it is the value the
+ * Cloud API takes back as `to`.
+ *
+ * Rendering that as "+MY.3816205081852835" invents a plus sign in front of
+ * something that is not a number, under a column headed "Number". Digits get
+ * the plus; anything else is shown as-is and labelled for what it is.
+ */
+export function waIdentifier(raw?: string | null): {
+  text: string;
+  isPhone: boolean;
+  label: string;
+} {
+  const v = (raw ?? "").trim();
+  const isPhone = v.length > 0 && /^\d+$/.test(v);
+  return {
+    text: isPhone ? `+${v}` : v,
+    isPhone,
+    label: isPhone ? "Phone number" : "WhatsApp username — this contact has no phone number",
+  };
+}
+
 export function tint(seed: string): string {
   const palette = [
     "#e2900a",

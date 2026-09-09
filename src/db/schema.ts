@@ -215,7 +215,13 @@ export const contact = connect.table(
     // Dynamic custom attributes keyed by contact_field.key (Seampify's 63 fields).
     attributes: jsonb("attributes"),
     marketingOptIn: boolean("marketing_opt_in").notNull().default(true),
+    /** Blocked contacts are excluded from broadcasts and flagged in the inbox. */
+    blocked: boolean("blocked").notNull().default(false),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow()
+      .$onUpdate(() => new Date()),
   },
   (t) => ({
     companyPhone: uniqueIndex("contact_company_phone_key").on(t.companyId, t.phone),
@@ -280,6 +286,47 @@ export const message = connect.table(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({ conversationIdx: index("message_conversation_idx").on(t.conversationId) })
+);
+
+/**
+ * The colleagues watching a conversation — Seampify's "Add Chat Members".
+ *
+ * NOT the same thing as `conversation.assigned_agent_id`. Assignment is
+ * single-valued and says who OWNS the reply; this table is the set of people
+ * pulled in to watch and help (the warehouse lead on a damaged-delivery thread,
+ * the manager on an escalation). One column cannot express both, which is why
+ * this is a row per person rather than another id on `conversation`.
+ *
+ * `added_by_member_id` is nullable so a row can survive an importer or a future
+ * automation adding a watcher with no human actor; every path in the app today
+ * writes the acting member.
+ */
+export const conversationMember = connect.table(
+  "conversation_member",
+  {
+    id: id(),
+    conversationId: text("conversation_id").notNull(),
+    memberId: text("member_id").notNull(),
+    /** Who pulled this person in. Null only for non-human additions. */
+    addedByMemberId: text("added_by_member_id"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    // NON-partial, and the ON CONFLICT target addChatMember inserts against:
+    // adding someone twice (two agents, one slow panel) must be a no-op, and a
+    // bare ON CONFLICT will not match a partial index (42P10).
+    //
+    // It also serves every read in the app, which is always "the watchers of
+    // conversation X" — conversation_id leads the index, so no separate
+    // conversation index is needed.
+    conversationMemberKey: uniqueIndex("conversation_member_conversation_member_key").on(
+      t.conversationId,
+      t.memberId
+    ),
+    // The reverse direction ("what am I watching") is the one lookup the unique
+    // index above cannot answer.
+    memberIdx: index("conversation_member_member_idx").on(t.memberId),
+  })
 );
 
 export const note = connect.table(
@@ -427,6 +474,47 @@ export const campaign = connect.table(
   (t) => ({ companyIdx: index("campaign_company_idx").on(t.companyId) })
 );
 
+// ─────────────────────── Template variable bindings ───────────────────────
+
+/**
+ * What each {{n}} of an approved WhatsApp template is filled from.
+ *
+ * The template itself is a Meta asset — it has no row in this database — so the
+ * mapping is keyed by the (company, name, language) triple Meta identifies a
+ * template by. Name AND language: `delivery_completed_thanks` in en_GB and in
+ * en are two different templates as far as Meta is concerned, and they can be
+ * mapped differently.
+ *
+ * `bindings` is an array of { index, source, key?, value? } — see VarBinding in
+ * lib/automation/vars.ts. Without this row the send path has no way to know that
+ * "{{2}}" means the contact's `ref_1`, and every variable goes out as "-".
+ */
+export const templateBinding = connect.table(
+  "template_binding",
+  {
+    id: id(),
+    companyId: text("company_id").notNull(),
+    templateName: text("template_name").notNull(),
+    language: text("language").notNull(),
+    bindings: jsonb("bindings").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow()
+      .$onUpdate(() => new Date()),
+  },
+  (t) => ({
+    // Non-partial, and the ON CONFLICT target the save action upserts on
+    // (a bare ON CONFLICT will not match a partial index — 42P10).
+    companyTemplateKey: uniqueIndex("template_binding_company_template_key").on(
+      t.companyId,
+      t.templateName,
+      t.language
+    ),
+    companyIdx: index("template_binding_company_idx").on(t.companyId),
+  })
+);
+
 // ─────────────────────────── Quick replies ───────────────────────────
 
 export const quickReply = connect.table(
@@ -511,6 +599,7 @@ export const companyRelations = relations(company, ({ many }) => ({
   automations: many(automation),
   campaigns: many(campaign),
   quickReplies: many(quickReply),
+  templateBindings: many(templateBinding),
   forms: many(form),
 }));
 
@@ -584,7 +673,31 @@ export const conversationRelations = relations(conversation, ({ one, many }) => 
   messages: many(message),
   notes: many(note),
   tagLinks: many(conversationTag),
+  memberLinks: many(conversationMember),
   payments: many(payment),
+}));
+
+/**
+ * Only the `conversation` side is reachable from a `many` — the two links to
+ * `member` are declared with relation names so that if anyone later adds a
+ * `many(conversationMember)` to memberRelations they can say which of the two
+ * they mean, instead of hitting Drizzle's "multiple relations" error.
+ */
+export const conversationMemberRelations = relations(conversationMember, ({ one }) => ({
+  conversation: one(conversation, {
+    fields: [conversationMember.conversationId],
+    references: [conversation.id],
+  }),
+  member: one(member, {
+    fields: [conversationMember.memberId],
+    references: [member.id],
+    relationName: "ChatMember",
+  }),
+  addedBy: one(member, {
+    fields: [conversationMember.addedByMemberId],
+    references: [member.id],
+    relationName: "ChatMemberAddedBy",
+  }),
 }));
 
 export const messageRelations = relations(message, ({ one }) => ({
@@ -662,6 +775,10 @@ export const campaignRelations = relations(campaign, ({ one }) => ({
 
 export const quickReplyRelations = relations(quickReply, ({ one }) => ({
   company: one(company, { fields: [quickReply.companyId], references: [company.id] }),
+}));
+
+export const templateBindingRelations = relations(templateBinding, ({ one }) => ({
+  company: one(company, { fields: [templateBinding.companyId], references: [company.id] }),
 }));
 
 export const driverEventRelations = relations(driverEvent, ({ one }) => ({

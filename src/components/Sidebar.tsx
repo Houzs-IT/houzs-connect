@@ -11,6 +11,7 @@ import {
   IconForm,
   IconSettings,
   IconReceipt,
+  IconPhone,
 } from "./icons";
 
 type NavItem = {
@@ -43,6 +44,7 @@ const SECTIONS: { title: string; items: NavItem[] }[] = [
     title: "System",
     items: [
       { href: "/logs", label: "System Logs", Icon: IconReceipt },
+      { href: "/settings/numbers", label: "Phone Numbers", Icon: IconPhone },
       { href: "/settings", label: "Settings", Icon: IconSettings },
     ],
   },
@@ -116,7 +118,7 @@ export function Sidebar({ unread, live }: { unread?: number; live?: boolean }) {
           alt="Houzs Century"
           className="h-9 w-auto max-w-[150px] object-contain brightness-0 invert"
         />
-        <span className="font-mono text-[9.5px] font-semibold uppercase tracking-[0.18em] text-[var(--color-brand-bright)]">
+        <span className="font-mono text-[9.5px] font-semibold uppercase tracking-brand text-[var(--color-brand-bright)]">
           Chat
         </span>
       </div>

@@ -8,7 +8,9 @@ import { ContactPanel } from "@/components/inbox/ContactPanel";
 import { DemoReplyBar } from "@/components/inbox/DemoReplyBar";
 import { WindowTimer } from "@/components/inbox/WindowTimer";
 import { getCurrentMember } from "@/lib/current-member";
-import { attrs, initials, tint } from "@/lib/format";
+import { ensureConversationMemberTable } from "@/db/ensure-conversation-member";
+import { isLive } from "@/lib/whatsapp/cloud-api";
+import { attrs, initials, stamp, tint, waIdentifier } from "@/lib/format";
 
 /**
  * How much of the thread is rendered. WhatsApp threads with a customer run for
@@ -28,6 +30,14 @@ export default async function ConversationPage({
   if (!me) notFound();
   const db = getDb();
 
+  // The watchers are read as part of the conversation's own query below, so on a
+  // deploy that lands before `pnpm db:migrate` a missing conversation_member
+  // table would 500 the whole thread, not just its panel section. Swallowing the
+  // error is deliberate: if the table already exists, a transient DDL failure
+  // must not take the page down, and if it genuinely does not exist the query
+  // right after this fails with Postgres's own message.
+  await ensureConversationMemberTable(db).catch(() => {});
+
   const convo = await db.query.conversation.findFirst({
     where: eq(conversation.id, id),
     with: {
@@ -35,6 +45,7 @@ export default async function ConversationPage({
       assignedAgent: true,
       assignedDepartment: true,
       tagLinks: { with: { tag: true } },
+      memberLinks: true,
       messages: {
         orderBy: (m, { desc }) => desc(m.createdAt),
         limit: THREAD_LIMIT,
@@ -69,6 +80,35 @@ export default async function ConversationPage({
   const name = convo.contact.name ?? convo.contact.phone;
   const contactAttrs = attrs(convo.contact.attributes);
 
+  // Who sent each outbound message. `members` is already the company's full
+  // roster for the assignment picker, so attribution costs no extra query — and
+  // it still resolves staff who have since been deactivated, because the org
+  // sync marks them inactive rather than deleting the row.
+  const memberNames = new Map(members.map((m) => [m.id, m.name]));
+
+  // Same roster, resolved the same way — the chat members are ids on the
+  // conversation, and naming them costs nothing extra. A member row is never
+  // hard-deleted (the org sync deactivates instead), so the fallback should
+  // never show; it is there so one stale id cannot blank the panel.
+  const chatMembers = convo.memberLinks
+    .map((l) => ({
+      id: l.memberId,
+      name: memberNames.get(l.memberId) ?? "Unknown member",
+      addedBy: l.addedByMemberId ? (memberNames.get(l.addedByMemberId) ?? null) : null,
+      // stamp() is Date.now()-free, so this stays a pure render.
+      addedAt: stamp(l.createdAt),
+    }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+
+  const thread = messages.map((m) => ({
+    ...m,
+    senderName: m.isBot
+      ? "Bot"
+      : m.sentByMemberId
+        ? (memberNames.get(m.sentByMemberId) ?? null)
+        : null,
+  }));
+
   return (
     <div className="flex min-w-0 flex-1">
       {/* Center: thread */}
@@ -84,11 +124,41 @@ export default async function ConversationPage({
             <div className="truncate text-[14px] font-semibold text-[var(--color-ink)]">
               {name}
             </div>
-            <div className="font-mono text-[11px] text-[var(--color-muted)]">
-              +{convo.contact.phone}
+            <div
+              className="font-mono text-[11px] text-[var(--color-muted)]"
+              title={waIdentifier(convo.contact.phone).label}
+            >
+              {waIdentifier(convo.contact.phone).text}
             </div>
           </div>
           <div className="ml-auto flex items-center gap-2">
+            {/* Who else is in the room. The panel is hidden below xl, so without
+                this an agent on a laptop has no way to know a colleague was
+                pulled in — and "someone else is watching" changes how you
+                write the next reply. */}
+            {chatMembers.length > 0 && (
+              <div
+                className="flex items-center gap-1.5"
+                title={`Watching: ${chatMembers.map((m) => m.name).join(", ")}`}
+              >
+                <div className="flex -space-x-1.5">
+                  {chatMembers.slice(0, 3).map((m) => (
+                    <span
+                      key={m.id}
+                      className="grid h-6 w-6 place-items-center rounded-full border border-[var(--color-surface)] text-[9px] font-semibold text-white"
+                      style={{ background: tint(m.name) }}
+                    >
+                      {initials(m.name).toUpperCase()}
+                    </span>
+                  ))}
+                </div>
+                <span className="text-[11px] text-[var(--color-muted)]">
+                  {chatMembers.length > 3
+                    ? `+${chatMembers.length - 3} watching`
+                    : "watching"}
+                </span>
+              </div>
+            )}
             <span className="rounded-full border border-[var(--color-border)] bg-[var(--color-surface-2)] px-2.5 py-1 text-[11px] font-medium text-[var(--color-muted)]">
               {convo.status}
             </span>
@@ -97,12 +167,24 @@ export default async function ConversationPage({
         </div>
 
         <Thread
-          messages={messages}
+          messages={thread}
           contactName={name}
           conversationId={convo.id}
         />
-        <DemoReplyBar conversationId={convo.id} />
-        <Composer conversationId={convo.id} />
+        {/* The DEMO simulators are for driving a flow with no real WhatsApp
+            attached. On LIVE they were still rendered — a thread showing
+            "LIVE · sending via WhatsApp" in the sidebar and a "Send as customer"
+            box under it, whose server actions demoOnly() already refuses. An
+            operator reading that can only conclude the inbox is faking traffic. */}
+        {!isLive() && <DemoReplyBar conversationId={convo.id} />}
+        <Composer
+          conversationId={convo.id}
+          // The expiry, not a boolean: comparing it to the clock is the client's
+          // job, exactly as WindowTimer does it. Deciding here would both call an
+          // impure function during render and freeze the answer at render time,
+          // so a composer left open past the deadline would still invite a reply.
+          windowExpiresAt={convo.windowExpiresAt?.toISOString() ?? null}
+        />
       </div>
 
       {/* Right: contact + order attributes */}
@@ -117,9 +199,14 @@ export default async function ConversationPage({
         fields={fields.map((f) => ({ key: f.key, name: f.name }))}
         values={contactAttrs}
         members={members.map((m) => ({ id: m.id, name: m.name }))}
+        chatMembers={chatMembers}
         departments={departments.map((d) => ({ id: d.id, name: d.name }))}
         allTags={tags.map((t) => ({ id: t.id, name: t.name, color: t.color }))}
         marketingOptIn={convo.contact.marketingOptIn}
+        contactId={convo.contact.id}
+        remarks={contactAttrs.remarks ?? ""}
+        email={convo.contact.email ?? ""}
+        starred={contactAttrs.starred === "1"}
       />
     </div>
   );

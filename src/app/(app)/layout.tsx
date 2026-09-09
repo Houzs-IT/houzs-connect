@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { and, gt, ne } from "drizzle-orm";
 import { Sidebar } from "@/components/Sidebar";
 import { getDb } from "@/db/client";
+import { ensureContactColumns } from "@/db/ensure";
 import { conversation } from "@/db/schema";
 import { getCurrentMember } from "@/lib/current-member";
 import { getVisibility, conversationVisibilityWhere } from "@/lib/access";
@@ -21,6 +22,15 @@ export default async function AppLayout({
   if (!me) redirect("/login");
 
   const db = getDb();
+
+  // Runs once per isolate, before ANY page under (app) queries a contact.
+  // `blocked` / `updated_at` exist in the Drizzle schema, and Drizzle selects
+  // the full column list on every read — so between a deploy and the migration
+  // landing, /inbox, /logs, /payments and /dashboard all 500 on a missing
+  // column. Gating that on someone visiting /contacts first would leave a real
+  // window in which the console is simply down for the team.
+  await ensureContactColumns(db).catch(() => {});
+
   const allMembers = await db.query.member.findMany({
     columns: { id: true, managerId: true },
   });

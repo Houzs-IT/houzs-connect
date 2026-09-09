@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { asc, desc, eq } from "drizzle-orm";
 import { getDb } from "@/db/client";
+import { ensureContactColumns } from "@/db/ensure";
 import {
   channel as channelTable,
   company as companyTable,
@@ -66,6 +67,12 @@ export async function POST(req: NextRequest) {
   })();
 
   const db = getDb();
+
+  // Contact columns that may not exist in Postgres yet (see db/ensure.ts).
+  // Drizzle selects the full column list, so without this a deploy that lands
+  // before the migration drops customer messages on the floor — the one failure
+  // mode here that loses data rather than showing an error page.
+  await ensureContactColumns(db).catch(() => {});
 
   // Record EVERY delivery before interpreting it. Without this the only way to
   // tell "Meta never called us" from "Meta called and we dropped it" was to

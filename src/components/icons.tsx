@@ -120,3 +120,9 @@ export const IconReceipt = (p: P) => (
     <path d="M9 8h6M9 12h6" />
   </svg>
 );
+
+export const IconPhone = (p: P) => (
+  <svg {...base(p)}>
+    <path d="M5 3h3.5l1.5 4-2 1.5a12 12 0 0 0 5.5 5.5L15 12l4 1.5V17a2 2 0 0 1-2.2 2A15.5 15.5 0 0 1 3 5.2 2 2 0 0 1 5 3z" />
+  </svg>
+);

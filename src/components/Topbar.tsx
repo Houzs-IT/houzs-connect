@@ -1,6 +1,5 @@
 import { logout } from "@/app/login/actions";
 import { initials, tint } from "@/lib/format";
-import { IconSearch } from "./icons";
 
 const ROLE_LABEL: Record<string, string> = {
   OWNER: "Owner",
@@ -32,12 +31,13 @@ export function Topbar({
         )}
       </div>
 
+      {/* There was a "Search…" box here. It was a <div> — no input, no handler,
+          no destination — sitting in the chrome of every page and looking
+          exactly like the search field in the inbox rail, which is real. There
+          is no global search to point it at, so it is gone rather than faked.
+          Search lives where it works: the conversation rail, and the phone
+          filter on Contacts. */}
       <div className="ml-auto flex items-center gap-3">
-        <div className="hidden items-center gap-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] px-3 py-2 text-sm text-[var(--color-faint)] md:flex">
-          <IconSearch width={16} height={16} />
-          <span>Search…</span>
-        </div>
-
         <div className="flex items-center gap-2.5">
           <div
             className="grid h-8 w-8 place-items-center rounded-full text-xs font-semibold text-white"

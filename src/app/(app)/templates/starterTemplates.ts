@@ -24,7 +24,11 @@ export const STARTER_TEMPLATES: StarterTemplate[] = [
     name: "hc_order_delivery_follow_up_1_order",
     language: "en",
     category: "UTILITY",
-    body: `Hi {{1}} 👋 Good news! Your order with Houzs has been scheduled for delivery.
+    // Line breaks verified against the live Seampify editor, not the rendered
+    // list (which collapses them) — the greeting is its own line.
+    body: `Hi {{1}} 👋
+
+Good news! Your order with Houzs has been scheduled for delivery.
 
 Reference No. : *{{2}}*
 Delivery Date: *{{3}}*
@@ -44,16 +48,19 @@ Please tap *"Confirm Date"* if this works for you. If you need to reschedule, pl
     name: "hc_order_amend_follow_up_1_order",
     language: "en",
     category: "UTILITY",
-    body: `Hi {{1}} 👋 Due to some arrangements with goods and transportation, we'll need to reschedule your delivery time.
+    body: `Hi {{1}} 👋
 
+Due to some arrangements with goods and transportation, we'll need to reschedule your delivery time.
 Our proposed new date is:
+
 Reference No. : *{{2}}*
 Delivery Date: *{{3}}*
 Branding: *{{4}}*
 
 Please confirm if this date works for you 👇
+We'll confirm the exact time with you again a few days before delivery.
 
-We'll confirm the exact time with you again a few days before delivery. If you need to change it, just tap the button below — our team will be happy to assist.`,
+If you need to change it, just tap the button below — our team will be happy to assist.`,
     examples: ["Wong", "znt7001", "15/08/2026", "Dunlopillo"],
     buttons: [
       { type: "QUICK_REPLY", text: "Confirm Date" },
@@ -63,7 +70,9 @@ We'll confirm the exact time with you again a few days before delivery. If you n
   {
     label: "Delivered — thank you",
     name: "delivery_completed_thanks",
-    language: "en",
+    // en_GB on the source WABA, not en — a different language code is a
+    // different template as far as Meta is concerned.
+    language: "en_GB",
     category: "UTILITY",
     body: `Hi {{1}}, This is a confirmation that your order {{2}} was successfully delivered today. Thank you for your understanding and for purchasing our products. We sincerely appreciate your support and are grateful for your trust in us. Please let us know if you have any questions or need further assistance with your items!`,
     examples: ["Wong", "znt7001"],
@@ -80,7 +89,7 @@ We'll confirm the exact time with you again a few days before delivery. If you n
   {
     label: "Ask for the delivery address",
     name: "ask_delivery_address",
-    language: "en",
+    language: "en_GB",
     category: "UTILITY",
     body: `Hi {{1}} 👋 We're getting your Houzs order *{{2}}* ready! 🚚
 
@@ -92,7 +101,7 @@ Thank you so much! ✨`,
   {
     label: "Order delayed",
     name: "overdue_order_status_update",
-    language: "en",
+    language: "en_GB",
     category: "UTILITY",
     body: `Hi *{{1}}* , this is the Customer Service Team from Houzs Century. We sincerely apologize for the delay with your order *{{2}}*. Due to *{{3}}*, your order requires additional time to ensure everything meets our standards. Our team is actively working on your items, and we expect to deliver your order within the next delivery timeframe *{{4}}*. Our logistics team will contact you shortly to confirm the exact date and time. Thank you for your patience and for giving us the opportunity to make this right.`,
     examples: ["Wong", "znt7001", "supplier delay", "end of August"],

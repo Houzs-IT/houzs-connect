@@ -4,18 +4,20 @@
 //
 // The server component (page.tsx) resolves the cheap aggregate counters and
 // hands them down as `kpis`, so the tab strip and every KPI tile paint with the
-// first byte. The four row-scanning cards arrive as *slots* — server-rendered
-// nodes already wrapped in their own <Suspense> upstream — so they stream in
-// behind matching skeletons without holding up the shell.
+// first byte. The row-scanning cards arrive as *slots* — server-rendered nodes
+// already wrapped in their own <Suspense> upstream — so they stream in behind
+// matching skeletons without holding up the shell.
 //
-// Tabs mirror Seampify's dashboard: Overview / Support / Marketing / Live
-// Reporting / Message Analytics / Calling Analytics. Real Connect figures and
-// clearly-labelled demo/derived figures are marked in the UI (a "demo" /
-// "derived" pill) so operators always know what is wired to live data.
+// Every number rendered here comes from `kpis` or from a streamed slot, and both
+// are database reads scoped to the signed-in member's company. There are no
+// sample figures in this file: an earlier version carried an invented WhatsApp
+// spend ("MYR 23.43", a four-row charges breakdown) and a whole Calling
+// Analytics tab of made-up call volumes. Connect receives neither Meta's billing
+// data nor any call events, so those figures are gone rather than approximated —
+// see the note at the foot of Overview.
 
 import { useState } from "react";
-import { BarChart } from "./charts";
-import { BarRow, Card, Pill, Stat } from "./ui";
+import { BarRow, Card, NoData, Pill, Stat } from "./ui";
 import { pctOf } from "./util";
 
 // ─────────────────────────── Data contract ───────────────────────────
@@ -39,16 +41,19 @@ export interface DashboardKpis {
   failed: number;
   optIn: number;
   templateUsage: number;
+  sentLast7Days: number;
 }
 
 export interface DashboardSlots {
-  /** Support → "Assigned agents" (grouped per-agent aggregate). */
+  /** Support → measured first-reply times. */
+  replySpeed: React.ReactNode;
+  /** Support → who is handling the chats (grouped per-agent aggregate). */
   agentLoad: React.ReactNode;
-  /** Marketing → "Tag reach" (contact↔tag join). */
+  /** Marketing → contacts per tag (contact↔tag join). */
   tagReach: React.ReactNode;
-  /** Live Reporting → "Recent activity" (three merged feeds). */
+  /** Live Reporting → latest activity (messages + automation runs). */
   activity: React.ReactNode;
-  /** Message Analytics → "Messages over time" (seven-day series). */
+  /** Message Analytics → messages sent (seven-day series). */
   messagesSeries: React.ReactNode;
 }
 
@@ -58,7 +63,6 @@ const TABS = [
   "Marketing",
   "Live Reporting",
   "Message Analytics",
-  "Calling Analytics",
 ] as const;
 type Tab = (typeof TABS)[number];
 
@@ -66,12 +70,10 @@ type Tab = (typeof TABS)[number];
 
 export function DashboardTabs({
   kpis: k,
-  spend,
   slots,
   initialTab,
 }: {
   kpis: DashboardKpis;
-  spend: { label: string; value: string; pct: number }[]; // demo
   slots: DashboardSlots;
   initialTab?: string;
 }) {
@@ -99,6 +101,13 @@ export function DashboardTabs({
     replied: k.inbound,
   };
 
+  const statuses = [
+    { label: "Open", value: k.openConvos },
+    { label: "Waiting on a reply", value: k.pendingConvos },
+    { label: "In the queue", value: k.queueConvos },
+    { label: "Closed", value: k.closedConvos },
+  ];
+
   return (
     <div className="p-6">
       {/* Tab strip */}
@@ -125,36 +134,60 @@ export function DashboardTabs({
       {tab === "Overview" && (
         <div className="animate-rise">
           <div className="grid grid-cols-2 gap-4 md:grid-cols-3">
-            <Stat label="Contacts" value={k.contacts} hint="in CRM" />
+            <Stat label="Contacts" value={k.contacts} hint="in the address book" />
             <Stat
               label="Conversations"
               value={k.conversations}
               hint={`${k.openConvos} open`}
             />
-            <Stat label="Active automations" value={k.automations} hint="running" />
-            <Stat label="Team members" value={k.members} hint="on org chart" />
+            <Stat label="Active automations" value={k.automations} hint="switched on" />
+            <Stat label="Team members" value={k.members} hint="still with us" />
             <Stat label="Campaigns" value={k.campaigns} hint="all time" />
-            <Stat label="Est. spend (7d)" value="MYR 23.43" hint="WhatsApp · demo" />
+            <Stat
+              label="Messages sent"
+              value={k.sentLast7Days}
+              hint="last 7 days"
+            />
           </div>
 
           <div className="mt-6 grid grid-cols-1 gap-4 lg:grid-cols-2">
-            <Card title="Approx. charges by category" meta={<Pill kind="demo" />}>
-              <p className="mb-4 -mt-3 text-[11px] text-[var(--color-faint)]">
-                Meta conversation billing · last 7 days
-              </p>
-              <div className="flex flex-col gap-3">
-                {spend.map((s) => (
-                  <BarRow key={s.label} label={s.label} value={s.value} pct={s.pct} />
-                ))}
-              </div>
+            <Card title="Conversations by status" meta={<Pill kind="real" />}>
+              {k.conversations === 0 ? (
+                <p className="text-[12px] text-[var(--color-faint)]">
+                  No conversations yet.
+                </p>
+              ) : (
+                <div className="flex flex-col gap-3">
+                  {statuses.map((s) => (
+                    <BarRow
+                      key={s.label}
+                      label={s.label}
+                      value={String(s.value)}
+                      pct={pctOf(s.value, k.conversations)}
+                    />
+                  ))}
+                </div>
+              )}
             </Card>
 
             <Card title="Messages" meta={<Pill kind="real" />}>
               <div className="grid grid-cols-2 gap-4">
-                <Stat label="Outbound" value={k.outbound} hint="all time" />
-                <Stat label="Inbound" value={k.inbound} hint="all time" />
+                <Stat label="We sent" value={k.outbound} hint="all time" />
+                <Stat label="Customers sent" value={k.inbound} hint="all time" />
               </div>
             </Card>
+          </div>
+
+          {/* What this page deliberately does NOT show. Both of these used to be
+              filled with invented figures. */}
+          <div className="mt-4 rounded-lg border border-dashed border-[var(--color-border-strong)] bg-[var(--color-surface-2)] px-4 py-3 text-[12px] leading-relaxed text-[var(--color-muted)]">
+            <span className="font-medium text-[var(--color-ink)]">
+              Not shown here:
+            </span>{" "}
+            what WhatsApp costs, and phone calls. Meta bills conversations on its
+            own account and does not send us the amounts, and Connect does not
+            handle calls at all — so there is nothing to count. Those figures are
+            left out rather than estimated.
           </div>
         </div>
       )}
@@ -163,25 +196,24 @@ export function DashboardTabs({
       {tab === "Support" && (
         <div className="animate-rise">
           <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
-            <Stat label="Open" value={k.openConvos} hint="conversations" />
-            <Stat label="Pending" value={k.pendingConvos} hint="awaiting reply" />
-            <Stat label="Queue" value={k.queueConvos} hint="unassigned" />
-            <Stat label="Closed" value={k.closedConvos} hint="resolved" />
+            <Stat label="Open" value={k.openConvos} hint="being handled" />
+            <Stat label="Waiting on a reply" value={k.pendingConvos} hint="customer answered" />
+            <Stat label="In the queue" value={k.queueConvos} hint="nobody assigned" />
+            <Stat label="Closed" value={k.closedConvos} hint="done" />
           </div>
 
           <div className="mt-6 grid grid-cols-1 gap-4 lg:grid-cols-2">
-            <Card title="Response time" meta={<Pill kind="demo" />}>
-              <div className="grid grid-cols-3 gap-3">
-                <Stat label="First response" value="2m 41s" />
-                <Stat label="Avg. resolution" value="18m" />
-                <Stat label="CSAT" value="94%" />
-              </div>
-              <p className="mt-3 text-[11px] text-[var(--color-faint)]">
-                Response-time metrics are not captured by the demo transport yet.
-              </p>
-            </Card>
-
+            {slots.replySpeed}
             {slots.agentLoad}
+          </div>
+
+          <div className="mt-4 rounded-lg border border-dashed border-[var(--color-border-strong)] bg-[var(--color-surface-2)] px-4 py-3 text-[12px] leading-relaxed text-[var(--color-muted)]">
+            <span className="font-medium text-[var(--color-ink)]">
+              Not shown here:
+            </span>{" "}
+            how long a chat takes to finish, and customer satisfaction scores.
+            Closing a chat is not timestamped and Connect never asks customers to
+            rate anything, so neither can be worked out from what we store.
           </div>
         </div>
       )}
@@ -190,37 +222,43 @@ export function DashboardTabs({
       {tab === "Marketing" && (
         <div className="animate-rise">
           <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
-            <Stat label="Campaigns sent" value={k.campaignsCompleted} hint="completed" />
-            <Stat label="Broadcast sends" value={funnel.sent} hint="messages out" />
-            <Stat label="Opted-in contacts" value={k.optIn} hint="marketing" />
-            <Stat label="Replies" value={funnel.replied} hint="inbound" />
+            <Stat label="Campaigns sent" value={k.campaignsCompleted} hint="finished" />
+            <Stat label="Contacts we may market to" value={k.optIn} hint="not opted out" />
+            <Stat label="Messages we sent" value={funnel.sent} hint="all outbound" />
+            <Stat label="Messages customers sent" value={funnel.replied} hint="all inbound" />
           </div>
 
           <div className="mt-6 grid grid-cols-1 gap-4 lg:grid-cols-2">
-            <Card title="Delivery funnel" meta={<Pill kind="derived" />}>
-              <div className="flex flex-col gap-3">
-                <BarRow label="Sent" value={String(funnel.sent)} pct={100} />
-                <BarRow
-                  label="Delivered"
-                  value={String(funnel.delivered)}
-                  pct={pctOf(funnel.delivered, funnel.sent)}
-                />
-                <BarRow
-                  label="Read"
-                  value={String(funnel.read)}
-                  pct={pctOf(funnel.read, funnel.sent)}
-                />
-                <BarRow
-                  label="Replied"
-                  value={String(funnel.replied)}
-                  pct={pctOf(funnel.replied, funnel.sent)}
-                />
-              </div>
-              <p className="mt-3 text-[11px] text-[var(--color-faint)]">
-                Sent &amp; replied are live; delivered/read are derived — the demo
-                transport marks every send as SENT (Meta delivery receipts arrive
-                via webhooks in LIVE mode).
-              </p>
+            <Card title="What happened to the messages we sent" meta={<Pill kind="derived" />}>
+              {funnel.sent === 0 ? (
+                <NoData>Nothing has been sent from this account yet.</NoData>
+              ) : (
+                <>
+                  <div className="flex flex-col gap-3">
+                    <BarRow label="Sent" value={String(funnel.sent)} pct={100} />
+                    <BarRow
+                      label="Delivered"
+                      value={String(funnel.delivered)}
+                      pct={pctOf(funnel.delivered, funnel.sent)}
+                    />
+                    <BarRow
+                      label="Read"
+                      value={String(funnel.read)}
+                      pct={pctOf(funnel.read, funnel.sent)}
+                    />
+                    <BarRow
+                      label="Customers wrote back"
+                      value={String(funnel.replied)}
+                      pct={pctOf(funnel.replied, funnel.sent)}
+                    />
+                  </div>
+                  <p className="mt-3 text-[11px] leading-relaxed text-[var(--color-faint)]">
+                    Sent and written-back are counted from our own messages.
+                    Delivered and read are whatever WhatsApp has told us so far —
+                    they only fill in for messages sent from the live number.
+                  </p>
+                </>
+              )}
             </Card>
 
             {slots.tagReach}
@@ -232,10 +270,10 @@ export function DashboardTabs({
       {tab === "Live Reporting" && (
         <div className="animate-rise">
           <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
-            <Stat label="Open now" value={k.openConvos} hint="conversations" />
-            <Stat label="Outbound" value={k.outbound} hint="messages" />
-            <Stat label="Inbound" value={k.inbound} hint="messages" />
-            <Stat label="Automations live" value={k.automations} hint="enabled" />
+            <Stat label="Open right now" value={k.openConvos} hint="conversations" />
+            <Stat label="We sent" value={k.outbound} hint="messages, all time" />
+            <Stat label="Customers sent" value={k.inbound} hint="messages, all time" />
+            <Stat label="Automations running" value={k.automations} hint="switched on" />
           </div>
 
           <div className="mt-6">{slots.activity}</div>
@@ -246,50 +284,20 @@ export function DashboardTabs({
       {tab === "Message Analytics" && (
         <div className="animate-rise">
           <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
-            <Stat label="Sent" value={k.outbound} />
-            <Stat label="Delivered" value={k.delivered} />
-            <Stat label="Read" value={k.read} />
-            <Stat label="Failed" value={k.failed} />
+            <Stat label="Sent" value={k.outbound} hint="all time" />
+            <Stat label="Delivered" value={k.delivered} hint="confirmed by WhatsApp" />
+            <Stat label="Read" value={k.read} hint="confirmed by WhatsApp" />
+            <Stat label="Failed" value={k.failed} hint="never arrived" />
           </div>
 
           <div className="mt-6 grid grid-cols-1 gap-4 lg:grid-cols-3">
             <div className="lg:col-span-2">{slots.messagesSeries}</div>
-            <Card title="Template usage" meta={<Pill kind="real" />}>
-              <Stat label="Template messages" value={k.templateUsage} hint="all time" />
-              <p className="mt-3 text-[11px] text-[var(--color-faint)]">
-                Broadcasts and automation sends dispatched as WhatsApp templates.
+            <Card title="Ready-made templates" meta={<Pill kind="real" />}>
+              <Stat label="Sent as a template" value={k.templateUsage} hint="all time" />
+              <p className="mt-3 text-[11px] leading-relaxed text-[var(--color-faint)]">
+                Broadcasts and automations go out as WhatsApp-approved templates.
+                This is how many of our messages were sent that way.
               </p>
-            </Card>
-          </div>
-        </div>
-      )}
-
-      {/* ─── Calling Analytics ─── */}
-      {tab === "Calling Analytics" && (
-        <div className="animate-rise">
-          <div className="mb-4 rounded-lg border border-dashed border-[var(--color-border-strong)] bg-[var(--color-surface-2)] px-4 py-2 text-[12px] text-[var(--color-muted)]">
-            WhatsApp Business Calling is not wired into Connect yet — every figure on
-            this tab is placeholder/demo data, shown to mirror Seampify&apos;s layout.
-          </div>
-          <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
-            <Stat label="Total calls" value="342" hint="demo" />
-            <Stat label="Answered" value="287" hint="demo" />
-            <Stat label="Avg. duration" value="3m 12s" hint="demo" />
-            <Stat label="Approx. charges" value="MYR 41.80" hint="demo" />
-          </div>
-
-          <div className="mt-6 grid grid-cols-1 gap-4 lg:grid-cols-3">
-            <div className="lg:col-span-2">
-              <Card title="Call activity (7 days)" meta={<Pill kind="demo" />}>
-                <BarChart data={CALL_ACTIVITY_DEMO} />
-              </Card>
-            </div>
-            <Card title="Calls summary" meta={<Pill kind="demo" />}>
-              <div className="flex flex-col gap-3">
-                <BarRow label="Answered" value="287" pct={84} color="var(--color-success)" />
-                <BarRow label="Missed" value="41" pct={12} color="var(--color-warning)" />
-                <BarRow label="Rejected" value="14" pct={4} color="var(--color-danger)" />
-              </div>
             </Card>
           </div>
         </div>
@@ -297,15 +305,3 @@ export function DashboardTabs({
     </div>
   );
 }
-
-// Static demo dataset for the Calling Analytics chart — Connect has no call
-// events, so this is illustrative only (clearly labelled in the UI).
-const CALL_ACTIVITY_DEMO = [
-  { label: "Mon", value: 38 },
-  { label: "Tue", value: 52 },
-  { label: "Wed", value: 47 },
-  { label: "Thu", value: 61 },
-  { label: "Fri", value: 55 },
-  { label: "Sat", value: 44 },
-  { label: "Sun", value: 45 },
-];

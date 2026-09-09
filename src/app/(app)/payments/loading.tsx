@@ -8,11 +8,11 @@ export default function PaymentsLoading() {
   return (
     <PageSkeleton
       title="Payments"
-      subtitle="Receipts auto-captured by OCR from customer chats"
+      subtitle="Receipts customers sent in chat, read automatically"
     >
       <div className="p-6">
         <div className="mb-4 flex gap-4">
-          {["Verified total", "Pending review"].map((label) => (
+          {["Confirmed total", "Still to check"].map((label) => (
             <div
               key={label}
               className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-3"
@@ -26,12 +26,12 @@ export default function PaymentsLoading() {
         <div className="overflow-hidden rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)]">
           <TableSkeleton
             headers={[
-              "Contact",
+              "Customer",
               "Amount",
               "Reference",
-              "Method",
+              "Paid by",
               "Order",
-              "When",
+              "Received",
               "Status",
               "Action",
             ]}

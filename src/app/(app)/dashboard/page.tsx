@@ -1,5 +1,5 @@
 import { Suspense } from "react";
-import { count, eq, sql } from "drizzle-orm";
+import { and, count, eq, gte, sql } from "drizzle-orm";
 import { getDb } from "@/db/client";
 import {
   automation,
@@ -19,25 +19,32 @@ import {
   AgentLoadSkeleton,
   MessagesSeriesSection,
   MessagesSeriesSkeleton,
+  ReplySpeedSection,
+  ReplySpeedSkeleton,
   TagReachSection,
   TagReachSkeleton,
 } from "./sections";
+import { reportWindow } from "./util";
 
 /**
- * Dashboard — Seampify-parity tabbed analytics. Every real count comes from the
- * `connect` schema; figures Connect does not yet capture (spend, response times,
- * calling) are computed as demo/derived values and clearly labelled in the UI.
+ * Dashboard — every figure on this page is read from the `connect` schema for
+ * the signed-in member's company. Nothing is sampled, seeded or illustrative:
+ * where Connect has no source for a metric (Meta's conversation billing, and
+ * WhatsApp calling) the card says so in words rather than showing a number.
+ *
+ * Company scoping: `contact`, `campaign`, `automation`, `member` and `tag` all
+ * carry `company_id`. `conversation` and `message` do not, so they are scoped
+ * through the join every other page uses — conversation → contact → company.
  *
  * Two-phase render:
  *
- *  · Phase 1 (blocks TTFB) — the counters. Six batched round-trips instead of
- *    the eighteen this used to issue: the conversation, message, contact and
- *    campaign figures are each one grouped aggregate now
- *    (`count(*) filter (where …)`), a single scan per table rather than one per
- *    status. Every result is O(1) rows, so the shell, the tab strip and every
- *    KPI tile land in the first flush.
+ *  · Phase 1 (blocks TTFB) — the counters. Six batched round-trips: the
+ *    conversation, message, contact and campaign figures are each one grouped
+ *    aggregate (`count(*) filter (where …)`), a single scan per table rather
+ *    than one per status. Every result is O(1) rows, so the shell, the tab strip
+ *    and every KPI tile land in the first flush.
  *
- *  · Phase 2 (streams) — the four cards that actually read rows, each behind its
+ *  · Phase 2 (streams) — the five cards that actually read rows, each behind its
  *    own <Suspense> and its own skeleton. They are siblings, so they still fan
  *    out in parallel; nothing here reintroduces a waterfall.
  */
@@ -50,9 +57,15 @@ export default async function DashboardPage({
   const [{ tab }, me] = await Promise.all([searchParams, getCurrentMember()]);
   if (!me) return null; // the (app) layout redirects unauthenticated users to /login
 
+  const companyId = me.companyId;
+  // Same seven Malaysian days the message chart buckets by, so the headline
+  // "last 7 days" figure and the chart can never disagree.
+  const { since } = reportWindow();
+  const mine = eq(contact.companyId, companyId);
+
   const [convoAgg, msgAgg, contactAgg, campaignAgg, automations, members] =
     await Promise.all([
-      // One pass over `conversation` for every status figure.
+      // One pass over this company's `conversation` rows for every status figure.
       db
         .select({
           total: count(),
@@ -76,8 +89,11 @@ export default async function DashboardPage({
               Number
             ),
         })
-        .from(conversation),
-      // One pass over `message` for direction, delivery status and template use.
+        .from(conversation)
+        .innerJoin(contact, eq(contact.id, conversation.contactId))
+        .where(mine),
+      // One pass over this company's `message` rows for direction, delivery
+      // status, template use and the seven-day send count.
       db
         .select({
           outbound:
@@ -103,8 +119,19 @@ export default async function DashboardPage({
             sql<number>`count(*) filter (where ${message.type} = 'TEMPLATE')`.mapWith(
               Number
             ),
+          // `gte(...)` rather than a hand-written comparison so the Date is
+          // encoded by the column's own mapper — the same path the seven-day
+          // chart already uses.
+          sent7:
+            sql<number>`count(*) filter (where ${message.direction} = 'OUT' and ${gte(
+              message.createdAt,
+              since
+            )})`.mapWith(Number),
         })
-        .from(message),
+        .from(message)
+        .innerJoin(conversation, eq(conversation.id, message.conversationId))
+        .innerJoin(contact, eq(contact.id, conversation.contactId))
+        .where(mine),
       db
         .select({
           total: count(),
@@ -112,7 +139,8 @@ export default async function DashboardPage({
             Number
           ),
         })
-        .from(contact),
+        .from(contact)
+        .where(mine),
       db
         .select({
           total: count(),
@@ -121,9 +149,18 @@ export default async function DashboardPage({
               Number
             ),
         })
-        .from(campaign),
-      db.$count(automation, eq(automation.enabled, true)),
-      db.$count(member),
+        .from(campaign)
+        .where(eq(campaign.companyId, companyId)),
+      db.$count(
+        automation,
+        and(eq(automation.companyId, companyId), eq(automation.enabled, true))
+      ),
+      // Members who have left are kept as rows (they own past assignments) and
+      // marked inactive — counting them would overstate the team.
+      db.$count(
+        member,
+        and(eq(member.companyId, companyId), eq(member.active, true))
+      ),
     ]);
 
   const c = convoAgg[0];
@@ -149,44 +186,44 @@ export default async function DashboardPage({
     failed: m.failed,
     optIn: ct.optIn,
     templateUsage: m.template,
+    sentLast7Days: m.sent7,
   };
-
-  // Spend (demo — mirrors the Seampify conversation-billing dashboard).
-  const spend = [
-    { label: "Marketing", value: "MYR 0.00", pct: 3 },
-    { label: "Utility", value: "MYR 19.97", pct: 82 },
-    { label: "Service", value: "MYR 0.00", pct: 3 },
-    { label: "Marketing-Lite", value: "MYR 3.47", pct: 18 },
-  ];
 
   return (
     <PageChrome
       title="Dashboard"
-      subtitle="Spend, delivery, support & message analytics"
+      subtitle="Conversations, delivery and message analytics"
     >
       <DashboardTabs
         kpis={kpis}
-        spend={spend}
         initialTab={tab}
         slots={{
+          replySpeed: (
+            <Suspense fallback={<ReplySpeedSkeleton />}>
+              <ReplySpeedSection companyId={companyId} />
+            </Suspense>
+          ),
           agentLoad: (
             <Suspense fallback={<AgentLoadSkeleton />}>
-              <AgentLoadSection unassignedOpen={c.unassignedOpen} />
+              <AgentLoadSection
+                companyId={companyId}
+                unassignedOpen={c.unassignedOpen}
+              />
             </Suspense>
           ),
           tagReach: (
             <Suspense fallback={<TagReachSkeleton />}>
-              <TagReachSection companyId={me.companyId} />
+              <TagReachSection companyId={companyId} />
             </Suspense>
           ),
           activity: (
             <Suspense fallback={<ActivitySkeleton />}>
-              <ActivitySection />
+              <ActivitySection companyId={companyId} />
             </Suspense>
           ),
           messagesSeries: (
             <Suspense fallback={<MessagesSeriesSkeleton />}>
-              <MessagesSeriesSection />
+              <MessagesSeriesSection companyId={companyId} />
             </Suspense>
           ),
         }}
