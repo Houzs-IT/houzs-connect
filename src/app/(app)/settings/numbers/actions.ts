@@ -7,7 +7,7 @@ import { company } from "@/db/schema";
 import { getCurrentMember } from "@/lib/current-member";
 import { channelForNumber, loadRoutingTable } from "@/lib/whatsapp/channels";
 import { assignNumber, type AssignTarget } from "@/lib/whatsapp/number-assignment";
-import { recordNumberEvent } from "@/lib/whatsapp/number-events";
+import { recordNumberEvent, recordStatusSnapshot } from "@/lib/whatsapp/number-events";
 import {
   activePhoneNumberId,
   addNumber,
@@ -93,6 +93,10 @@ export async function fetchNumbers(): Promise<NumbersView> {
       ...empty,
     };
   }
+
+  // What Meta just said about each number, kept so it can be read back later
+  // without the page open (number-events.ts).
+  await recordStatusSnapshot(res.data).catch(() => {});
 
   const db = getDb();
   const [routing, companies] = await Promise.all([
