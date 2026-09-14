@@ -80,9 +80,26 @@ re-registered with its PIN within 14 days; 10 changes per 30 days). Every save i
 with Meta's answer (`source='numbers'`). The Graph calls are UNTESTED against Meta until
 an owner saves a profile on production — the log will show the result.
 
-**Still open, in the owner's order (2026-09-14):** per-company automatic replies
-(greeting, after-hours); then an end-to-end test of both numbers from a real phone
-through to delivered ticks.
+Business profile shipped as PR #15 (deploy run 34814794974, head `e38aae02f`).
+
+**Auto replies (branch `feat/auto-replies`):** Settings → Auto Replies, per company
+(`connect.auto_reply`, migration `0007`, self-applied by `src/db/ensure-auto-reply.ts`).
+A welcome during opening hours for a customer writing in fresh (first message, or first
+after N hours of silence), and an away message outside hours, not repeated within N hours;
+outside hours the away message wins and no welcome follows. Sent only when no automation
+resumed or started on that message, and at most one per customer message; tagged on the
+row as `interactivePayload.kind = 'auto_reply'` so the next decision can see it. Hours are
+Malaysia time; a slot past midnight belongs to the day it started. Drafts (English +
+Chinese) are pre-filled and start switched OFF — the wording and hours are the owner's.
+Pinned by `scripts/smoke-auto-reply.mjs` (mutation-checked: letting a welcome follow the
+away message fails it). All 11 Houzs automations were disabled on production on
+2026-09-14, so nothing else replies alongside.
+
+**Still open (2026-09-14):** the owner registers + assigns the Hookka number, fills both
+profiles and switches the auto replies on; then an end-to-end test of both numbers from a
+real phone through to delivered ticks. Separately: the WhatsApp webhook does not verify
+Meta's `X-Hub-Signature-256` (needs the app secret as a Worker secret) — anyone who knows
+the URL can post a fake inbound message.
 
 ---
 

@@ -585,6 +585,37 @@ export const formResponse = connect.table(
 
 // ─────────────────────────── Inbound webhooks (ERP / driver app) ───────────────────────────
 
+// ─────────────────────────── Auto replies ───────────────────────────
+
+/**
+ * A company's automatic replies: a welcome for a customer who writes in fresh,
+ * and an away message outside business hours. WhatsApp's own greeting and away
+ * messages belong to the Business APP; a number on the Cloud API has neither,
+ * so they are ours to send. One row per company (see src/lib/auto-reply/).
+ */
+export const autoReply = connect.table(
+  "auto_reply",
+  {
+    id: id(),
+    companyId: text("company_id").notNull(),
+    welcomeEnabled: boolean("welcome_enabled").notNull().default(false),
+    welcomeText: text("welcome_text").notNull().default(""),
+    /** A customer silent this many hours is greeted again when they come back. */
+    welcomeAfterHours: integer("welcome_after_hours").notNull().default(24),
+    awayEnabled: boolean("away_enabled").notNull().default(false),
+    awayText: text("away_text").notNull().default(""),
+    /** { mon: { open: "09:00", close: "18:00" } | null, … } in `timezone`. */
+    hours: jsonb("hours"),
+    timezone: text("timezone").notNull().default("Asia/Kuala_Lumpur"),
+    /** The away message is not repeated in one conversation within this many hours. */
+    awayRepeatHours: integer("away_repeat_hours").notNull().default(12),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedBy: text("updated_by"),
+  },
+  // NON-partial: the settings save upserts on company_id (42P10 otherwise).
+  (t) => ({ companyKey: uniqueIndex("auto_reply_company_key").on(t.companyId) })
+);
+
 export const webhookEvent = connect.table(
   "webhook_event",
   {

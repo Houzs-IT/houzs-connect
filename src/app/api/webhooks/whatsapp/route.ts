@@ -12,6 +12,7 @@ import { attrs } from "@/lib/format";
 import { getOrCreateConversation, recordInbound } from "@/lib/whatsapp/transport";
 import { handleInboundMessage } from "@/lib/automation/dispatch";
 import { loadRoutingTable, pickInboundChannel } from "@/lib/whatsapp/channels";
+import { maybeAutoReply } from "@/lib/auto-reply/run";
 
 /**
  * Meta WhatsApp Cloud API webhook.
@@ -191,7 +192,7 @@ export async function POST(req: NextRequest) {
           media?.caption ??
           (isMedia ? "[attachment]" : "");
 
-        await recordInbound(convo.id, text, {
+        const inbound = await recordInbound(convo.id, text, {
           type: isMedia ? (m.type === "document" ? "DOCUMENT" : "IMAGE") : buttonId ? "INTERACTIVE" : "TEXT",
           interactivePayload: buttonId
             ? { tapped: buttonId }
@@ -221,7 +222,19 @@ export async function POST(req: NextRequest) {
           });
         }
 
-        await handleInboundMessage(contact.id, buttonId ? { buttonId } : { text });
+        const flows = await handleInboundMessage(contact.id, buttonId ? { buttonId } : { text });
+
+        // The company's welcome / away message — only when no automation took
+        // this message, so a greeting never lands in the middle of a flow that is
+        // waiting on the customer. Never allowed to fail the delivery: the
+        // customer's message is already saved.
+        if (flows.resumed === 0 && flows.started === 0) {
+          await maybeAutoReply(db, {
+            conversationId: convo.id,
+            companyId: channel.companyId,
+            inboundMessageId: inbound.id,
+          }).catch((e) => console.error("AUTO_REPLY_FAIL", e));
+        }
         handled++;
       }
     }
