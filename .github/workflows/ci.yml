@@ -69,6 +69,9 @@ jobs:
       - name: Auto-reply decision smoke test (pure, no DB)
         run: node scripts/smoke-auto-reply.mjs
 
+      - name: Webhook signature smoke test (pure, no DB)
+        run: node scripts/smoke-webhook-signature.mjs
+
       # Hermetic: every endpoint it calls is a loopback server the script itself
       # starts, so CI never hits the owner's real Apps Script webhooks.
       - name: call_rest_api smoke test (loopback only, no internet)

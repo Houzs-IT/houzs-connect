@@ -97,9 +97,19 @@ away message fails it). All 11 Houzs automations were disabled on production on
 
 **Still open (2026-09-14):** the owner registers + assigns the Hookka number, fills both
 profiles and switches the auto replies on; then an end-to-end test of both numbers from a
-real phone through to delivered ticks. Separately: the WhatsApp webhook does not verify
-Meta's `X-Hub-Signature-256` (needs the app secret as a Worker secret) — anyone who knows
-the URL can post a fake inbound message.
+real phone through to delivered ticks.
+
+**Webhook signature (branch `feat/webhook-signature`):** the webhook checks Meta's
+`X-Hub-Signature-256` (HMAC-SHA256 of the raw body with the app secret) when
+`WHATSAPP_APP_SECRET` is set on the Worker. Enforcement arms itself on the first delivery
+that verifies (`|sig:valid` on the webhook_event row, looked up over 30 days, remembered
+per isolate): before that an unverified delivery is accepted and marked, so a secret
+pasted wrong cannot silently reject every real customer message. Once armed, an invalid
+or missing signature gets 401 and a `rejected:signature-*` row without the forged body.
+System Logs shows the state. **Owner action:** Meta App Dashboard → the WhatsApp app →
+Settings → Basic → App secret, set as the Worker secret `WHATSAPP_APP_SECRET` on
+`houzs-connect` (Cloudflare dashboard, never in chat or GitHub), then send one WhatsApp
+message to a company number to arm it.
 
 ---
 
