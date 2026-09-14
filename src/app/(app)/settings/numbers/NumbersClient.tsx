@@ -23,6 +23,7 @@ import {
 } from "./actions";
 import type { CodeMethod, WabaNumber } from "@/lib/whatsapp/numbers";
 import { nextStep } from "@/lib/whatsapp/numbers";
+import { ProfileEditor } from "./ProfileEditor";
 
 const inputCls =
   "rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] px-3 py-2 text-[13px] text-[var(--color-ink)] outline-none focus:border-[var(--color-accent)]";
@@ -703,6 +704,9 @@ function NumberCard({
       )}
 
       <CompanyAssignment n={n} assignment={assignment} companies={companies} />
+
+      {/* Meta only keeps a business profile for a registered number. */}
+      {n.connection === "CONNECTED" && <ProfileEditor n={n} />}
 
       <NumberActions n={n} managerUrl={managerUrl} />
     </div>

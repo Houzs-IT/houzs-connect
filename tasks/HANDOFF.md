@@ -66,10 +66,23 @@ inbox and answered them from Houzs's number.
    phone must receive it from +60 18-310 7133.
 4. Optional: assign the Houzs number explicitly to Houzs Century (it works without this).
 
-**Still open, in the owner's order (2026-09-14):** WhatsApp business profile editing per
-number (photo, about, description, address, email, websites, category; display name
-changes go through Meta review); per-company automatic replies (greeting, after-hours);
-then an end-to-end test of both numbers from a real phone through to delivered ticks.
+**Deployed 2026-09-14 (PR #14, deploy run 34813786110, head `c472d863d`):** DDL 0006
+pre-applied on production and re-read on a fresh connection (text, nullable, unique
+index). Probe: a synthetic delivery to an unassigned id `0000000000000000` was logged
+`dropped:number-not-assigned:0000000000000000` with no contact created.
+
+**Business profile (branch `feat/business-profile`):** every CONNECTED number's card has
+"Edit business profile" — about (139), description (512), address (256), email, two
+websites, category (Meta's vertical enum), a JPEG/PNG photo up to 5 MB (Resumable Upload
+API; the app id is read from the token via `GET /app`, `WHATSAPP_APP_ID` overrides), and
+display-name changes submitted for Meta review (after approval the number must be
+re-registered with its PIN within 14 days; 10 changes per 30 days). Every save is logged
+with Meta's answer (`source='numbers'`). The Graph calls are UNTESTED against Meta until
+an owner saves a profile on production — the log will show the result.
+
+**Still open, in the owner's order (2026-09-14):** per-company automatic replies
+(greeting, after-hours); then an end-to-end test of both numbers from a real phone
+through to delivered ticks.
 
 ---
 

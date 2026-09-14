@@ -64,6 +64,9 @@ export interface WabaNumber {
   codeVerification: CodeVerification | null;
   /** APPROVED / AVAILABLE_WITHOUT_REVIEW / DECLINED / PENDING_REVIEW / NONE */
   nameStatus: string | null;
+  /** A display name submitted for review and not yet live, with its review state. */
+  newDisplayName: string | null;
+  newNameStatus: string | null;
   qualityRating: string | null;
   /** TIER_50 / TIER_250 / TIER_1K … or absent before business verification. */
   limitTier: string | null;
@@ -79,6 +82,8 @@ interface RawNumber {
   status?: string;
   code_verification_status?: string;
   name_status?: string;
+  new_display_name?: string;
+  new_name_status?: string;
   quality_rating?: string;
   messaging_limit_tier?: string;
   platform_type?: string;
@@ -91,10 +96,30 @@ const FIELDS = [
   "status",
   "code_verification_status",
   "name_status",
+  "new_display_name",
+  "new_name_status",
   "quality_rating",
   "messaging_limit_tier",
   "platform_type",
 ].join(",");
+
+/** One mapping for the list and the single read, so the two cannot drift. */
+function toWabaNumber(n: RawNumber, active: string | null): WabaNumber {
+  return {
+    id: n.id,
+    displayPhoneNumber: n.display_phone_number ?? "unknown",
+    verifiedName: n.verified_name ?? null,
+    connection: n.status ?? null,
+    codeVerification: n.code_verification_status ?? null,
+    nameStatus: n.name_status ?? null,
+    newDisplayName: n.new_display_name ?? null,
+    newNameStatus: n.new_name_status ?? null,
+    qualityRating: n.quality_rating ?? null,
+    limitTier: n.messaging_limit_tier ?? null,
+    platformType: n.platform_type ?? null,
+    isActive: !!active && n.id === active,
+  };
+}
 
 /** Every business phone number on the WABA. */
 export async function listNumbers(
@@ -106,19 +131,7 @@ export async function listNumbers(
     cfg.token
   );
   if (!res.ok) return res;
-  const numbers = (res.data.data ?? []).map((n) => ({
-    id: n.id,
-    displayPhoneNumber: n.display_phone_number ?? "unknown",
-    verifiedName: n.verified_name ?? null,
-    connection: n.status ?? null,
-    codeVerification: n.code_verification_status ?? null,
-    nameStatus: n.name_status ?? null,
-    qualityRating: n.quality_rating ?? null,
-    limitTier: n.messaging_limit_tier ?? null,
-    platformType: n.platform_type ?? null,
-    isActive: !!active && n.id === active,
-  }));
-  return { ok: true, data: numbers };
+  return { ok: true, data: (res.data.data ?? []).map((n) => toWabaNumber(n, active)) };
 }
 
 /** One number, read fresh from Meta — how an action proves what it changed. */
@@ -126,25 +139,9 @@ export async function getNumber(
   cfg: WabaConfig,
   phoneId: string
 ): Promise<GraphResult<WabaNumber>> {
-  const active = activePhoneNumberId();
   const res = await graph<RawNumber>(`${GRAPH}/${phoneId}?fields=${FIELDS}`, cfg.token);
   if (!res.ok) return res;
-  const n = res.data;
-  return {
-    ok: true,
-    data: {
-      id: n.id,
-      displayPhoneNumber: n.display_phone_number ?? "unknown",
-      verifiedName: n.verified_name ?? null,
-      connection: n.status ?? null,
-      codeVerification: n.code_verification_status ?? null,
-      nameStatus: n.name_status ?? null,
-      qualityRating: n.quality_rating ?? null,
-      limitTier: n.messaging_limit_tier ?? null,
-      platformType: n.platform_type ?? null,
-      isActive: !!active && n.id === active,
-    },
-  };
+  return { ok: true, data: toWabaNumber(res.data, activePhoneNumberId()) };
 }
 
 export interface NewNumber {

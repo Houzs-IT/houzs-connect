@@ -3,10 +3,11 @@
 import { revalidatePath } from "next/cache";
 import { asc, eq } from "drizzle-orm";
 import { getDb } from "@/db/client";
-import { company, webhookEvent } from "@/db/schema";
+import { company } from "@/db/schema";
 import { getCurrentMember } from "@/lib/current-member";
 import { channelForNumber, loadRoutingTable } from "@/lib/whatsapp/channels";
 import { assignNumber, type AssignTarget } from "@/lib/whatsapp/number-assignment";
+import { recordNumberEvent } from "@/lib/whatsapp/number-events";
 import {
   activePhoneNumberId,
   addNumber,
@@ -145,39 +146,6 @@ const UNCONFIGURED: ActionResult = {
   ok: false,
   error: "WhatsApp is not connected — WHATSAPP_WABA_ID and WHATSAPP_TOKEN are not set on this Worker.",
 };
-
-/**
- * Keep a record of what was asked of Meta and what Meta answered.
- *
- * "I pressed Register and it did not work" had no answer except a screenshot:
- * the result lived for one render and was gone. It is written to the same log
- * System Logs already reads. The PIN and the verification code are NEVER
- * stored — only which number, which step, and Meta's own words.
- */
-async function recordNumberEvent(
-  action: string,
-  number: string,
-  result: ActionResult,
-  extra: Record<string, unknown> = {}
-): Promise<void> {
-  const me = await getCurrentMember();
-  await getDb()
-    .insert(webhookEvent)
-    .values({
-      source: "numbers",
-      eventType: `numbers:${action}:${result.ok ? "ok" : "failed"}`,
-      payload: {
-        action,
-        number,
-        by: me?.email ?? null,
-        error: result.error ?? null,
-        statusAfter: result.statusAfter ?? null,
-        ...extra,
-      },
-      processed: result.ok,
-    })
-    .catch(() => {});
-}
 
 /** Step 1 — put a new number on the WABA. */
 export async function addPhoneNumber(input: {
