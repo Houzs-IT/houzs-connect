@@ -8,6 +8,7 @@ import { contact, conversation, conversationMember, member } from "@/db/schema";
 import { ensureConversationMemberTable } from "@/db/ensure-conversation-member";
 import { conversationCompanyWhere, conversationVisibilityWhere, getVisibility } from "@/lib/access";
 import type { ConversationListItem } from "@/components/inbox/ConversationList";
+import { bypassReadCache } from "@/db/fresh";
 
 /**
  * A signed-in member, and the conversation must be in THEIR company.
@@ -68,7 +69,9 @@ export async function fetchConversations(
   // One row over the page size is how "is there anything older" gets answered
   // without a second COUNT over the same predicate.
   const rows = await db.query.conversation.findMany({
-    where: and(conversationCompanyWhere(db, me.companyId), conversationVisibilityWhere(vis)),
+    // Fresh (db/fresh.ts): the rail is refreshed every few seconds to surface new
+    // customer messages; a cached page would sit a minute behind.
+    where: and(conversationCompanyWhere(db, me.companyId), conversationVisibilityWhere(vis), bypassReadCache()),
     orderBy: [desc(conversation.lastMessageAt), desc(conversation.createdAt)],
     limit: PAGE_SIZE + 1,
     offset: off,

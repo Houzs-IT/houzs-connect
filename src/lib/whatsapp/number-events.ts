@@ -9,6 +9,7 @@
 // those is a POST endpoint, and a log writer must not be callable from outside.
 
 import { getDb } from "@/db/client";
+import { bypassReadCache } from "@/db/fresh";
 import { webhookEvent } from "@/db/schema";
 import { getCurrentMember } from "@/lib/current-member";
 
@@ -73,10 +74,18 @@ export async function recordStatusSnapshot(
   const db = getDb();
   const last = await db.query.webhookEvent.findFirst({
     columns: { payload: true, createdAt: true },
-    where: (w, { and, eq }) => and(eq(w.source, "numbers"), eq(w.eventType, "numbers:status:ok")),
+    where: (w, { and, eq }) => and(eq(w.source, "numbers"), eq(w.eventType, "numbers:status:ok"), bypassReadCache()),
     orderBy: (w, { desc }) => desc(w.createdAt),
   });
-  const unchanged = JSON.stringify((last?.payload as { numbers?: unknown } | undefined)?.numbers) === JSON.stringify(snapshot);
+  // Compared field by field in a fixed order, not as JSON text: Postgres stores
+  // jsonb with its keys reordered, so the stored snapshot never stringified the
+  // same as the fresh one and every page open wrote a row (five in forty seconds
+  // on 2026-09-14).
+  const key = (rows: unknown) =>
+    (Array.isArray(rows) ? (rows as Record<string, unknown>[]) : [])
+      .map((n) => [n.id, n.connection, n.codeVerification, n.nameStatus, n.newNameStatus, n.qualityRating, n.limitTier, n.name].join("|"))
+      .join(";");
+  const unchanged = key((last?.payload as { numbers?: unknown } | undefined)?.numbers) === key(snapshot);
   const recent = last && Date.now() - last.createdAt.getTime() < 3600_000;
   if (unchanged && recent) return;
   await db

@@ -113,6 +113,24 @@ message to a company number to arm it.
 
 ---
 
+**End-to-end, PROVEN on production 2026-09-14 16:10 MYT:** Hookka registered (Meta
+CONNECTED, TIER_250, logged `numbers:register:ok`), assigned to the new Connect-only
+company Hookka (`numbers:assign:ok`). A phone sent "hi" to each number: Hookka's landed in
+Hookka's inbox (new Hookka contact), Houzs's in Houzs Century's (legacy routing). Replies
+from Connect went out from the right number (the sent/delivered/read status webhooks
+arrived on each sending number) and reached READ.
+
+**LANDMINE — Hyperdrive caches reads.** After the owner's first Assign succeeded,
+Settings → Phone numbers kept showing NO COMPANY for ~2 minutes and three more Assign
+presses were refused (the unique index stopped one of them putting Hookka's number on Houzs
+Century). Hyperdrive caches read results (60 s default + stale-while-revalidate) and never
+caches a query that calls a volatile/stable function. `src/db/fresh.ts` `bypassReadCache()`
+(an always-true `now() is not null`) is added to the reads where stale is WRONG: routing,
+company choices, number assignment, auto-reply decisions, the numbers page company list,
+the status-snapshot dedupe, and the inbox rail / thread / unread badge (refreshed every
+few seconds). Anything else still reads through the cache — add it where a stale answer
+would be a bug.
+
 ## 1. Where things stand
 
 ### Live and verified

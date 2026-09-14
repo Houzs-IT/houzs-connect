@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation";
-import { asc, eq } from "drizzle-orm";
+import { and, asc, eq } from "drizzle-orm";
 import { getDb } from "@/db/client";
 import { contactField, conversation, department, member, tag } from "@/db/schema";
 import { Thread } from "@/components/inbox/Thread";
@@ -11,6 +11,7 @@ import { getCurrentMember } from "@/lib/current-member";
 import { ensureConversationMemberTable } from "@/db/ensure-conversation-member";
 import { isLive } from "@/lib/whatsapp/cloud-api";
 import { attrs, initials, stamp, tint, waIdentifier } from "@/lib/format";
+import { bypassReadCache } from "@/db/fresh";
 
 /**
  * How much of the thread is rendered. WhatsApp threads with a customer run for
@@ -39,7 +40,9 @@ export default async function ConversationPage({
   await ensureConversationMemberTable(db).catch(() => {});
 
   const convo = await db.query.conversation.findFirst({
-    where: eq(conversation.id, id),
+    // Fresh (db/fresh.ts): this page re-renders every few seconds to show a
+    // customer's new message; a cached thread would hide it for a minute.
+    where: and(eq(conversation.id, id), bypassReadCache()),
     with: {
       contact: true,
       assignedAgent: true,

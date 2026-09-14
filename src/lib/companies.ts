@@ -15,6 +15,7 @@
 
 import { and, asc, eq } from "drizzle-orm";
 import type { DB } from "@/db/client";
+import { bypassReadCache } from "@/db/fresh";
 import { company, member } from "@/db/schema";
 
 export interface CompanyChoice {
@@ -39,12 +40,13 @@ export async function companyChoices(db: DB, me: Who): Promise<CompanyChoice[]> 
   const [companies, rows] = await Promise.all([
     db.query.company.findMany({
       columns: { id: true, name: true, erpCompanyId: true },
-      where: eq(company.active, true),
+      // Fresh (db/fresh.ts): a company created a moment ago must be switchable now.
+      where: and(eq(company.active, true), bypassReadCache()),
       orderBy: asc(company.createdAt),
     }),
     db.query.member.findMany({
       columns: { companyId: true },
-      where: and(eq(member.email, me.email), eq(member.active, true)),
+      where: and(eq(member.email, me.email), eq(member.active, true), bypassReadCache()),
     }),
   ]);
   const memberOf = new Set(rows.map((r) => r.companyId));

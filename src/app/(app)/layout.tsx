@@ -6,6 +6,7 @@ import { ensureContactColumns } from "@/db/ensure";
 import { ensureChannelColumns } from "@/db/ensure-channel";
 import { conversation } from "@/db/schema";
 import { getCurrentMember } from "@/lib/current-member";
+import { bypassReadCache } from "@/db/fresh";
 import {
   conversationCompanyWhere,
   conversationVisibilityWhere,
@@ -48,6 +49,7 @@ export default async function AppLayout({
     and(
       conversationCompanyWhere(db, me.companyId),
       conversationVisibilityWhere(vis),
+      bypassReadCache(),
       gt(conversation.unreadCount, 0),
       ne(conversation.status, "CLOSED")
     )
