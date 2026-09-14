@@ -1,5 +1,7 @@
 import { Suspense } from "react";
+import { getDb } from "@/db/client";
 import { getCurrentMember } from "@/lib/current-member";
+import { companyChoices } from "@/lib/companies";
 import { Topbar } from "@/components/Topbar";
 import { ConversationList } from "@/components/inbox/ConversationList";
 import { ConversationListSkeleton } from "@/components/inbox/ConversationListSkeleton";
@@ -39,7 +41,12 @@ export default async function InboxLayout({
     <>
       {/* Poll for new customer messages — no WebSockets in this app yet. */}
       <LiveRefresh seconds={5} />
-      <Topbar title="Inbox" subtitle="Shared team inbox" current={me} />
+      <Topbar
+        title="Inbox"
+        subtitle="Shared team inbox"
+        current={me}
+        companies={await companyChoices(getDb(), me)}
+      />
       <div className="flex min-h-0 flex-1">
         <Suspense fallback={<ConversationListSkeleton />}>
           <ConversationRail />

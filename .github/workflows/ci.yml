@@ -58,6 +58,11 @@ jobs:
       - name: Org-sync planner smoke test (pure, no DB)
         run: node scripts/smoke-org-sync.mjs
 
+      # Several WhatsApp numbers on one account: a delivery lands in the company
+      # that owns the receiving number, and an unassigned number is refused.
+      - name: Multi-number routing smoke test (pure, no DB)
+        run: node scripts/smoke-channel-routing.mjs
+
       # Hermetic: every endpoint it calls is a loopback server the script itself
       # starts, so CI never hits the owner's real Apps Script webhooks.
       - name: call_rest_api smoke test (loopback only, no internet)

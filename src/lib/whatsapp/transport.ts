@@ -10,6 +10,7 @@ import {
   sendMediaMessage,
   type WaContactCard,
 } from "./media";
+import { senderForChannel, UNASSIGNED_SENDER } from "./channels";
 
 /**
  * WhatsApp transport. DEMO mode records messages in the DB (no Meta). LIVE mode
@@ -136,7 +137,16 @@ export async function sendOutbound(
       where: eq(conversation.id, conversationId),
       with: { contact: true },
     });
-    if (convo) {
+    // The number this conversation lives on. A reply goes out from the number the
+    // customer wrote to — never the default sender of another company.
+    const from = convo ? await senderForChannel(db, convo.channelId) : null;
+    if (convo && !from) {
+      await db
+        .update(message)
+        .set({ status: "FAILED", interactivePayload: { kind: "send_error", reason: UNASSIGNED_SENDER } })
+        .where(eq(message.id, msg.id));
+    }
+    if (convo && from) {
       // Meta's refusal text lands here instead of only in console.error. Losing
       // it is what made a whole day of undelivered messages undiagnosable: the
       // row said FAILED and nothing said why.
@@ -154,11 +164,12 @@ export async function sendOutbound(
                   },
                 ]
               : undefined,
-            outcome
+            outcome,
+            from
           )
         : interactive
-          ? await sendButtons(convo.contact.phone, body, opts.buttons ?? [])
-          : await sendText(convo.contact.phone, body, outcome);
+          ? await sendButtons(convo.contact.phone, body, opts.buttons ?? [], outcome, from)
+          : await sendText(convo.contact.phone, body, outcome, from);
       // No id back means Meta refused it (bad template, closed window, bad
       // number). The row must say so — a message that reads SENT in the inbox
       // while the customer got nothing is worse than no message at all.
@@ -246,14 +257,21 @@ export async function sendOutboundMedia(
     .where(eq(conversation.id, conversationId));
 
   if (!isLive()) return { ok: true };
-  const cfg = mediaConfig();
-  if (!cfg) return { ok: true };
-
   const convo = await db.query.conversation.findFirst({
     where: eq(conversation.id, conversationId),
     with: { contact: true },
   });
   if (!convo) return { ok: true };
+
+  // Same number the attachment was uploaded under (media-actions.ts), which is
+  // the number this conversation lives on.
+  const from = await senderForChannel(db, convo.channelId);
+  if (!from) {
+    await db.update(message).set({ status: "FAILED" }).where(eq(message.id, msg.id));
+    return { ok: false, error: UNASSIGNED_SENDER };
+  }
+  const cfg = mediaConfig(from);
+  if (!cfg) return { ok: true };
 
   const res = await sendMediaMessage(cfg, convo.contact.phone, m.kind, m.mediaId, {
     fileName: m.fileName,
@@ -301,14 +319,19 @@ export async function sendOutboundContacts(
     .where(eq(conversation.id, conversationId));
 
   if (!isLive()) return { ok: true };
-  const cfg = mediaConfig();
-  if (!cfg) return { ok: true };
-
   const convo = await db.query.conversation.findFirst({
     where: eq(conversation.id, conversationId),
     with: { contact: true },
   });
   if (!convo) return { ok: true };
+
+  const from = await senderForChannel(db, convo.channelId);
+  if (!from) {
+    await db.update(message).set({ status: "FAILED" }).where(eq(message.id, msg.id));
+    return { ok: false, error: UNASSIGNED_SENDER };
+  }
+  const cfg = mediaConfig(from);
+  if (!cfg) return { ok: true };
 
   const res = await sendContactsMessage(cfg, convo.contact.phone, cards);
   await db

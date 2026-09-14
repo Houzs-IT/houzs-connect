@@ -66,11 +66,18 @@ export function addressing(to: string): Record<string, unknown> {
     : { recipient_type: "individual", recipient: to };
 }
 
+/**
+ * `from` is the phone number id to send from — the conversation's own number
+ * (src/lib/whatsapp/channels.ts). It falls back to WHATSAPP_PHONE_NUMBER_ID only
+ * for a caller that has no conversation to ask; a reply must never borrow
+ * another company's number because the caller forgot to pass one.
+ */
 async function post(
   payload: Record<string, unknown>,
-  out?: SendOutcome
+  out?: SendOutcome,
+  from?: string
 ): Promise<string | null> {
-  const phoneId = process.env.WHATSAPP_PHONE_NUMBER_ID!;
+  const phoneId = from ?? process.env.WHATSAPP_PHONE_NUMBER_ID!;
   const token = process.env.WHATSAPP_TOKEN!;
   const to = typeof payload.to === "string" ? payload.to : "";
   // `to` is re-added by addressing() only when it is a phone number. Deleting it
@@ -206,17 +213,20 @@ export async function phoneNumberInfo(): Promise<PhoneNumberInfo | null> {
 export async function sendText(
   to: string,
   body: string,
-  out?: SendOutcome
+  out?: SendOutcome,
+  from?: string
 ): Promise<string | null> {
   if (!isLive()) return null;
-  return post({ to, type: "text", text: { body } }, out);
+  return post({ to, type: "text", text: { body } }, out, from);
 }
 
 /** Send interactive reply buttons (max 3, per Cloud API limits). */
 export async function sendButtons(
   to: string,
   body: string,
-  buttons: FlowButton[]
+  buttons: FlowButton[],
+  out?: SendOutcome,
+  from?: string
 ): Promise<string | null> {
   if (!isLive()) return null;
   return post({
@@ -232,7 +242,7 @@ export async function sendButtons(
         })),
       },
     },
-  });
+  }, out, from);
 }
 
 /** Send an approved template message. */
@@ -241,7 +251,8 @@ export async function sendTemplate(
   name: string,
   languageCode = "en",
   components?: unknown[],
-  out?: SendOutcome
+  out?: SendOutcome,
+  from?: string
 ): Promise<string | null> {
   if (!isLive()) return null;
   return post(
@@ -250,6 +261,7 @@ export async function sendTemplate(
       type: "template",
       template: { name, language: { code: languageCode }, ...(components ? { components } : {}) },
     },
-    out
+    out,
+    from
   );
 }

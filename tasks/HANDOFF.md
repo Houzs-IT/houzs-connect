@@ -1,6 +1,7 @@
 # Houzs Connect — Handoff / current state
 
-_Last updated: 2026-08-01_
+_Last updated: 2026-09-14 (§0). Sections 1–7 are the 2026-08-01 state and are kept as
+history; where they disagree with §0, §0 is current._
 
 Houzs Connect (`chat.houzscentury.com`) is the in-house replacement for **Seampify**
 (`waba.seampify.com`), the WhatsApp follow-up platform Houzs Century runs its delivery
@@ -10,6 +11,65 @@ a dedicated `connect` pgSchema.
 
 **Scope of the current engagement: get WhatsApp connected. Everything after that is handed
 to the next owner** — see §7.
+
+---
+
+## 0. 2026-09-14 — several WhatsApp numbers, each in its own company
+
+**State before this change (read on production, read-only, 2026-09-14):** WhatsApp is
+LIVE. The WABA carries two numbers: **+60 11-1110 8822** (Houzs Century, id
+`1327476460438603`, CONNECTED, the `WHATSAPP_PHONE_NUMBER_ID` secret) and
+**+60 18-310 7133** (Hookka, id `1219492597923127`, verified, not yet registered). Connect
+had 2 companies (Houzs Century, 2990's Home), ONE channel (Houzs, no phone number id,
+placeholder phone), 6 conversations, 33 webhook deliveries in 30 days — all to the Houzs
+number. `connect.__drizzle_migrations` holds only `0000`: **nobody runs `pnpm db:migrate`
+on production**; every later schema change reached it through the runtime `ensure*`
+functions. Do not start running `db:migrate` against production without checking each
+of 0001–0006 is idempotent first.
+
+**The defect.** The webhook filed every message under the first company's default channel
+and every send used the single secret number, whichever number the customer wrote to. The
+inbox rail and the unread badge were also not company-scoped (owner/admin visibility is
+`scope: "all"`), so a second company's threads would have shown in the first company's
+rail. Registering the Hookka number would have put Hookka's customers in Houzs Century's
+inbox and answered them from Houzs's number.
+
+**What changed (branch `feat/multi-number-routing`):**
+- `channel.phone_number_id` (migration `0006`, self-applied by `src/db/ensure-channel.ts`),
+  unique, non-partial.
+- `src/lib/whatsapp/channel-routing.ts` (pure, pinned by `scripts/smoke-channel-routing.mjs`
+  in CI): a delivery goes to the channel holding the receiving number; every reply, media
+  upload, voice note and contact card goes out from the conversation's own number. An
+  unassigned number is REFUSED (`dropped:number-not-assigned:<id>` on System Logs — the
+  raw delivery is kept), never guessed into a company. **Legacy case:** the Houzs channel
+  has no id yet, so the default sender still maps to the first company's default channel
+  until someone assigns that number explicitly; the fallback switches itself off the moment
+  the number is assigned anywhere.
+- Settings → Phone numbers: each number shows its company, and an owner/admin assigns it
+  to an existing company or a **new Connect-only company** (no ERP id — the org sync never
+  touches it). A number whose channel already has conversations is never moved.
+- Register / verify / request-code / release / assign are written to `webhook_event`
+  (`source = 'numbers'`, never the PIN or the code) with Meta's answer and the number's
+  status read back from Meta right after the step — "I pressed Register and nothing
+  happened" is now answerable from System Logs.
+- Company switcher in the top bar (`src/lib/companies.ts`, `src/app/company-actions.ts`):
+  members switch into companies where the ERP sync gave them a member row; an owner/admin
+  can also enter a Connect-only company (a member row is created on first entry).
+- Inbox rail and unread badge scoped to the session company (`conversationCompanyWhere`).
+
+**To bring the Hookka number live (owner, on chat.houzscentury.com):**
+1. Settings → Phone numbers → Hookka → Register for Cloud API with a six-digit PIN (write
+   it down). The page now reports Meta's status after the call; expect CONNECTED.
+2. Same card → Company → "New company…" → `Hookka` → Assign.
+3. Top bar → Company → Hookka. Send a WhatsApp to +60 18-310 7133 from a phone; it must
+   appear in Hookka's inbox (and System Logs must say "Saved to the inbox"). Reply; the
+   phone must receive it from +60 18-310 7133.
+4. Optional: assign the Houzs number explicitly to Houzs Century (it works without this).
+
+**Still open, in the owner's order (2026-09-14):** WhatsApp business profile editing per
+number (photo, about, description, address, email, websites, category; display name
+changes go through Meta review); per-company automatic replies (greeting, after-hours);
+then an end-to-end test of both numbers from a real phone through to delivered ticks.
 
 ---
 

@@ -43,6 +43,13 @@
       "when": 1786860000000,
       "tag": "0005_conversation_member",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1789300000000,
+      "tag": "0006_channel_phone_number_id",
+      "breakpoints": true
     }
   ]
 }

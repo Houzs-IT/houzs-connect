@@ -13,11 +13,13 @@ import { useState, useTransition } from "react";
 import { ActionConfirm } from "@/components/ActionConfirm";
 import {
   addPhoneNumber,
+  assignNumberToCompany,
   confirmVerificationCode,
   registerForCloudApi,
   releaseFromCloudApi,
   sendVerificationCode,
   type ActionResult,
+  type NumberAssignment,
 } from "./actions";
 import type { CodeMethod, WabaNumber } from "@/lib/whatsapp/numbers";
 import { nextStep } from "@/lib/whatsapp/numbers";
@@ -305,9 +307,11 @@ function AddWizard({ onDone }: { onDone: () => void }) {
               onClick={() =>
                 run(
                   () => registerForCloudApi(newId!, pin),
-                  () => {
+                  (r) => {
                     setFinished(true);
-                    return "Registered. This number can send now.";
+                    return r.statusAfter === "CONNECTED"
+                      ? "Registered. Meta now reports CONNECTED. Assign it to its company below so its messages have somewhere to go."
+                      : `Meta accepted the registration, but the number still reads ${r.statusAfter ?? "unknown"}. Reload in a minute.`;
                   }
                 )
               }
@@ -362,16 +366,31 @@ function NumberActions({ n, managerUrl }: { n: WabaNumber; managerUrl: string | 
   const [result, setResult] = useState<{ ok: boolean; text: string } | null>(null);
   const [pending, start] = useTransition();
 
-  function run(fn: () => Promise<ActionResult>, okText: string) {
+  function run(fn: () => Promise<ActionResult>, okText: string | ((r: ActionResult) => string)) {
     setResult(null);
     start(async () => {
       const r = await fn();
       setResult({
         ok: r.ok,
-        text: r.ok ? okText : (r.error ?? "Meta refused and gave no reason."),
+        text: r.ok
+          ? typeof okText === "function"
+            ? okText(r)
+            : okText
+          : (r.error ?? "Meta refused and gave no reason."),
       });
     });
   }
+
+  /**
+   * Say what Meta reports AFTER the step, not what we hoped. A registration Meta
+   * accepted can still leave the number short of CONNECTED for a moment, and a
+   * success line the next reload contradicts is how "I registered it and nothing
+   * happened" gets reported.
+   */
+  const registeredText = (r: ActionResult) =>
+    r.statusAfter === "CONNECTED"
+      ? "Registered. Meta now reports CONNECTED — this number can send and receive."
+      : `Meta accepted the registration, but the number still reads ${r.statusAfter ?? "unknown"}. Reload in a minute. Every attempt and Meta's answer is kept on System Logs.`;
 
   const verified = n.codeVerification === "VERIFIED";
   const connected = n.connection === "CONNECTED";
@@ -458,10 +477,7 @@ function NumberActions({ n, managerUrl }: { n: WabaNumber; managerUrl: string | 
               disabled={pending || pin.replace(/\D/g, "").length !== 6}
               className={btnCls}
               onClick={() =>
-                run(
-                  () => registerForCloudApi(n.id, pin),
-                  "Registered. This number can send now."
-                )
+                run(() => registerForCloudApi(n.id, pin), registeredText)
               }
             >
               Register
@@ -526,7 +542,126 @@ function NumberActions({ n, managerUrl }: { n: WabaNumber; managerUrl: string | 
   );
 }
 
-function NumberCard({ n, managerUrl }: { n: WabaNumber; managerUrl: string | null }) {
+const NEW_COMPANY = "__new__";
+
+/**
+ * Which company this number serves. Without an assignment a second number has
+ * nowhere to file its customers, so the webhook refuses them rather than guess —
+ * this is where that stops being true.
+ */
+function CompanyAssignment({
+  n,
+  assignment,
+  companies,
+}: {
+  n: WabaNumber;
+  assignment: NumberAssignment | null;
+  companies: { id: string; name: string }[];
+}) {
+  const nameMatch = companies.find(
+    (c) => n.verifiedName && c.name.toLowerCase() === n.verifiedName.toLowerCase()
+  );
+  const [choice, setChoice] = useState(
+    assignment?.companyId ?? nameMatch?.id ?? (n.verifiedName ? NEW_COMPANY : companies[0]?.id ?? NEW_COMPANY)
+  );
+  const [newName, setNewName] = useState(nameMatch ? "" : (n.verifiedName ?? ""));
+  const [open, setOpen] = useState(!assignment);
+  const [result, setResult] = useState<{ ok: boolean; text: string } | null>(null);
+  const [pending, start] = useTransition();
+
+  function assign() {
+    setResult(null);
+    start(async () => {
+      const r = await assignNumberToCompany(
+        n.id,
+        choice === NEW_COMPANY ? { newCompanyName: newName } : { companyId: choice }
+      );
+      setResult({
+        ok: r.ok,
+        text: r.ok
+          ? `Assigned to ${r.companyName}. Messages to this number now go to ${r.companyName}'s inbox, and replies go out from this number.`
+          : (r.error ?? "It could not be assigned."),
+      });
+    });
+  }
+
+  return (
+    <div className="mt-3 border-t border-[var(--color-border)] pt-3">
+      <label className={labelCls}>Company</label>
+      {assignment ? (
+        <p className="mt-1 text-[12.5px] text-[var(--color-muted)]">
+          Customers who message this number land in{" "}
+          <strong className="text-[var(--color-ink)]">{assignment.companyName}</strong>&apos;s inbox,
+          and replies go out from it.
+          {assignment.legacy && (
+            <>
+              {" "}
+              This comes from the default sender setting; assigning it here writes it down so it
+              no longer depends on that setting.
+            </>
+          )}
+        </p>
+      ) : (
+        <p className="mt-1 text-[12.5px] text-[var(--color-danger)]">
+          Not assigned to a company. Messages to this number are kept on System Logs but not put in
+          any inbox, and nothing can be sent from it, until it is assigned.
+        </p>
+      )}
+
+      {!open ? (
+        <button type="button" className={`${ghostBtnCls} mt-2`} onClick={() => setOpen(true)}>
+          {assignment?.legacy ? "Assign explicitly" : "Change company"}
+        </button>
+      ) : (
+        <div className="mt-2 flex flex-wrap items-end gap-2">
+          <select
+            className={inputCls}
+            value={choice}
+            onChange={(e) => setChoice(e.target.value)}
+            aria-label="Company for this number"
+          >
+            {companies.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name}
+              </option>
+            ))}
+            <option value={NEW_COMPANY}>New company…</option>
+          </select>
+          {choice === NEW_COMPANY && (
+            <input
+              className={`${inputCls} w-56`}
+              placeholder="Company name, e.g. Hookka"
+              value={newName}
+              onChange={(e) => setNewName(e.target.value)}
+              aria-label="New company name"
+            />
+          )}
+          <button
+            type="button"
+            className={btnCls}
+            disabled={pending || (choice === NEW_COMPANY && newName.trim().length < 2)}
+            onClick={assign}
+          >
+            {pending ? "Assigning…" : "Assign"}
+          </button>
+        </div>
+      )}
+      <Result r={result} />
+    </div>
+  );
+}
+
+function NumberCard({
+  n,
+  managerUrl,
+  assignment,
+  companies,
+}: {
+  n: WabaNumber;
+  managerUrl: string | null;
+  assignment: NumberAssignment | null;
+  companies: { id: string; name: string }[];
+}) {
   const advice = nextStep(n);
   return (
     <div
@@ -543,7 +678,9 @@ function NumberCard({ n, managerUrl }: { n: WabaNumber; managerUrl: string | nul
         {n.verifiedName && (
           <span className="text-[12.5px] text-[var(--color-muted)]">{n.verifiedName}</span>
         )}
-        {n.isActive && <Badge text="SENDING FROM THIS" tone="good" />}
+        {assignment && <Badge text={assignment.companyName.toUpperCase()} tone="good" />}
+        {!assignment && <Badge text="NO COMPANY" tone="bad" />}
+        {n.isActive && <Badge text="DEFAULT SENDER" tone="mute" />}
       </div>
 
       <div className="mt-2 flex flex-wrap items-center gap-2">
@@ -565,6 +702,8 @@ function NumberCard({ n, managerUrl }: { n: WabaNumber; managerUrl: string | nul
         </p>
       )}
 
+      <CompanyAssignment n={n} assignment={assignment} companies={companies} />
+
       <NumberActions n={n} managerUrl={managerUrl} />
     </div>
   );
@@ -574,10 +713,14 @@ export function NumbersClient({
   numbers,
   activeId,
   managerUrl,
+  assignments,
+  companies,
 }: {
   numbers: WabaNumber[];
   activeId: string | null;
   managerUrl: string | null;
+  assignments: Record<string, NumberAssignment | null>;
+  companies: { id: string; name: string }[];
 }) {
   // Bumping this remounts the wizard after "Add another", clearing its state
   // without a router refresh the person did not ask for.
@@ -606,7 +749,15 @@ export function NumbersClient({
           No numbers on this WhatsApp Business Account yet.
         </p>
       ) : (
-        numbers.map((n) => <NumberCard key={n.id} n={n} managerUrl={managerUrl} />)
+        numbers.map((n) => (
+          <NumberCard
+            key={n.id}
+            n={n}
+            managerUrl={managerUrl}
+            assignment={assignments[n.id] ?? null}
+            companies={companies}
+          />
+        ))
       )}
 
       <AddWizard key={wizardKey} onDone={() => setWizardKey((k) => k + 1)} />

@@ -1,10 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import { asc, desc, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { getDb } from "@/db/client";
 import { ensureContactColumns } from "@/db/ensure";
 import {
-  channel as channelTable,
-  company as companyTable,
   contact as contactTable,
   message as messageTable,
   payment as paymentTable,
@@ -13,6 +11,7 @@ import {
 import { attrs } from "@/lib/format";
 import { getOrCreateConversation, recordInbound } from "@/lib/whatsapp/transport";
 import { handleInboundMessage } from "@/lib/automation/dispatch";
+import { loadRoutingTable, pickInboundChannel } from "@/lib/whatsapp/channels";
 
 /**
  * Meta WhatsApp Cloud API webhook.
@@ -109,27 +108,21 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true });
   }
 
-  // Single-tenant resolve: first company + its default channel. Routing by
-  // value.metadata.phone_number_id is what a second WABA needs, and there is
-  // already a branch for it (feat/multi-tenant-channels) — not tonight's change.
-  const company = await db.query.company.findFirst({ orderBy: asc(companyTable.createdAt) });
-  const channel = company
-    ? await db.query.channel.findFirst({
-        where: eq(channelTable.companyId, company.id),
-        orderBy: desc(channelTable.isDefault),
-      })
-    : null;
-
-  if (!company || !channel) {
-    // The silent drop that made this undiagnosable. Now it is a log line.
-    await finish(
-      company ? "dropped:no-channel-for-company" : "dropped:no-company",
-      false
-    );
-    return NextResponse.json({ ok: true });
+  // Which company a message belongs to is decided by the number it was SENT TO:
+  // value.metadata.phone_number_id -> the channel holding that number -> its
+  // company. One account carries several companies' numbers, so the channel is
+  // picked per change, never once per request; the table itself is a handful of
+  // rows and is read once. Delivery statuses need none of this — they match our
+  // own message row by Meta's message id.
+  const routing = await loadRoutingTable(db).catch(() => null);
+  if (!routing) {
+    await finish("failed:routing-table-unreadable", false);
+    // Non-2xx so Meta retries: this is our failure, and the message is not lost.
+    return NextResponse.json({ ok: false }, { status: 500 });
   }
 
   let handled = 0;
+  const refused: string[] = [];
   for (const entry of body.entry) {
     for (const change of entry.changes ?? []) {
       const value = change.value;
@@ -145,6 +138,17 @@ export async function POST(req: NextRequest) {
             .set({ status: status as "SENT" | "DELIVERED" | "READ" | "FAILED" })
             .where(eq(messageTable.waMessageId, s.id));
         }
+      }
+
+      const receivingId = value.metadata?.phone_number_id ?? null;
+      const channel = pickInboundChannel(routing, receivingId);
+      if (!channel) {
+        // A number nobody has assigned to a company. Filing it under a guessed
+        // company is how one company's customers end up in another's inbox, so
+        // it is refused — the raw delivery is already in webhook_event above, and
+        // the number shows as "not assigned" on Settings → Phone numbers.
+        if (value.messages?.length) refused.push(receivingId ?? "no-number");
+        continue;
       }
 
       const nameById = new Map(
@@ -165,7 +169,7 @@ export async function POST(req: NextRequest) {
         const [contact] = await db
           .insert(contactTable)
           .values({
-            companyId: company.id,
+            companyId: channel.companyId,
             phone,
             name: nameById.get(senderId) ?? null,
             source: "whatsapp",
@@ -222,6 +226,13 @@ export async function POST(req: NextRequest) {
       }
     }
   }
-  await finish(handled > 0 ? `handled:${handled}-message(s)` : "handled:status-only", true);
+  await finish(
+    refused.length
+      ? `dropped:number-not-assigned:${[...new Set(refused)].join(",")}${handled ? `;handled:${handled}-message(s)` : ""}`
+      : handled > 0
+        ? `handled:${handled}-message(s)`
+        : "handled:status-only",
+    refused.length === 0
+  );
   return NextResponse.json({ ok: true });
 }

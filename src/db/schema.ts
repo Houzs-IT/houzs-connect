@@ -192,11 +192,23 @@ export const channel = connect.table(
     companyId: text("company_id").notNull(),
     displayName: text("display_name").notNull(),
     phone: text("phone").notNull(),
+    // The Meta phone number id this channel receives on and sends from. This is
+    // what lets one WhatsApp Business Account carry several companies' numbers:
+    // the webhook reads value.metadata.phone_number_id and files the message
+    // under the channel (and so the company) holding that id, and every reply on
+    // the channel's conversations goes out from it. NULL on a channel that has no
+    // number yet — src/lib/whatsapp/channels.ts covers the one legacy case.
+    // Unique so two companies can never claim the same number; NULLs are distinct
+    // in a Postgres unique index, so any number of unassigned channels coexist.
+    phoneNumberId: text("phone_number_id"),
     provider: text("provider").notNull().default("whatsapp"),
     mode: text("mode").notNull().default("DEMO"),
     isDefault: boolean("is_default").notNull().default(false),
   },
-  (t) => ({ companyIdx: index("channel_company_idx").on(t.companyId) })
+  (t) => ({
+    companyIdx: index("channel_company_idx").on(t.companyId),
+    phoneNumberIdKey: uniqueIndex("channel_phone_number_id_key").on(t.phoneNumberId),
+  })
 );
 
 // ─────────────────────────── Contacts / CRM ───────────────────────────
