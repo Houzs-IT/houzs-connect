@@ -50,6 +50,13 @@
       "when": 1789300000000,
       "tag": "0006_channel_phone_number_id",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1789310000000,
+      "tag": "0007_auto_reply",
+      "breakpoints": true
     }
   ]
 }

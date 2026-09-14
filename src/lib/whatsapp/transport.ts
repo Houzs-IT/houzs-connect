@@ -70,6 +70,12 @@ interface OutboundOptions {
    * recorded on the message row so the inbox shows what the customer received.
    */
   template?: TemplateSend;
+  /**
+   * Stored on the row's interactivePayload for a plain text send, so a message
+   * can say what produced it (auto replies are found this way). Ignored for
+   * buttons, which keep their own payload.
+   */
+  payload?: Record<string, unknown>;
 }
 
 /** Send an outbound message on a conversation (DEMO: just record it). */
@@ -123,7 +129,7 @@ export async function sendOutbound(
       status: "SENT",
       interactivePayload: interactive
         ? { kind: "buttons", buttons: opts.buttons }
-        : null,
+        : (opts.payload ?? null),
     })
     .returning();
   await db
