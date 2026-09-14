@@ -121,6 +121,32 @@ export async function listNumbers(
   return { ok: true, data: numbers };
 }
 
+/** One number, read fresh from Meta — how an action proves what it changed. */
+export async function getNumber(
+  cfg: WabaConfig,
+  phoneId: string
+): Promise<GraphResult<WabaNumber>> {
+  const active = activePhoneNumberId();
+  const res = await graph<RawNumber>(`${GRAPH}/${phoneId}?fields=${FIELDS}`, cfg.token);
+  if (!res.ok) return res;
+  const n = res.data;
+  return {
+    ok: true,
+    data: {
+      id: n.id,
+      displayPhoneNumber: n.display_phone_number ?? "unknown",
+      verifiedName: n.verified_name ?? null,
+      connection: n.status ?? null,
+      codeVerification: n.code_verification_status ?? null,
+      nameStatus: n.name_status ?? null,
+      qualityRating: n.quality_rating ?? null,
+      limitTier: n.messaging_limit_tier ?? null,
+      platformType: n.platform_type ?? null,
+      isActive: !!active && n.id === active,
+    },
+  };
+}
+
 export interface NewNumber {
   /** Country calling code WITHOUT the plus — "60" for Malaysia. */
   cc: string;

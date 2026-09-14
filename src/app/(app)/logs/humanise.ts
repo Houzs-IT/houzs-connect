@@ -59,6 +59,26 @@ function describeOutcome(eventType: string | null, processed: boolean): Pick<Web
       tone: "ok",
     };
   }
+  if (t.startsWith("dropped:number-not-assigned")) {
+    return {
+      outcome:
+        "Not filed — the WhatsApp number this was sent to is not assigned to a company yet. Assign it on Settings → Phone numbers; the message itself is kept here.",
+      tone: "bad",
+    };
+  }
+  if (t === "failed:routing-table-unreadable") {
+    return {
+      outcome: "Not filed — we could not read which company owns the number, so WhatsApp was asked to send it again.",
+      tone: "bad",
+    };
+  }
+  if (t.startsWith("numbers:")) {
+    const ok = t.endsWith(":ok");
+    return {
+      outcome: ok ? "Meta accepted it." : "Meta refused it — the reason is below.",
+      tone: ok ? "ok" : "bad",
+    };
+  }
   if (t === "dropped:no-channel-for-company") {
     return {
       outcome: "Discarded — this company has no WhatsApp channel set up, so there was nowhere to file it.",
@@ -87,6 +107,23 @@ export function summarise(
   payload: unknown
 ): WebhookSummary {
   const { outcome, tone } = describeOutcome(eventType, processed);
+
+  if (source === "numbers") {
+    // What an owner or admin did to a number on Settings → Phone numbers, and
+    // what Meta answered. Kept so "I pressed Register and nothing happened" has
+    // an answer that does not depend on a screenshot.
+    const p = (payload ?? {}) as { action?: string; number?: string; error?: string; statusAfter?: string; company?: string };
+    return {
+      headline: `Phone number ${p.number ?? "unknown"}: ${p.action ?? "change"}`,
+      details: [
+        p.statusAfter ? `Meta now reports ${p.statusAfter}` : "",
+        p.company ? `company: ${p.company}` : "",
+        p.error ? `Meta said: ${p.error}` : "",
+      ].filter(Boolean),
+      outcome,
+      tone,
+    };
+  }
 
   if (source !== "whatsapp") {
     // ERP / driver webhooks carry a flat payload with a phone and attributes.

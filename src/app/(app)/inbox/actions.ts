@@ -6,7 +6,7 @@ import { getCurrentMember } from "@/lib/current-member";
 import { getDb } from "@/db/client";
 import { contact, conversation, conversationMember, member } from "@/db/schema";
 import { ensureConversationMemberTable } from "@/db/ensure-conversation-member";
-import { conversationVisibilityWhere, getVisibility } from "@/lib/access";
+import { conversationCompanyWhere, conversationVisibilityWhere, getVisibility } from "@/lib/access";
 import type { ConversationListItem } from "@/components/inbox/ConversationList";
 
 /**
@@ -68,7 +68,7 @@ export async function fetchConversations(
   // One row over the page size is how "is there anything older" gets answered
   // without a second COUNT over the same predicate.
   const rows = await db.query.conversation.findMany({
-    where: conversationVisibilityWhere(vis),
+    where: and(conversationCompanyWhere(db, me.companyId), conversationVisibilityWhere(vis)),
     orderBy: [desc(conversation.lastMessageAt), desc(conversation.createdAt)],
     limit: PAGE_SIZE + 1,
     offset: off,

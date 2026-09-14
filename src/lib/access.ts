@@ -1,6 +1,7 @@
-import { inArray, or, type SQL } from "drizzle-orm";
+import { eq, inArray, or, type SQL } from "drizzle-orm";
 import type { InferSelectModel } from "drizzle-orm";
-import { conversation, member } from "@/db/schema";
+import type { DB } from "@/db/client";
+import { channel, conversation, member } from "@/db/schema";
 
 type Member = InferSelectModel<typeof member>;
 
@@ -67,4 +68,22 @@ export function conversationVisibilityWhere(vis: Visibility): SQL | undefined {
     conds.push(inArray(conversation.assignedDepartmentId, vis.departmentIds));
   }
   return or(...conds);
+}
+
+/**
+ * Conversations that belong to `companyId` — those on one of its channels.
+ *
+ * Visibility above answers WHO inside a company sees a thread; it does not say
+ * WHICH company, and `scope: "all"` put no bound on that at all. With one
+ * company on one number the gap was invisible. With a second company's number
+ * on the same account, an owner of Houzs Century would have seen Hookka's
+ * customers in the rail — rows they then could not open, because every thread
+ * action already checks the contact's company. Combine this with the visibility
+ * predicate on every conversation list and count.
+ */
+export function conversationCompanyWhere(db: DB, companyId: string): SQL {
+  return inArray(
+    conversation.channelId,
+    db.select({ id: channel.id }).from(channel).where(eq(channel.companyId, companyId))
+  );
 }

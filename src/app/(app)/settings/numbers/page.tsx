@@ -49,6 +49,8 @@ export default async function NumbersPage() {
             numbers={view.numbers}
             activeId={view.activeId}
             managerUrl={view.managerUrl}
+            assignments={view.assignments}
+            companies={view.companies}
           />
         )}
       </div>

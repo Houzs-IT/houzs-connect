@@ -3,9 +3,14 @@ import { and, gt, ne } from "drizzle-orm";
 import { Sidebar } from "@/components/Sidebar";
 import { getDb } from "@/db/client";
 import { ensureContactColumns } from "@/db/ensure";
+import { ensureChannelColumns } from "@/db/ensure-channel";
 import { conversation } from "@/db/schema";
 import { getCurrentMember } from "@/lib/current-member";
-import { getVisibility, conversationVisibilityWhere } from "@/lib/access";
+import {
+  conversationCompanyWhere,
+  conversationVisibilityWhere,
+  getVisibility,
+} from "@/lib/access";
 
 // This is a live, data-driven console backed by per-request Cloudflare bindings
 // (Hyperdrive). Nothing here is static — force dynamic rendering for the whole
@@ -30,6 +35,9 @@ export default async function AppLayout({
   // column. Gating that on someone visiting /contacts first would leave a real
   // window in which the console is simply down for the team.
   await ensureContactColumns(db).catch(() => {});
+  // Same window, for the channel's phone number id (ensure-channel.ts): the
+  // automations, campaigns and phone-number pages all read channel rows.
+  await ensureChannelColumns(db).catch(() => {});
 
   const allMembers = await db.query.member.findMany({
     columns: { id: true, managerId: true },
@@ -38,6 +46,7 @@ export default async function AppLayout({
   const unread = await db.$count(
     conversation,
     and(
+      conversationCompanyWhere(db, me.companyId),
       conversationVisibilityWhere(vis),
       gt(conversation.unreadCount, 0),
       ne(conversation.status, "CLOSED")

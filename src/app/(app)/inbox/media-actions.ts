@@ -31,6 +31,7 @@ import {
 } from "@/lib/whatsapp/media";
 import { checkVoiceNote, formatDuration, VOICE_UPLOAD_MIME } from "@/lib/whatsapp/voice";
 import { sendOutboundContacts, sendOutboundMedia } from "@/lib/whatsapp/transport";
+import { senderForChannel, UNASSIGNED_SENDER } from "@/lib/whatsapp/channels";
 
 /**
  * A signed-in member, and the conversation must be in THEIR company.
@@ -92,7 +93,11 @@ export async function sendAttachment(
   const check = checkAttachment({ name: originalName, type: mimeType, size: file.size });
   if (!check.ok) return { ok: false, error: check.error };
 
-  const cfg = mediaConfig();
+  // Upload under the number this conversation lives on: a media id belongs to
+  // the number it was uploaded under, and the send below uses that same number.
+  const from = await senderForChannel(auth.db, auth.convo.channelId);
+  if (isLive() && !from) return { ok: false, error: UNASSIGNED_SENDER };
+  const cfg = mediaConfig(from);
   if (!cfg || !isLive()) {
     // Nothing to fall back to: an attachment only exists once Meta has the
     // bytes, so there is no honest row to record in DEMO. Say so rather than
@@ -167,7 +172,9 @@ export async function sendVoiceNote(
   const check = checkVoiceNote({ type: clip.type, size: clip.size });
   if (!check.ok) return { ok: false, error: check.error };
 
-  const cfg = mediaConfig();
+  const from = await senderForChannel(auth.db, auth.convo.channelId);
+  if (isLive() && !from) return { ok: false, error: UNASSIGNED_SENDER };
+  const cfg = mediaConfig(from);
   if (!cfg || !isLive()) {
     // Same as an attachment: the recording only exists once Meta holds the
     // bytes, so there is no honest row to write in DEMO.
