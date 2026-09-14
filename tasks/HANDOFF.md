@@ -41,10 +41,11 @@ inbox and answered them from Houzs's number.
   in CI): a delivery goes to the channel holding the receiving number; every reply, media
   upload, voice note and contact card goes out from the conversation's own number. An
   unassigned number is REFUSED (`dropped:number-not-assigned:<id>` on System Logs — the
-  raw delivery is kept), never guessed into a company. **Legacy case:** the Houzs channel
-  has no id yet, so the default sender still maps to the first company's default channel
-  until someone assigns that number explicitly; the fallback switches itself off the moment
-  the number is assigned anywhere.
+  raw delivery is kept), never guessed into a company. **Legacy case:** a channel with no
+  id makes the default sender map to the first company's default channel; the fallback
+  switches itself off the moment the number is assigned anywhere. _Since 2026-09-14 ~17:40
+  MYT no channel relies on it: the Houzs channel holds its id — see "Houzs number assigned
+  explicitly" below._
 - Settings → Phone numbers: each number shows its company, and an owner/admin assigns it
   to an existing company or a **new Connect-only company** (no ERP id — the org sync never
   touches it). A number whose channel already has conversations is never moved.
@@ -64,7 +65,8 @@ inbox and answered them from Houzs's number.
 3. Top bar → Company → Hookka. Send a WhatsApp to +60 18-310 7133 from a phone; it must
    appear in Hookka's inbox (and System Logs must say "Saved to the inbox"). Reply; the
    phone must receive it from +60 18-310 7133.
-4. Optional: assign the Houzs number explicitly to Houzs Century (it works without this).
+4. ~~Optional: assign the Houzs number explicitly to Houzs Century~~ — done 2026-09-14, see
+   "Houzs number assigned explicitly" below.
 
 **Deployed 2026-09-14 (PR #14, deploy run 34813786110, head `c472d863d`):** DDL 0006
 pre-applied on production and re-read on a fresh connection (text, nullable, unique
@@ -95,9 +97,11 @@ Pinned by `scripts/smoke-auto-reply.mjs` (mutation-checked: letting a welcome fo
 away message fails it). All 11 Houzs automations were disabled on production on
 2026-09-14, so nothing else replies alongside.
 
-**Still open (2026-09-14):** the owner registers + assigns the Hookka number, fills both
-profiles and switches the auto replies on; then an end-to-end test of both numbers from a
-real phone through to delivered ticks.
+**Still open (updated 2026-09-14 evening):** Hookka is registered and assigned, and both
+numbers are proven end to end (below). What remains is the owner's: fill both business
+profiles (the editor was fixed in PR #20), review the auto-reply wording and hours and
+switch them on per company, and set `WHATSAPP_APP_SECRET` (below). Then one phone test of
+the auto replies.
 
 **Webhook signature (branch `feat/webhook-signature`):** the webhook checks Meta's
 `X-Hub-Signature-256` (HMAC-SHA256 of the raw body with the app secret) when
@@ -147,7 +151,26 @@ Every attempt is now logged, including ones stopped before Meta: `payload.stage`
 rather than blaming Meta. An action that cannot be reached shows a message instead of
 crashing the page. The editor was exercised in a local harness (real component, stubbed
 actions); the Graph calls themselves are still UNTESTED until an owner saves on
-production — the log row will show Meta's answer.
+production — the log row will show Meta's answer. Shipped as PR #20 (deploy run
+34829208217, Worker version `e6c2e289`); the live `settings/numbers` chunk carries
+"Choose photo…" and no "Upload photo".
+
+**Houzs number assigned explicitly (2026-09-14 ~17:40 MYT, guarded write on production).**
+The Houzs Century channel `qcml91i8d47vzpo15ik734jm` had `phone_number_id` NULL, so its
+number reached it only through the legacy default (`WHATSAPP_PHONE_NUMBER_ID` + "oldest
+company's default channel"); it also carried a placeholder `phone` `601161556133` (shown
+as the sender number in the campaign composer) and `mode` `DEMO` (not read anywhere). A
+plan/apply script — transaction, row lock, refusing unless the channel was still
+unassigned, still the oldest company's default channel, and no channel already held the id
+— set `phone_number_id = 1327476460438603`, `phone = 601111108822`, `mode = LIVE`: the
+fields "Assign explicitly" writes for this case, except `display_name`, left as
+"Houzs Century Sdn Bhd". No `webhook_event` row was written for it (System Logs would have
+called it "Meta accepted it", and Meta was not involved). Re-read on a fresh connection;
+then the real `pickInboundChannel` / `senderIdForChannel` run on the production channel
+table routed Houzs → Houzs Century from `1327476460438603` and Hookka → Hookka from
+`1219492597923127`, both `legacy=false`, with the env default set to either id or unset,
+and refused an unknown id. Routing no longer depends on `WHATSAPP_PHONE_NUMBER_ID` at all.
+To undo: set the three columns back on that one row.
 
 ## 1. Where things stand
 
