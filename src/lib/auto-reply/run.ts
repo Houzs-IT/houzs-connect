@@ -9,6 +9,7 @@
 import { and, desc, eq, ne, sql } from "drizzle-orm";
 import type { DB } from "@/db/client";
 import { ensureAutoReplyTable } from "@/db/ensure-auto-reply";
+import { bypassReadCache } from "@/db/fresh";
 import { autoReply, message } from "@/db/schema";
 import { sendOutbound } from "@/lib/whatsapp/transport";
 import { decideAutoReply, type WeekHours } from "./decide";
@@ -22,7 +23,7 @@ export async function maybeAutoReply(
 ): Promise<"away" | "welcome" | null> {
   await ensureAutoReplyTable(db);
   const settings = await db.query.autoReply.findFirst({
-    where: eq(autoReply.companyId, args.companyId),
+    where: and(eq(autoReply.companyId, args.companyId), bypassReadCache()),
   });
   if (!settings || (!settings.welcomeEnabled && !settings.awayEnabled)) return null;
 
@@ -32,7 +33,10 @@ export async function maybeAutoReply(
       where: and(
         eq(message.conversationId, args.conversationId),
         eq(message.direction, "IN"),
-        ne(message.id, args.inboundMessageId)
+        ne(message.id, args.inboundMessageId),
+        // Fresh (db/fresh.ts): the reply sent a minute ago must count, or a
+        // customer who writes twice hears the away message twice.
+        bypassReadCache()
       ),
       orderBy: desc(message.createdAt),
     }),
@@ -43,7 +47,8 @@ export async function maybeAutoReply(
         and(
           eq(message.conversationId, args.conversationId),
           eq(message.direction, "OUT"),
-          sql`${message.interactivePayload}->>'kind' = ${AUTO_REPLY_KIND}`
+          sql`${message.interactivePayload}->>'kind' = ${AUTO_REPLY_KIND}`,
+          bypassReadCache()
         )
       )
       .orderBy(desc(message.createdAt))

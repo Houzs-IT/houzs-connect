@@ -2,7 +2,7 @@
 // company's WhatsApp number: a welcome, and an away message outside hours.
 
 import { notFound } from "next/navigation";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { getDb } from "@/db/client";
 import { ensureAutoReplyTable } from "@/db/ensure-auto-reply";
 import { autoReply, company } from "@/db/schema";
@@ -11,6 +11,7 @@ import { getCurrentMember } from "@/lib/current-member";
 import { isOpen, type WeekHours } from "@/lib/auto-reply/decide";
 import { defaultAutoReplies } from "@/lib/auto-reply/defaults";
 import { AutoRepliesForm } from "./AutoRepliesForm";
+import { bypassReadCache } from "@/db/fresh";
 
 export const dynamic = "force-dynamic";
 
@@ -21,7 +22,9 @@ export default async function AutoRepliesPage() {
   await ensureAutoReplyTable(db).catch(() => {});
 
   const [row, co] = await Promise.all([
-    db.query.autoReply.findFirst({ where: eq(autoReply.companyId, me.companyId) }).catch(() => undefined),
+    db.query.autoReply
+      .findFirst({ where: and(eq(autoReply.companyId, me.companyId), bypassReadCache()) })
+      .catch(() => undefined),
     db.query.company.findFirst({ columns: { name: true }, where: eq(company.id, me.companyId) }),
   ]);
   const companyName = co?.name ?? "our company";

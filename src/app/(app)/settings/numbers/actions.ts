@@ -1,7 +1,8 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { asc, eq } from "drizzle-orm";
+import { and, asc, eq } from "drizzle-orm";
+import { bypassReadCache } from "@/db/fresh";
 import { getDb } from "@/db/client";
 import { company } from "@/db/schema";
 import { getCurrentMember } from "@/lib/current-member";
@@ -103,7 +104,7 @@ export async function fetchNumbers(): Promise<NumbersView> {
     loadRoutingTable(db),
     db.query.company.findMany({
       columns: { id: true, name: true },
-      where: eq(company.active, true),
+      where: and(eq(company.active, true), bypassReadCache()),
       orderBy: asc(company.createdAt),
     }),
   ]);

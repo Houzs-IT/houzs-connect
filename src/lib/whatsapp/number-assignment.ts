@@ -16,7 +16,8 @@
 //     org sync only touches companies the ERP has, so it will never rename or
 //     deactivate it.
 
-import { count, eq, sql } from "drizzle-orm";
+import { and, count, eq, sql } from "drizzle-orm";
+import { bypassReadCache } from "@/db/fresh";
 import type { DB } from "@/db/client";
 import { channel, company, conversation } from "@/db/schema";
 import { channelForNumber, loadRoutingTable } from "./channels";
@@ -39,7 +40,7 @@ async function conversationCount(db: DB, channelId: string): Promise<number> {
   const [row] = await db
     .select({ n: count() })
     .from(conversation)
-    .where(eq(conversation.channelId, channelId));
+    .where(and(eq(conversation.channelId, channelId), bypassReadCache()));
   return row?.n ?? 0;
 }
 
@@ -50,7 +51,7 @@ async function resolveCompany(
   if ("companyId" in target) {
     const found = await db.query.company.findFirst({
       columns: { id: true, name: true, active: true },
-      where: eq(company.id, target.companyId),
+      where: and(eq(company.id, target.companyId), bypassReadCache()),
     });
     if (!found || !found.active) return { error: "That company no longer exists." };
     return { id: found.id, name: found.name, created: false };
@@ -64,14 +65,14 @@ async function resolveCompany(
   // differ only in case would be two inboxes nobody can tell apart.
   const clash = await db.query.company.findFirst({
     columns: { name: true },
-    where: sql`lower(${company.name}) = ${name.toLowerCase()}`,
+    where: and(sql`lower(${company.name}) = ${name.toLowerCase()}`, bypassReadCache()),
   });
   if (clash) {
     return { error: `A company called "${clash.name}" already exists — pick it from the list instead.` };
   }
   const base = slugify(name) || "company";
   const taken = new Set(
-    (await db.query.company.findMany({ columns: { slug: true } })).map((c) => c.slug)
+    (await db.query.company.findMany({ columns: { slug: true }, where: bypassReadCache() })).map((c) => c.slug)
   );
   let slug = base;
   for (let n = 2; taken.has(slug); n++) slug = `${base}-${n}`;
