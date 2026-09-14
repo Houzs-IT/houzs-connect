@@ -1,4 +1,4 @@
-import { desc } from "drizzle-orm";
+import { desc, sql } from "drizzle-orm";
 import { getDb } from "@/db/client";
 import { webhookEvent } from "@/db/schema";
 import { PageChrome } from "@/components/PageChrome";
@@ -23,10 +23,21 @@ export default async function WebhookDeliveriesPage() {
   if (!me) return null;
 
   const db = getDb();
-  const events = await db.query.webhookEvent.findMany({
-    orderBy: desc(webhookEvent.createdAt),
-    limit: PAGE_SIZE,
-  });
+  const [events, verified] = await Promise.all([
+    db.query.webhookEvent.findMany({
+      orderBy: desc(webhookEvent.createdAt),
+      limit: PAGE_SIZE,
+    }),
+    db
+      .select({ id: webhookEvent.id })
+      .from(webhookEvent)
+      .where(
+        sql`${webhookEvent.source} = 'whatsapp' and ${webhookEvent.eventType} like '%|sig:valid' and ${webhookEvent.createdAt} > now() - interval '30 days'`
+      )
+      .limit(1)
+      .catch(() => []),
+  ]);
+  const signatureVerifiedRecently = verified.length > 0;
 
   return (
     <PageChrome
@@ -35,6 +46,19 @@ export default async function WebhookDeliveriesPage() {
     >
       <LogTabs />
       <div className="p-6">
+        {!process.env.WHATSAPP_APP_SECRET ? (
+          <div className="mb-4 rounded-xl border border-[color-mix(in_srgb,var(--color-danger)_35%,transparent)] bg-[color-mix(in_srgb,var(--color-danger)_6%,transparent)] px-4 py-3 text-[12.5px] text-[var(--color-danger)]">
+            Incoming WhatsApp deliveries are not checked for Meta&apos;s signature, so a forged
+            &quot;customer message&quot; would be accepted. Set <span className="font-mono">WHATSAPP_APP_SECRET</span>{" "}
+            (the Meta app&apos;s App Secret) on the Worker to turn the check on.
+          </div>
+        ) : !signatureVerifiedRecently ? (
+          <div className="mb-4 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-3 text-[12.5px] text-[var(--color-muted)]">
+            The app secret is set. The signature check starts refusing forged deliveries after the first
+            real WhatsApp message verifies against it — send one to a company number to arm it. Until
+            then an unverified delivery is accepted and marked below.
+          </div>
+        ) : null}
         <div className="overflow-hidden rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)]">
           {events.length === 0 && (
             <div className="px-4 py-12 text-center text-[13px] text-[var(--color-faint)]">

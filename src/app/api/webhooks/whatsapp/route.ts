@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { getDb } from "@/db/client";
 import { ensureContactColumns } from "@/db/ensure";
 import {
@@ -13,6 +13,27 @@ import { getOrCreateConversation, recordInbound } from "@/lib/whatsapp/transport
 import { handleInboundMessage } from "@/lib/automation/dispatch";
 import { loadRoutingTable, pickInboundChannel } from "@/lib/whatsapp/channels";
 import { maybeAutoReply } from "@/lib/auto-reply/run";
+import { mustRefuse, signatureState, type SignatureState } from "@/lib/whatsapp/signature";
+
+/**
+ * Whether signature enforcement has armed (see mustRefuse): some delivery in the
+ * last 30 days verified against the configured secret. Remembered per isolate
+ * once true — it never un-arms on its own.
+ */
+let armed = false;
+async function signatureArmed(db: ReturnType<typeof getDb>): Promise<boolean> {
+  if (armed) return true;
+  const rows = await db
+    .select({ id: webhookEvent.id })
+    .from(webhookEvent)
+    .where(
+      sql`${webhookEvent.source} = 'whatsapp' and ${webhookEvent.eventType} like '%|sig:valid' and ${webhookEvent.createdAt} > now() - interval '30 days'`
+    )
+    .limit(1)
+    .catch(() => []);
+  armed = rows.length > 0;
+  return armed;
+}
 
 /**
  * Meta WhatsApp Cloud API webhook.
@@ -74,6 +95,25 @@ export async function POST(req: NextRequest) {
   // mode here that loses data rather than showing an error page.
   await ensureContactColumns(db).catch(() => {});
 
+  // Did Meta send this? (src/lib/whatsapp/signature.ts) A forged delivery is
+  // refused before it can reach an inbox or trigger an automatic reply — once a
+  // real delivery has proven the configured secret right.
+  const sig: SignatureState = await signatureState(
+    raw,
+    req.headers.get("x-hub-signature-256"),
+    process.env.WHATSAPP_APP_SECRET
+  );
+  if (sig === "valid") armed = true;
+  if (mustRefuse(sig, await signatureArmed(db))) {
+    // The forged body is not kept: it is not a customer's, and storing it
+    // would hand the sender a way to write into System Logs.
+    await db
+      .insert(webhookEvent)
+      .values({ source: "whatsapp", eventType: `rejected:signature-${sig}`, payload: { bytes: raw.length }, processed: false })
+      .catch(() => {});
+    return NextResponse.json({ ok: false }, { status: 401 });
+  }
+
   // Record EVERY delivery before interpreting it. Without this the only way to
   // tell "Meta never called us" from "Meta called and we dropped it" was to
   // guess — the handler used to return 200 and write nothing on any payload it
@@ -99,7 +139,8 @@ export async function POST(req: NextRequest) {
     if (!eventId) return;
     await db
       .update(webhookEvent)
-      .set({ processed, eventType: note })
+      // "|sig:valid" on a real delivery is also what arms enforcement.
+      .set({ processed, eventType: sig === "off" ? note : `${note}|sig:${sig}` })
       .where(eq(webhookEvent.id, eventId))
       .catch(() => {});
   };

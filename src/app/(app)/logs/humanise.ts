@@ -48,7 +48,14 @@ function describeMessage(m: WaMessage): string {
 
 /** What our handler recorded it did — stored in eventType. */
 function describeOutcome(eventType: string | null, processed: boolean): Pick<WebhookSummary, "outcome" | "tone"> {
-  const t = eventType ?? "";
+  // The signature verdict rides after "|sig:"; the outcome is what comes before.
+  const t = (eventType ?? "").split("|sig:")[0];
+  if (t.startsWith("rejected:signature-")) {
+    return {
+      outcome: "Refused — it did not carry Meta's signature, so it was not from WhatsApp. Nothing was saved.",
+      tone: "bad",
+    };
+  }
   if (t.startsWith("handled:")) {
     const n = t.match(/handled:(\d+)/)?.[1];
     if (t.includes("status-only")) {
@@ -144,6 +151,9 @@ export function summarise(
       ?.value ?? {}
   ) as WaValue;
 
+  const sigState = (eventType ?? "").split("|sig:")[1];
+  const sigChip = sigState ? `signature ${sigState === "valid" ? "verified" : sigState}` : "";
+
   const person =
     value.contacts?.[0]?.profile?.name ??
     value.contacts?.[0]?.profile?.username ??
@@ -154,7 +164,7 @@ export function summarise(
     const s = value.statuses[0];
     return {
       headline: `Delivery receipt from WhatsApp — a message was marked ${s.status ?? "updated"}`,
-      details: [s.recipient_id ? `to ${s.recipient_id}` : ""].filter(Boolean),
+      details: [s.recipient_id ? `to ${s.recipient_id}` : "", sigChip].filter(Boolean),
       outcome,
       tone,
     };
@@ -168,6 +178,7 @@ export function summarise(
       details: [
         value.metadata?.display_phone_number ? `to +${value.metadata.display_phone_number}` : "",
         value.contacts?.[0]?.wa_id ? `from +${value.contacts[0].wa_id}` : "",
+        sigChip,
       ].filter(Boolean),
       outcome,
       tone,
