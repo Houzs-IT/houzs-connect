@@ -119,6 +119,15 @@ export function summarise(
     // What an owner or admin did to a number on Settings → Phone numbers, and
     // what Meta answered. Kept so "I pressed Register and nothing happened" has
     // an answer that does not depend on a screenshot.
+    const snap = (payload as { numbers?: { display?: string; name?: string | null; connection?: string | null }[] } | null)?.numbers;
+    if (Array.isArray(snap)) {
+      return {
+        headline: "Phone number status, as Meta reported it when the Phone numbers page was opened",
+        details: snap.map((n) => `${n.display ?? "?"}${n.name ? ` ${n.name}` : ""}: ${n.connection ?? "unknown"}`),
+        outcome: "Read from Meta.",
+        tone: "ok",
+      };
+    }
     const p = (payload ?? {}) as { action?: string; number?: string; error?: string; statusAfter?: string; company?: string };
     return {
       headline: `Phone number ${p.number ?? "unknown"}: ${p.action ?? "change"}`,
