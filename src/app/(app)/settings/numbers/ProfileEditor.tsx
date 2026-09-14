@@ -4,16 +4,32 @@
 //
 // Loaded on demand rather than with the page: the profile is one Graph call per
 // number, and the page is mostly visited to check a number's status.
+//
+// The photo is ONE button that opens the picker and uploads what is picked. It
+// used to be the browser's own file control plus a separate "Upload photo"
+// button that stayed disabled until a file was chosen — and Tailwind's reset
+// strips the file control's button styling, so "Choose File" rendered as plain
+// text next to the only real-looking button, which did nothing. On 2026-09-14
+// that was reported as "tidak boleh mengupload gambar", with no upload attempt
+// on record. The same pattern the inbox composer uses: a hidden input, opened
+// from a real button.
 
-import { useState, useTransition } from "react";
+import { useRef, useState, useTransition } from "react";
 import type { WabaNumber } from "@/lib/whatsapp/numbers";
-import { PROFILE_LIMITS, VERTICALS, type BusinessProfile } from "@/lib/whatsapp/profile-limits";
+import {
+  PHOTO_MAX_BYTES,
+  PHOTO_TYPES,
+  PROFILE_FIELD_LABELS,
+  PROFILE_LIMITS,
+  VERTICALS,
+  type BusinessProfile,
+  type ProfileInput,
+} from "@/lib/whatsapp/profile-limits";
 import {
   loadBusinessProfile,
   saveBusinessProfile,
   submitDisplayName,
   uploadBusinessPhoto,
-  type ProfileResult,
 } from "./profile-actions";
 
 const inputCls =
@@ -25,7 +41,18 @@ const btnCls =
 const ghostBtnCls =
   "rounded-lg border border-[var(--color-border)] px-3 py-2 text-[13px] font-medium text-[var(--color-ink)] transition-colors hover:bg-[var(--color-surface-2)] disabled:opacity-40";
 
-function Note({ r }: { r: { ok: boolean; text: string } | null }) {
+type NoteValue = { ok: boolean; text: string } | null;
+type Doing = "load" | "save" | "photo" | "name";
+
+/**
+ * When the action itself cannot be reached (connection dropped, or the app was
+ * updated since the page was opened), say so here instead of letting the throw
+ * take the whole page down.
+ */
+const UNREACHABLE =
+  "Connect could not be reached, so nothing was changed. Check the internet connection and try again — if it keeps happening, reload the page.";
+
+function Note({ r }: { r: NoteValue }) {
   if (!r) return null;
   return (
     <p
@@ -46,6 +73,13 @@ function Counter({ value, max }: { value: string; max: number }) {
   );
 }
 
+/** "the about line", "the about line and address", "the about line, address and email". */
+function fieldList(fields: (keyof ProfileInput)[]): string {
+  const names = fields.map((f) => PROFILE_FIELD_LABELS[f]);
+  if (names.length <= 1) return `the ${names[0] ?? "profile"}`;
+  return `the ${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
+}
+
 export function ProfileEditor({ n }: { n: WabaNumber }) {
   const [open, setOpen] = useState(false);
   const [profile, setProfile] = useState<BusinessProfile | null>(null);
@@ -56,17 +90,22 @@ export function ProfileEditor({ n }: { n: WabaNumber }) {
   const [site1, setSite1] = useState("");
   const [site2, setSite2] = useState("");
   const [vertical, setVertical] = useState("");
-  const [photo, setPhoto] = useState<File | null>(null);
+  // The picked photo, shown while it uploads and until Meta hands back its own URL.
+  const [preview, setPreview] = useState<string | null>(null);
+  const previewUrl = useRef<string | null>(null);
+  const photoInput = useRef<HTMLInputElement>(null);
   const [newName, setNewName] = useState("");
   const [pendingName, setPendingName] = useState<{ name: string | null; status: string | null }>({
     name: n.newDisplayName,
     status: n.newNameStatus,
   });
-  const [loadNote, setLoadNote] = useState<{ ok: boolean; text: string } | null>(null);
-  const [saveNote, setSaveNote] = useState<{ ok: boolean; text: string } | null>(null);
-  const [photoNote, setPhotoNote] = useState<{ ok: boolean; text: string } | null>(null);
-  const [nameNote, setNameNote] = useState<{ ok: boolean; text: string } | null>(null);
+  const [loadNote, setLoadNote] = useState<NoteValue>(null);
+  const [saveNote, setSaveNote] = useState<NoteValue>(null);
+  const [photoNote, setPhotoNote] = useState<NoteValue>(null);
+  const [nameNote, setNameNote] = useState<NoteValue>(null);
   const [pending, start] = useTransition();
+  const [doing, setDoing] = useState<Doing | null>(null);
+  const busy = pending ? doing : null;
 
   function fill(p: BusinessProfile) {
     setProfile(p);
@@ -79,19 +118,71 @@ export function ProfileEditor({ n }: { n: WabaNumber }) {
     setVertical(p.vertical);
   }
 
+  /** Run one action at a time; if it cannot be reached, the note says so. */
+  function act(what: Doing, note: (v: NoteValue) => void, fn: () => Promise<void>) {
+    setDoing(what);
+    note(null);
+    start(async () => {
+      try {
+        await fn();
+      } catch {
+        note({ ok: false, text: UNREACHABLE });
+      }
+    });
+  }
+
   function openEditor() {
     setOpen(true);
-    setLoadNote(null);
-    start(async () => {
+    act("load", setLoadNote, async () => {
       const r = await loadBusinessProfile(n.id);
       if (r.ok && r.profile) fill(r.profile);
       else setLoadNote({ ok: false, text: r.error ?? "Meta did not return this number's profile." });
     });
   }
 
-  function after(r: ProfileResult, okText: string, set: (v: { ok: boolean; text: string }) => void) {
-    if (r.ok && r.profile) fill(r.profile);
-    set({ ok: r.ok, text: r.ok ? okText : (r.error ?? "Meta refused and gave no reason.") });
+  function showPreview(url: string | null) {
+    if (previewUrl.current && previewUrl.current !== url) URL.revokeObjectURL(previewUrl.current);
+    previewUrl.current = url;
+    setPreview(url);
+  }
+
+  function onPhotoPicked(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0] ?? null;
+    // Cleared so that picking the same file again, after a refusal, still fires.
+    e.target.value = "";
+    if (!file) return;
+    if (!PHOTO_TYPES.includes(file.type)) {
+      setPhotoNote({ ok: false, text: "That file is not a JPEG or PNG photo. Choose a .jpg or .png." });
+      return;
+    }
+    if (file.size > PHOTO_MAX_BYTES) {
+      setPhotoNote({
+        ok: false,
+        text: `That photo is ${(file.size / 1048576).toFixed(1)} MB. It must be 5 MB or smaller.`,
+      });
+      return;
+    }
+    const local = URL.createObjectURL(file);
+    showPreview(local);
+    const fd = new FormData();
+    fd.append("phoneId", n.id);
+    fd.append("photo", file);
+    act("photo", setPhotoNote, async () => {
+      try {
+        const r = await uploadBusinessPhoto(fd);
+        if (r.ok && r.profile) fill(r.profile);
+        // Keep showing the picked photo if Meta has not produced its URL yet.
+        showPreview(r.ok && !r.profile?.profilePictureUrl ? local : null);
+        setPhotoNote(
+          r.ok
+            ? { ok: true, text: "Photo updated on WhatsApp. Customers see it the next time they open this business." }
+            : { ok: false, text: r.error ?? "Meta refused the photo and gave no reason." }
+        );
+      } catch (err) {
+        showPreview(null);
+        throw err;
+      }
+    });
   }
 
   if (!open) {
@@ -109,6 +200,8 @@ export function ProfileEditor({ n }: { n: WabaNumber }) {
     );
   }
 
+  const photoUrl = preview ?? profile?.profilePictureUrl ?? null;
+
   return (
     <div className="mt-3 space-y-4 border-t border-[var(--color-border)] pt-3">
       <div className="flex items-baseline justify-between gap-3">
@@ -118,20 +211,20 @@ export function ProfileEditor({ n }: { n: WabaNumber }) {
         </button>
       </div>
 
-      {pending && !profile && <p className="text-[12.5px] text-[var(--color-muted)]">Asking Meta for the current profile…</p>}
+      {busy === "load" && !profile && <p className="text-[12.5px] text-[var(--color-muted)]">Asking Meta for the current profile…</p>}
       <Note r={loadNote} />
 
       {profile && (
         <>
           {/* Photo */}
           <div className="flex flex-wrap items-center gap-4">
-            {profile.profilePictureUrl ? (
-              // Meta-hosted and short-lived; shown, never stored.
+            {photoUrl ? (
+              // Meta-hosted and short-lived (or the picked file, while it uploads); shown, never stored.
               // eslint-disable-next-line @next/next/no-img-element
               <img
-                src={profile.profilePictureUrl}
-                alt="Current profile photo"
-                className="h-16 w-16 rounded-full border border-[var(--color-border)] object-cover"
+                src={photoUrl}
+                alt="Profile photo"
+                className={`h-16 w-16 rounded-full border border-[var(--color-border)] object-cover ${busy === "photo" ? "opacity-60" : ""}`}
               />
             ) : (
               <div className="grid h-16 w-16 place-items-center rounded-full border border-dashed border-[var(--color-border)] text-[11px] text-[var(--color-faint)]">
@@ -142,31 +235,25 @@ export function ProfileEditor({ n }: { n: WabaNumber }) {
               <label className={labelCls}>Profile photo</label>
               <p className="mt-1 text-[11px] text-[var(--color-faint)]">
                 JPEG or PNG, up to 5 MB. A square image at least 640 × 640 looks best; WhatsApp crops it to a circle.
+                The photo you choose is sent to WhatsApp straight away.
               </p>
-              <div className="mt-1 flex flex-wrap items-center gap-2">
-                <input
-                  type="file"
-                  accept="image/jpeg,image/png"
-                  onChange={(e) => setPhoto(e.target.files?.[0] ?? null)}
-                  className="text-[12px] text-[var(--color-muted)]"
-                  aria-label="Choose a profile photo"
-                />
-                <button
-                  type="button"
-                  className={btnCls}
-                  disabled={pending || !photo}
-                  onClick={() => {
-                    if (!photo) return;
-                    setPhotoNote(null);
-                    const fd = new FormData();
-                    fd.append("phoneId", n.id);
-                    fd.append("photo", photo);
-                    start(async () => after(await uploadBusinessPhoto(fd), "Photo updated on WhatsApp.", setPhotoNote));
-                  }}
-                >
-                  Upload photo
-                </button>
-              </div>
+              <input
+                ref={photoInput}
+                type="file"
+                accept="image/jpeg,image/png"
+                onChange={onPhotoPicked}
+                className="hidden"
+                tabIndex={-1}
+                aria-hidden
+              />
+              <button
+                type="button"
+                className={`${btnCls} mt-2`}
+                disabled={pending}
+                onClick={() => photoInput.current?.click()}
+              >
+                {busy === "photo" ? "Uploading…" : profile.profilePictureUrl ? "Change photo…" : "Choose photo…"}
+              </button>
               <Note r={photoNote} />
             </div>
           </div>
@@ -223,26 +310,32 @@ export function ProfileEditor({ n }: { n: WabaNumber }) {
               type="button"
               className={btnCls}
               disabled={pending}
-              onClick={() => {
-                setSaveNote(null);
-                start(async () =>
-                  after(
-                    await saveBusinessProfile(n.id, {
-                      about,
-                      description,
-                      address,
-                      email,
-                      websites: [site1, site2],
-                      vertical,
-                    }),
-                    "Saved. This is now what customers see for this number.",
-                    setSaveNote
-                  )
-                );
-              }}
+              onClick={() =>
+                act("save", setSaveNote, async () => {
+                  const r = await saveBusinessProfile(n.id, {
+                    about,
+                    description,
+                    address,
+                    email,
+                    websites: [site1, site2],
+                    vertical,
+                  });
+                  if (r.ok && r.profile) fill(r.profile);
+                  setSaveNote(
+                    !r.ok
+                      ? { ok: false, text: r.error ?? "Meta refused and gave no reason." }
+                      : r.changed?.length
+                        ? { ok: true, text: `Saved ${fieldList(r.changed)}. This is now what customers see for this number.` }
+                        : { ok: true, text: "Nothing to save — every field already matches what customers see." }
+                  );
+                })
+              }
             >
-              {pending ? "Saving…" : "Save profile"}
+              {busy === "save" ? "Saving…" : "Save profile"}
             </button>
+            <p className="mt-1 text-[11px] text-[var(--color-faint)]">
+              Only the fields you change are sent to WhatsApp; the rest stay as they are.
+            </p>
             <Note r={saveNote} />
           </div>
 
@@ -270,9 +363,8 @@ export function ProfileEditor({ n }: { n: WabaNumber }) {
                 type="button"
                 className={ghostBtnCls}
                 disabled={pending || newName.trim().length < 3}
-                onClick={() => {
-                  setNameNote(null);
-                  start(async () => {
+                onClick={() =>
+                  act("name", setNameNote, async () => {
                     const r = await submitDisplayName(n.id, newName);
                     if (r.ok) setPendingName({ name: r.newDisplayName ?? newName.trim(), status: r.newNameStatus ?? null });
                     setNameNote({
@@ -281,10 +373,10 @@ export function ProfileEditor({ n }: { n: WabaNumber }) {
                         ? `Submitted for review${r.newNameStatus ? ` — Meta reports ${r.newNameStatus}` : ""}.`
                         : (r.error ?? "Meta refused and gave no reason."),
                     });
-                  });
-                }}
+                  })
+                }
               >
-                Submit for review
+                {busy === "name" ? "Submitting…" : "Submit for review"}
               </button>
             </div>
             <Note r={nameNote} />
