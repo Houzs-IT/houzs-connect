@@ -131,6 +131,24 @@ the status-snapshot dedupe, and the inbox rail / thread / unread badge (refreshe
 few seconds). Anything else still reads through the cache — add it where a stale answer
 would be a bug.
 
+**Business profile "cannot edit, cannot upload" (reported 2026-09-14, branch
+`fix/profile-editing`).** No save or upload attempt was on record, and two causes were
+found. (1) The photo control was the browser's file input plus an "Upload photo" button
+disabled until a file was chosen — and Tailwind v4's preflight strips the file input's
+button (measured: 0 border, transparent background, 0 padding), so "Choose File" rendered
+as plain text beside the only real-looking button, which did nothing. It is now one
+"Choose photo…" button (hidden input, the inbox composer's pattern) that uploads what is
+picked. (2) Every save sent all six text fields, so a box left empty went to Meta as `""`
+— and Meta's reference says the about line "cannot be empty" (the Houzs number's about was
+empty). A save now sends only the fields that differ from what Meta holds at that moment
+(`profileChanges`, pinned in `scripts/smoke-business-profile.mjs`, mutation-checked).
+Every attempt is now logged, including ones stopped before Meta: `payload.stage` is
+`read` / `connect` / `meta`, and System Logs says "Not sent to Meta — Connect stopped it"
+rather than blaming Meta. An action that cannot be reached shows a message instead of
+crashing the page. The editor was exercised in a local harness (real component, stubbed
+actions); the Graph calls themselves are still UNTESTED until an owner saves on
+production — the log row will show Meta's answer.
+
 ## 1. Where things stand
 
 ### Live and verified

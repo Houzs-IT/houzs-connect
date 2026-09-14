@@ -128,16 +128,37 @@ export function summarise(
         tone: "ok",
       };
     }
-    const p = (payload ?? {}) as { action?: string; number?: string; error?: string; statusAfter?: string; company?: string };
+    const p = (payload ?? {}) as {
+      action?: string;
+      number?: string;
+      error?: string;
+      statusAfter?: string;
+      company?: string;
+      /** Where a profile attempt ended: "read", "connect" (stopped before Meta) or "meta". */
+      stage?: string;
+      fields?: string[];
+    };
+    const ok = (eventType ?? "").endsWith(":ok");
+    // A business-profile save stopped by Connect never reached Meta, and saying
+    // "Meta refused it" there would send someone looking in the wrong place.
+    const stopped =
+      p.stage === "connect"
+        ? ok
+          ? { outcome: "Nothing sent to Meta — no field had changed.", tone: "ok" as const }
+          : { outcome: "Not sent to Meta — Connect stopped it, and the reason is below.", tone: "bad" as const }
+        : p.stage === "read" && !ok
+          ? { outcome: "Meta did not return the current profile, so nothing was sent.", tone: "bad" as const }
+          : null;
     return {
       headline: `Phone number ${p.number ?? "unknown"}: ${p.action ?? "change"}`,
       details: [
         p.statusAfter ? `Meta now reports ${p.statusAfter}` : "",
         p.company ? `company: ${p.company}` : "",
-        p.error ? `Meta said: ${p.error}` : "",
+        Array.isArray(p.fields) && p.fields.length ? `fields: ${p.fields.join(", ")}` : "",
+        p.error ? `${p.stage === "connect" ? "Reason" : "Meta said"}: ${p.error}` : "",
       ].filter(Boolean),
-      outcome,
-      tone,
+      outcome: stopped?.outcome ?? outcome,
+      tone: stopped?.tone ?? tone,
     };
   }
 
