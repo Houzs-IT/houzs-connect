@@ -10,7 +10,7 @@ const TABS = ["All", "Unread", "Open", "Closed", "Queue"];
  */
 export function ConversationListSkeleton() {
   return (
-    <div className="flex w-[336px] shrink-0 flex-col border-r border-[var(--color-border)] bg-[var(--color-surface)]">
+    <div className="flex w-full shrink-0 flex-col border-r border-[var(--color-border)] bg-[var(--color-surface)] md:w-[336px]">
       <div className="border-b border-[var(--color-border)] p-3">
         <Skel className="skeleton-strong h-[37px] w-full rounded-lg" />
         <div className="mt-2.5 flex items-center gap-1">

@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { notFound } from "next/navigation";
 import { and, asc, eq } from "drizzle-orm";
 import { getDb } from "@/db/client";
@@ -116,7 +117,19 @@ export default async function ConversationPage({
     <div className="flex min-w-0 flex-1">
       {/* Center: thread */}
       <div className="flex min-w-0 flex-1 flex-col bg-[var(--color-canvas)]">
-        <div className="flex h-14 shrink-0 items-center gap-3 border-b border-[var(--color-border)] bg-[var(--color-surface)] px-5">
+        <div className="flex h-14 shrink-0 items-center gap-3 border-b border-[var(--color-border)] bg-[var(--color-surface)] px-4 md:px-5">
+          {/* Back to the conversation list. On a phone the rail and the thread
+              never share the screen, so this is the only way back to it; above
+              md the rail is always visible and the control is hidden. */}
+          <Link
+            href="/inbox"
+            aria-label="Back to inbox"
+            className="-ml-1 grid h-9 w-9 shrink-0 place-items-center rounded-md text-[var(--color-muted)] transition-colors hover:bg-[var(--color-surface-2)] hover:text-[var(--color-ink)] md:hidden"
+          >
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M15 18l-6-6 6-6" />
+            </svg>
+          </Link>
           <div
             className="grid h-8 w-8 place-items-center rounded-full text-[11px] font-semibold text-white"
             style={{ background: tint(name) }}

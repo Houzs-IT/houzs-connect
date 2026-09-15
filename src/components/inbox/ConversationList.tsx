@@ -81,7 +81,7 @@ export function ConversationList({
   });
 
   return (
-    <div className="flex w-[336px] shrink-0 flex-col border-r border-[var(--color-border)] bg-[var(--color-surface)]">
+    <div className="flex w-full shrink-0 flex-col border-r border-[var(--color-border)] bg-[var(--color-surface)] md:w-[336px]">
       <div className="border-b border-[var(--color-border)] p-3">
         <div className="flex items-center gap-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] px-2.5 py-2">
           <IconSearch width={15} height={15} className="text-[var(--color-faint)]" />

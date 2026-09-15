@@ -28,7 +28,7 @@ export function Topbar({
 }) {
   const here = companies?.find((c) => c.current);
   return (
-    <header className="flex h-16 shrink-0 items-center gap-4 border-b border-[var(--color-border)] bg-[var(--color-surface)] px-6">
+    <header className="flex h-16 shrink-0 items-center gap-4 border-b border-[var(--color-border)] bg-[var(--color-surface)] pl-16 pr-4 md:px-6">
       <div className="min-w-0">
         <h1 className="truncate text-[17px] font-semibold tracking-tight text-[var(--color-ink)]">
           {title}
