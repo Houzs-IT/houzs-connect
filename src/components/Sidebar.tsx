@@ -180,14 +180,11 @@ function RailBody({
 }
 
 export function Sidebar({ unread, live }: { unread?: number; live?: boolean }) {
-  const path = usePathname();
   const [open, setOpen] = useState(false);
 
-  // Close the drawer whenever the route changes — tapping a destination should
-  // land you on it, not on the menu you tapped it from.
-  useEffect(() => {
-    setOpen(false);
-  }, [path]);
+  // The drawer closes itself when a destination is chosen (every nav link calls
+  // onNavigate), so there is no route-change effect here — closing on the click
+  // that navigates is both enough and cheaper than reacting to the new path.
 
   // Escape closes it, and while it is open the body underneath must not scroll.
   useEffect(() => {
