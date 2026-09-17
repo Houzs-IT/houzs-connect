@@ -93,7 +93,11 @@ export async function fetchTeam(): Promise<TeamView> {
   const byKey = new Map<string, Person>();
   for (const m of members) {
     if (!m.active) continue;
-    const key = m.erpUserId != null ? `u:${m.erpUserId}` : `e:${m.email.toLowerCase()}`;
+    // Key by email — the identity that is stable across a person's ERP-synced
+    // rows and any manual grants. Keying ERP rows separately (by erp_user_id)
+    // split one person into two rows, so a grant made on the manual row never
+    // showed on the ERP row the operator actually clicked.
+    const key = m.email.toLowerCase();
     let p = byKey.get(key);
     if (!p) {
       p = {
@@ -109,6 +113,8 @@ export async function fetchTeam(): Promise<TeamView> {
     }
     // Prefer a real name and the richest org detail from whichever row has it.
     if ((!p.name || p.name === p.email) && m.name) p.name = m.name;
+    // The role dropdown edits manual grants, so a manual row's role wins for display.
+    if (m.erpUserId == null) p.role = m.role;
     if (!p.department && m.departmentId) p.department = deptName.get(m.departmentId) ?? null;
     if (!p.reportsTo && m.managerId) p.reportsTo = memberName.get(m.managerId) ?? null;
     p.access[m.companyId] = {
