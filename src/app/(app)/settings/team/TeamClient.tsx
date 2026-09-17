@@ -1,11 +1,11 @@
-"use client";
-
-import { useTransition } from "react";
-import { setCompanyAccess, setPersonRole, type Person, type TeamCompany } from "./actions";
+import { toggleAccess, setRoleForm, type Person, type TeamCompany } from "./actions";
 import { syncFromErp } from "../sync-actions";
 
 const ROLE_OPTIONS = ["ADMIN", "MANAGER", "AGENT", "SALES", "VIEWER", "DRIVER"] as const;
 
+// Server-rendered. Every control is a <form action={serverAction}> so it posts
+// and works without depending on client hydration — the onChange + useTransition
+// version left the checkboxes inert on the deployed page.
 export function TeamClient({
   companies,
   people,
@@ -13,17 +13,6 @@ export function TeamClient({
   companies: TeamCompany[];
   people: Person[];
 }) {
-  const [pending, start] = useTransition();
-
-  const toggle = (p: Person, companyId: string, on: boolean) =>
-    start(async () => {
-      await setCompanyAccess({ email: p.email, name: p.name, role: p.role, companyId, on });
-    });
-  const changeRole = (p: Person, role: string) =>
-    start(async () => {
-      await setPersonRole({ email: p.email, role });
-    });
-
   return (
     <div className="space-y-4">
       <form
@@ -56,7 +45,7 @@ export function TeamClient({
               ))}
             </tr>
           </thead>
-          <tbody className={pending ? "opacity-60" : undefined}>
+          <tbody>
             {people.map((p) => (
               <tr key={p.key} className="border-b border-[var(--color-border)] align-middle last:border-0">
                 <td className="px-4 py-2.5">
@@ -64,18 +53,27 @@ export function TeamClient({
                   <span className="block truncate font-mono text-[10.5px] text-[var(--color-faint)]">{p.email}</span>
                 </td>
                 <td className="px-4 py-2.5">
-                  <select
-                    value={p.role}
-                    onChange={(e) => changeRole(p, e.target.value)}
-                    aria-label={`Role for ${p.name}`}
-                    className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] px-2 py-1 text-[12px] text-[var(--color-ink)] outline-none focus:border-[var(--color-accent)]"
-                  >
-                    {ROLE_OPTIONS.map((r) => (
-                      <option key={r} value={r}>
-                        {r}
-                      </option>
-                    ))}
-                  </select>
+                  <form action={setRoleForm} className="flex items-center gap-1.5">
+                    <input type="hidden" name="email" value={p.email} />
+                    <select
+                      name="role"
+                      defaultValue={p.role}
+                      aria-label={`Role for ${p.name}`}
+                      className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] px-2 py-1 text-[12px] text-[var(--color-ink)] outline-none focus:border-[var(--color-accent)]"
+                    >
+                      {ROLE_OPTIONS.map((r) => (
+                        <option key={r} value={r}>
+                          {r}
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      type="submit"
+                      className="rounded-md px-2 py-1 text-[11px] font-medium text-[var(--color-accent-ink)] transition-colors hover:bg-[var(--color-accent-soft)]"
+                    >
+                      Save
+                    </button>
+                  </form>
                 </td>
                 <td className="px-4 py-2.5 text-[var(--color-muted)]">{p.department ?? "—"}</td>
                 <td className="px-4 py-2.5 text-[var(--color-muted)]">{p.reportsTo ?? "—"}</td>
@@ -83,32 +81,44 @@ export function TeamClient({
                   const a = p.access[c.id];
                   const on = !!a;
                   const locked = !!a?.fromErp;
+                  if (locked) {
+                    return (
+                      <td key={c.id} className="px-3 py-2.5 text-center">
+                        <span
+                          className="inline-flex flex-col items-center"
+                          title="Granted by the Houzs ERP"
+                        >
+                          <span className="grid h-5 w-5 place-items-center rounded border border-[var(--color-border)] bg-[var(--color-surface-2)] text-[12px] text-[var(--color-muted)]">
+                            ✓
+                          </span>
+                          <span className="mt-0.5 text-[9px] uppercase tracking-wide text-[var(--color-faint)]">
+                            ERP
+                          </span>
+                        </span>
+                      </td>
+                    );
+                  }
                   return (
                     <td key={c.id} className="px-3 py-2.5 text-center">
-                      <input
-                        type="checkbox"
-                        checked={on}
-                        disabled={locked || pending}
-                        // Toggle from the known server state, not e.target.checked:
-                        // the box is controlled and driven by an async action, so
-                        // the event's checked value is unreliable and a revoke kept
-                        // re-sending "on".
-                        onChange={() => toggle(p, c.id, !on)}
-                        aria-label={`${p.name} access to ${c.name}`}
-                        title={
-                          locked
-                            ? "Granted by the Houzs ERP"
-                            : on
-                              ? "Granted here — click to remove"
-                              : "Click to grant"
-                        }
-                        className="h-4 w-4 cursor-pointer accent-[var(--color-accent)] disabled:cursor-not-allowed"
-                      />
-                      {locked && (
-                        <span className="mt-0.5 block text-[9px] uppercase tracking-wide text-[var(--color-faint)]">
-                          ERP
-                        </span>
-                      )}
+                      <form action={toggleAccess} className="inline-flex">
+                        <input type="hidden" name="email" value={p.email} />
+                        <input type="hidden" name="name" value={p.name} />
+                        <input type="hidden" name="role" value={p.role} />
+                        <input type="hidden" name="companyId" value={c.id} />
+                        <input type="hidden" name="on" value={on ? "1" : "0"} />
+                        <button
+                          type="submit"
+                          aria-label={`${p.name} access to ${c.name}`}
+                          title={on ? "Granted — click to remove" : "Click to grant"}
+                          className={`grid h-5 w-5 place-items-center rounded border text-[12px] transition-colors ${
+                            on
+                              ? "border-[var(--color-accent)] bg-[var(--color-accent)] text-white"
+                              : "border-[var(--color-border)] bg-[var(--color-surface)] text-transparent hover:border-[var(--color-accent)]"
+                          }`}
+                        >
+                          ✓
+                        </button>
+                      </form>
                     </td>
                   );
                 })}
@@ -119,10 +129,10 @@ export function TeamClient({
       </div>
 
       <p className="text-[11px] leading-relaxed text-[var(--color-faint)]">
-        A tick means the person can read that company&apos;s inbox. <b>ERP</b> boxes are set by the
-        Houzs ERP and locked here; the rest you grant or remove — that is the only way to give access
-        to a Connect-only company like Hookka. The role applies to companies you grant here: ADMIN
-        sees every chat in a company, AGENT only chats assigned to them.
+        A green tick means the person can read that company&apos;s inbox — click to grant or remove.
+        <b> ERP</b> boxes are set by the Houzs ERP and locked here; the rest are the only way to give
+        access to a Connect-only company like Hookka. The role applies to companies you grant here:
+        ADMIN sees every chat in a company, AGENT only chats assigned to them.
       </p>
     </div>
   );

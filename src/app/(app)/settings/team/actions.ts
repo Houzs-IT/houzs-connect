@@ -137,58 +137,53 @@ export async function fetchTeam(): Promise<TeamView> {
   return { permitted: true, companies, people };
 }
 
-export async function setCompanyAccess(input: {
-  email: string;
-  name: string;
-  role: string;
-  companyId: string;
-  on: boolean;
-}): Promise<void> {
+// Both mutations take a FormData and run from a plain <form action={...}>. That
+// is the app's standard, progressively-enhanced path — it posts and works even
+// before (or without) client hydration, unlike an onChange + useTransition call,
+// which left the matrix inert on the deployed page.
+
+export async function toggleAccess(formData: FormData): Promise<void> {
   const me = await manager();
   if (!me) return;
-  const email = input.email.trim().toLowerCase();
-  if (!email) return;
+  const email = String(formData.get("email") ?? "").trim().toLowerCase();
+  const name = String(formData.get("name") ?? "").trim();
+  const role = cleanRole(String(formData.get("role") ?? "AGENT"));
+  const companyId = String(formData.get("companyId") ?? "");
+  // The row's CURRENT state, submitted with the form: granted -> remove, else add.
+  const on = String(formData.get("on") ?? "") === "1";
+  if (!email || !companyId) return;
   const db = getDb();
 
-  if (input.on) {
-    const role = cleanRole(input.role);
+  if (on) {
+    // Never let an admin remove their own access to the company they are in.
+    if (email === me.email.toLowerCase() && companyId === me.companyId) return;
+    // Only a manual grant (erp_user_id null) can be removed; the ERP owns its own.
+    await db
+      .update(member)
+      .set({ active: false })
+      .where(and(eq(member.companyId, companyId), eq(member.email, email), isNull(member.erpUserId)));
+  } else {
     await db
       .insert(member)
-      .values({ companyId: input.companyId, email, name: input.name || email, role })
+      .values({ companyId, email, name: name || email, role })
       .onConflictDoUpdate({
         target: [member.companyId, member.email],
         set: { active: true, role },
       });
-  } else {
-    // Never let an admin remove their own access to the company they are standing
-    // in — that is the one that would lock them out mid-action.
-    if (email === me.email.toLowerCase() && input.companyId === me.companyId) return;
-    // Only a manual grant (erp_user_id null) can be removed; the ERP owns its own
-    // grants.
-    await db
-      .update(member)
-      .set({ active: false })
-      .where(
-        and(
-          eq(member.companyId, input.companyId),
-          eq(member.email, email),
-          isNull(member.erpUserId)
-        )
-      );
   }
   revalidatePath("/settings/team");
   revalidatePath("/inbox");
 }
 
-export async function setPersonRole(input: { email: string; role: string }): Promise<void> {
+export async function setRoleForm(formData: FormData): Promise<void> {
   const me = await manager();
   if (!me) return;
-  const email = input.email.trim().toLowerCase();
-  const role = cleanRole(input.role);
+  const email = String(formData.get("email") ?? "").trim().toLowerCase();
+  const role = cleanRole(String(formData.get("role") ?? "AGENT"));
   if (!email) return;
   const db = getDb();
-  // Manual grants only — an ERP-synced member's role is the ERP's and is
-  // overwritten on their next sign-in anyway.
+  // Manual grants only — an ERP-synced member's role is the ERP's, overwritten on
+  // their next sign-in.
   await db
     .update(member)
     .set({ role })
