@@ -6,6 +6,7 @@ import { Topbar } from "@/components/Topbar";
 import { ConversationList } from "@/components/inbox/ConversationList";
 import { ConversationListSkeleton } from "@/components/inbox/ConversationListSkeleton";
 import { LiveRefresh } from "@/components/inbox/LiveRefresh";
+import { InboxPanes } from "@/components/inbox/InboxPanes";
 import { fetchConversations } from "./actions";
 
 /**
@@ -47,12 +48,15 @@ export default async function InboxLayout({
         current={me}
         companies={await companyChoices(getDb(), me)}
       />
-      <div className="flex min-h-0 flex-1">
-        <Suspense fallback={<ConversationListSkeleton />}>
-          <ConversationRail />
-        </Suspense>
-        <div className="flex min-w-0 flex-1">{children}</div>
-      </div>
+      <InboxPanes
+        rail={
+          <Suspense fallback={<ConversationListSkeleton />}>
+            <ConversationRail />
+          </Suspense>
+        }
+      >
+        {children}
+      </InboxPanes>
     </>
   );
 }
