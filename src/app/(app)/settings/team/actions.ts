@@ -15,6 +15,7 @@
 import { revalidatePath } from "next/cache";
 import { and, eq, isNull } from "drizzle-orm";
 import { getDb } from "@/db/client";
+import { bypassReadCache } from "@/db/fresh";
 import { company, member } from "@/db/schema";
 import { getCurrentMember } from "@/lib/current-member";
 
@@ -66,7 +67,10 @@ export async function fetchTeam(): Promise<TeamView> {
   const [companies, members, departments] = await Promise.all([
     db.query.company.findMany({
       columns: { id: true, name: true },
-      where: eq(company.active, true),
+      // Fresh (db/fresh.ts): a grant made a moment ago must show at once — without
+      // this Hyperdrive serves a stale snapshot for up to ~2 min, so a ticked box
+      // reverts and looks like nothing happened.
+      where: and(eq(company.active, true), bypassReadCache()),
       orderBy: (c, { asc }) => asc(c.createdAt),
     }),
     db.query.member.findMany({
@@ -81,8 +85,12 @@ export async function fetchTeam(): Promise<TeamView> {
         managerId: true,
         departmentId: true,
       },
+      where: bypassReadCache(),
     }),
-    db.query.department.findMany({ columns: { id: true, name: true } }),
+    db.query.department.findMany({
+      columns: { id: true, name: true },
+      where: bypassReadCache(),
+    }),
   ]);
 
   const deptName = new Map(departments.map((d) => [d.id, d.name]));
