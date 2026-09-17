@@ -12,6 +12,10 @@ import {
   deleteQuickReply,
   deleteTag,
 } from "./actions";
+import { grantAccess, revokeAccess, setMemberRole } from "./access-actions";
+
+/** Roles an admin may hand out in the access panel (OWNER is not grantable). */
+const ROLE_OPTIONS = ["ADMIN", "MANAGER", "AGENT", "SALES", "VIEWER", "DRIVER"] as const;
 
 const inputCls =
   "rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] px-3 py-2 text-[13px] text-[var(--color-ink)] outline-none focus:border-[var(--color-accent)]";
@@ -48,6 +52,7 @@ export default async function SettingsPage() {
   const me = await getCurrentMember();
   if (!me) notFound();
   const db = getDb();
+  const canManage = me.role === "OWNER" || me.role === "ADMIN";
 
   // Every one of these four was unfiltered, and the ERP org sync deliberately
   // fans one ERP user out to one member row PER GRANTED COMPANY — so the org
@@ -173,32 +178,99 @@ export default async function SettingsPage() {
           </form>
         </Card>
 
-        {/* Org chart (read-only — synced from ERP on login) */}
-        <Card title="Org chart & roles" subtitle="Synced from the Houzs ERP staff directory each time someone signs in.">
-          <table className="w-full text-left text-[13px]">
-            <thead>
-              <tr className="border-b border-[var(--color-border)] text-[11px] uppercase tracking-wide text-[var(--color-faint)]">
-                <th className="px-4 py-2.5 font-medium">Member</th>
-                <th className="px-4 py-2.5 font-medium">Role</th>
-                <th className="px-4 py-2.5 font-medium">Department</th>
-                <th className="px-4 py-2.5 font-medium">Reports to</th>
-              </tr>
-            </thead>
-            <tbody>
-              {members.map((m) => (
-                <tr key={m.id} className="border-b border-[var(--color-border)] last:border-0">
-                  <td className="px-4 py-2.5 font-medium text-[var(--color-ink)]">{m.name}</td>
-                  <td className="px-4 py-2.5">
-                    <span className="rounded-md bg-[var(--color-accent-soft)] px-2 py-0.5 text-[11px] font-medium text-[var(--color-accent-ink)]">
-                      {m.role}
-                    </span>
-                  </td>
-                  <td className="px-4 py-2.5 text-[var(--color-muted)]">{m.department?.name ?? "—"}</td>
-                  <td className="px-4 py-2.5 text-[var(--color-muted)]">{m.manager?.name ?? "—"}</td>
+        {/* Team & access — base roles from the ERP, plus manual grants for this
+            company (the only way into a Connect-only company like Hookka). */}
+        <Card
+          title="Team & access"
+          subtitle="Base roles sync from the Houzs ERP each sign-in. Grant or adjust access for THIS company below — e.g. a teammate who should handle Hookka. The email must be their Houzs ERP login."
+        >
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-[13px]">
+              <thead>
+                <tr className="border-b border-[var(--color-border)] text-[11px] uppercase tracking-wide text-[var(--color-faint)]">
+                  <th className="px-4 py-2.5 font-medium">Member</th>
+                  <th className="px-4 py-2.5 font-medium">Role</th>
+                  <th className="px-4 py-2.5 font-medium">Department</th>
+                  <th className="px-4 py-2.5 font-medium">Reports to</th>
+                  {canManage && <th className="px-4 py-2.5 font-medium">Access</th>}
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {members.map((m) => {
+                  const manual = m.erpUserId == null;
+                  const editable = canManage && manual && m.role !== "OWNER" && m.id !== me.id;
+                  return (
+                    <tr key={m.id} className="border-b border-[var(--color-border)] align-middle last:border-0">
+                      <td className="px-4 py-2.5">
+                        <span className="flex items-center gap-2 font-medium text-[var(--color-ink)]">
+                          {m.name}
+                          {manual && (
+                            <span className="rounded bg-[var(--color-surface-2)] px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-[var(--color-faint)]">
+                              Granted here
+                            </span>
+                          )}
+                        </span>
+                        <span className="block truncate font-mono text-[10.5px] text-[var(--color-faint)]">{m.email}</span>
+                      </td>
+                      <td className="px-4 py-2.5">
+                        {editable ? (
+                          <form action={setMemberRole} className="flex items-center gap-1.5">
+                            <input type="hidden" name="id" value={m.id} />
+                            <select name="role" defaultValue={m.role} className={`${inputCls} py-1`}>
+                              {ROLE_OPTIONS.map((r) => (
+                                <option key={r} value={r}>{r}</option>
+                              ))}
+                            </select>
+                            <button
+                              type="submit"
+                              className="rounded-md px-2 py-1 text-[11px] font-medium text-[var(--color-accent-ink)] transition-colors hover:bg-[var(--color-accent-soft)]"
+                            >
+                              Save
+                            </button>
+                          </form>
+                        ) : (
+                          <span className="rounded-md bg-[var(--color-accent-soft)] px-2 py-0.5 text-[11px] font-medium text-[var(--color-accent-ink)]">
+                            {m.role}
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-4 py-2.5 text-[var(--color-muted)]">{m.department?.name ?? "—"}</td>
+                      <td className="px-4 py-2.5 text-[var(--color-muted)]">{m.manager?.name ?? "—"}</td>
+                      {canManage && (
+                        <td className="px-4 py-2.5">
+                          {editable ? (
+                            <DeleteBtn action={revokeAccess} id={m.id} />
+                          ) : (
+                            <span className="text-[11px] text-[var(--color-faint)]">{manual ? "—" : "ERP"}</span>
+                          )}
+                        </td>
+                      )}
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          {canManage && (
+            <>
+              <form
+                action={grantAccess}
+                className="flex flex-wrap items-center gap-2 border-t border-[var(--color-border)] bg-[var(--color-surface-2)] px-4 py-3"
+              >
+                <input name="email" type="email" placeholder="teammate@houzscentury.com" required className={`${inputCls} min-w-0 flex-1`} />
+                <input name="name" placeholder="Name (optional)" className={`${inputCls} w-40`} />
+                <select name="role" defaultValue="AGENT" className={inputCls}>
+                  {ROLE_OPTIONS.map((r) => (
+                    <option key={r} value={r}>{r}</option>
+                  ))}
+                </select>
+                <button type="submit" className={addBtnCls}>Grant access</button>
+              </form>
+              <p className="border-t border-[var(--color-border)] px-4 py-2.5 text-[11px] text-[var(--color-faint)]">
+                ADMIN sees every chat in this company; AGENT sees only chats assigned to them. Access from the ERP still applies — this only adds to it.
+              </p>
+            </>
+          )}
         </Card>
       </div>
     </PageChrome>
