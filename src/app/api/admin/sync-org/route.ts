@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { getDb } from "@/db/client";
 import {
+  applyOrgHierarchy,
   applyOrgSync,
   ensureErpOrgColumns,
   fetchErpOrg,
@@ -67,6 +68,8 @@ export async function POST(req: NextRequest) {
     }
 
     const applied = await applyOrgSync(db, plan);
+    // Second pass: fill department + reports-to on the rows just written.
+    await applyOrgHierarchy(db, erp);
     return NextResponse.json({ ok: true, dryRun: false, applied });
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);

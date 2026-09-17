@@ -13,6 +13,7 @@ import {
   deleteTag,
 } from "./actions";
 import { grantAccess, revokeAccess, setMemberRole } from "./access-actions";
+import { syncFromErp } from "./sync-actions";
 
 /** Roles an admin may hand out in the access panel (OWNER is not grantable). */
 const ROLE_OPTIONS = ["ADMIN", "MANAGER", "AGENT", "SALES", "VIEWER", "DRIVER"] as const;
@@ -184,6 +185,22 @@ export default async function SettingsPage() {
           title="Team & access"
           subtitle="Base roles sync from the Houzs ERP each sign-in. Grant or adjust access for THIS company below — e.g. a teammate who should handle Hookka. The email must be their Houzs ERP login."
         >
+          {canManage && (
+            <form
+              action={syncFromErp}
+              className="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--color-border)] bg-[var(--color-surface-2)] px-4 py-2.5"
+            >
+              <span className="text-[11px] text-[var(--color-muted)]">
+                Pull the latest roles, departments and reporting from the Houzs ERP.
+              </span>
+              <button
+                type="submit"
+                className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-1.5 text-[12px] font-medium text-[var(--color-ink)] transition-colors hover:bg-[var(--color-surface-2)]"
+              >
+                Sync from ERP now
+              </button>
+            </form>
+          )}
           <div className="overflow-x-auto">
             <table className="w-full text-left text-[13px]">
               <thead>

@@ -19,7 +19,7 @@
 // assignments) — a user removed from the ERP is soft-deactivated (active=false).
 
 import { eq, sql } from "drizzle-orm";
-import { company, member } from "@/db/schema";
+import { company, department, member } from "@/db/schema";
 import { roleFromErp } from "@/lib/erp-auth";
 import type { DB } from "@/db/client";
 
@@ -35,7 +35,8 @@ export interface ErpCompany {
   name: string;
 }
 
-/** GET /api/users -> { users: [...] }. Rich row; we consume identity fields. */
+/** GET /api/users -> { users: [...] }. Rich row; we consume identity fields plus
+ *  the org-chart fields the handler already returns (department + manager). */
 export interface ErpUser {
   id: number;
   email: string;
@@ -43,6 +44,10 @@ export interface ErpUser {
   phone: string | null;
   status: string | null; // 'active' | 'invited' | 'disabled'
   role_name: string | null;
+  /** Org hierarchy, consumed by applyOrgHierarchy. Optional so older callers and
+   *  fixtures without them still type-check. */
+  department_name?: string | null;
+  manager_id?: number | null;
 }
 
 /** GET /api/users/:id/companies -> { companies: number[] } (granted company ids;
@@ -498,6 +503,95 @@ export async function applyOrgSync(db: DB, plan: OrgSyncPlan): Promise<AppliedCo
     membersUpdated: plan.members.update.length,
     membersDeactivated: plan.members.deactivate.length,
   };
+}
+
+/**
+ * Populate the org chart the base sync leaves blank: each synced member's
+ * department and who they report to. Kept OUT of the pure planner (and its
+ * apply) so that diff stays a companies + identities mirror — this is a second,
+ * idempotent pass over the rows applyOrgSync just wrote, run right after it.
+ *
+ *  - department: upsert one connect.department per (company, ERP department name)
+ *    and point member.department_id at it. The name is the ERP's; each company
+ *    keeps its own set, fanned out the same way members are.
+ *  - manager: member.manager_id is another member IN THE SAME COMPANY — the row
+ *    for the ERP manager, resolved only after every member exists (a manager may
+ *    sync after their report). A self-referential ERP loop is dropped.
+ *
+ * erp_user_id is the join key throughout, so only ERP-synced members are ever
+ * touched; manual grants (erp_user_id null, e.g. Hookka) keep what they have.
+ */
+export async function applyOrgHierarchy(db: DB, erp: ErpOrg): Promise<void> {
+  // (company, name) uniqueness makes the department upsert idempotent — bare
+  // ON CONFLICT needs a non-partial unique index (Postgres 42P10 otherwise).
+  await db.execute(
+    sql`CREATE UNIQUE INDEX IF NOT EXISTS "department_company_name_key" ON "connect"."department" ("company_id", "name")`
+  );
+
+  // NUL cannot appear in a company id, ERP name or number, so it is a safe key
+  // separator for the composite maps below.
+  const SEP = " ";
+
+  const companyRows = await db
+    .select({ id: company.id, erpCompanyId: company.erpCompanyId })
+    .from(company);
+  const connectCompanyByErp = new Map<number, string>();
+  for (const r of companyRows) if (r.erpCompanyId != null) connectCompanyByErp.set(r.erpCompanyId, r.id);
+
+  // ERP user -> its department name / manager (an ERP user id).
+  const deptOf = new Map<number, string | null>();
+  const mgrOf = new Map<number, number | null>();
+  for (const u of erp.users) {
+    deptOf.set(u.id, (u.department_name ?? "").trim() || null);
+    mgrOf.set(u.id, u.manager_id ?? null);
+  }
+
+  // The (connect company, department name) pairs we will need — one per company a
+  // user is granted, matching the base sync's fan-out.
+  const wanted = new Set<string>();
+  for (const u of erp.users) {
+    const name = deptOf.get(u.id);
+    if (!name) continue;
+    const grant = erp.grants[u.id];
+    const targetErp = grant && grant.length > 0 ? grant : erp.companies.map((c) => c.id);
+    for (const ec of targetErp) {
+      const cid = connectCompanyByErp.get(ec);
+      if (cid) wanted.add(`${cid}${SEP}${name}`);
+    }
+  }
+  for (const key of wanted) {
+    const idx = key.indexOf(SEP);
+    const companyId = key.slice(0, idx);
+    const name = key.slice(idx + 1);
+    await db
+      .insert(department)
+      .values({ companyId, name })
+      .onConflictDoNothing({ target: [department.companyId, department.name] });
+  }
+
+  const deptRows = await db
+    .select({ id: department.id, companyId: department.companyId, name: department.name })
+    .from(department);
+  const deptIdBy = new Map<string, string>();
+  for (const d of deptRows) deptIdBy.set(`${d.companyId}${SEP}${d.name.toLowerCase()}`, d.id);
+
+  const memRows = await db
+    .select({ id: member.id, companyId: member.companyId, erpUserId: member.erpUserId })
+    .from(member);
+  const memberByCompanyUser = new Map<string, string>();
+  for (const m of memRows) {
+    if (m.erpUserId != null) memberByCompanyUser.set(`${m.companyId}${SEP}${m.erpUserId}`, m.id);
+  }
+
+  for (const m of memRows) {
+    if (m.erpUserId == null) continue; // manual grants keep their own values
+    const name = deptOf.get(m.erpUserId) ?? null;
+    const departmentId = name ? deptIdBy.get(`${m.companyId}${SEP}${name.toLowerCase()}`) ?? null : null;
+    const erpMgr = mgrOf.get(m.erpUserId) ?? null;
+    const resolved = erpMgr ? memberByCompanyUser.get(`${m.companyId}${SEP}${erpMgr}`) ?? null : null;
+    const managerId = resolved === m.id ? null : resolved; // never your own manager
+    await db.update(member).set({ departmentId, managerId }).where(eq(member.id, m.id));
+  }
 }
 
 /** Small summary for the dry-run response (counts without the full row dump). */
