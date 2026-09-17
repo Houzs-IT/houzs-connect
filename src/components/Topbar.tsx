@@ -28,13 +28,13 @@ export function Topbar({
 }) {
   const here = companies?.find((c) => c.current);
   return (
-    <header className="flex h-16 shrink-0 items-center gap-4 border-b border-[var(--color-border)] bg-[var(--color-surface)] pl-16 pr-4 md:px-6">
+    <header className="flex h-16 shrink-0 items-center gap-2 border-b border-[var(--color-border)] bg-[var(--color-surface)] pl-14 pr-3 md:gap-4 md:px-6">
       <div className="min-w-0">
-        <h1 className="truncate text-[17px] font-semibold tracking-tight text-[var(--color-ink)]">
+        <h1 className="truncate text-[15px] font-semibold tracking-tight text-[var(--color-ink)] md:text-[17px]">
           {title}
         </h1>
         {subtitle && (
-          <p className="truncate text-xs text-[var(--color-muted)]">{subtitle}</p>
+          <p className="hidden truncate text-xs text-[var(--color-muted)] sm:block">{subtitle}</p>
         )}
       </div>
 
@@ -44,14 +44,14 @@ export function Topbar({
           is no global search to point it at, so it is gone rather than faked.
           Search lives where it works: the conversation rail, and the phone
           filter on Contacts. */}
-      <div className="ml-auto flex items-center gap-3">
+      <div className="ml-auto flex items-center gap-1.5 md:gap-3">
         {companies && companies.length > 1 && here && (
           // A <details> menu of plain forms: no client JavaScript, and each choice
           // is a POST the server re-checks against the same eligibility list.
           <details className="relative">
-            <summary className="flex cursor-pointer list-none items-center gap-2 rounded-lg border border-[var(--color-border)] px-3 py-2 text-[12px] font-medium text-[var(--color-ink)] transition-colors hover:bg-[var(--color-surface-2)]">
-              <span className="text-[var(--color-faint)]">Company</span>
-              <span>{here.name}</span>
+            <summary className="flex cursor-pointer list-none items-center gap-1.5 rounded-lg border border-[var(--color-border)] px-2.5 py-1.5 text-[12px] font-medium text-[var(--color-ink)] transition-colors hover:bg-[var(--color-surface-2)] md:gap-2 md:px-3 md:py-2">
+              <span className="hidden text-[var(--color-faint)] sm:inline">Company</span>
+              <span className="max-w-[92px] truncate md:max-w-none">{here.name}</span>
               <span aria-hidden className="text-[var(--color-faint)]">▾</span>
             </summary>
             <div className="absolute right-0 z-30 mt-1 min-w-48 overflow-hidden rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] py-1 shadow-lg">
@@ -71,9 +71,9 @@ export function Topbar({
             </div>
           </details>
         )}
-        <div className="flex items-center gap-2.5">
+        <div className="flex items-center gap-1.5 md:gap-2.5">
           <div
-            className="grid h-8 w-8 place-items-center rounded-full text-xs font-semibold text-white"
+            className="grid h-8 w-8 shrink-0 place-items-center rounded-full text-xs font-semibold text-white"
             style={{ background: tint(current.name) }}
           >
             {initials(current.name).toUpperCase()}
@@ -89,7 +89,7 @@ export function Topbar({
           <form action={logout}>
             <button
               type="submit"
-              className="rounded-lg border border-[var(--color-border)] px-3 py-2 text-[12px] font-medium text-[var(--color-muted)] transition-colors hover:bg-[var(--color-surface-2)] hover:text-[var(--color-ink)]"
+              className="rounded-lg border border-[var(--color-border)] px-2.5 py-1.5 text-[12px] font-medium text-[var(--color-muted)] transition-colors hover:bg-[var(--color-surface-2)] hover:text-[var(--color-ink)] md:px-3 md:py-2"
             >
               Sign out
             </button>
