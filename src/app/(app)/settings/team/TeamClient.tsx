@@ -89,7 +89,11 @@ export function TeamClient({
                         type="checkbox"
                         checked={on}
                         disabled={locked || pending}
-                        onChange={(e) => toggle(p, c.id, e.target.checked)}
+                        // Toggle from the known server state, not e.target.checked:
+                        // the box is controlled and driven by an async action, so
+                        // the event's checked value is unreliable and a revoke kept
+                        // re-sending "on".
+                        onChange={() => toggle(p, c.id, !on)}
                         aria-label={`${p.name} access to ${c.name}`}
                         title={
                           locked
