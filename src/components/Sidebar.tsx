@@ -47,6 +47,7 @@ const SECTIONS: { title: string; items: NavItem[] }[] = [
     items: [
       { href: "/logs", label: "System Logs", Icon: IconReceipt },
       { href: "/settings/numbers", label: "Phone Numbers", Icon: IconPhone },
+      { href: "/settings/team", label: "Team & access", Icon: IconContacts },
       { href: "/settings", label: "Settings", Icon: IconSettings },
     ],
   },
