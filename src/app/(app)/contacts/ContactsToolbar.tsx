@@ -5,7 +5,8 @@
 // refreshable, linkable, and it survives the revalidate after a block/unblock.
 // Only the Add panel needs state, hence the one client component.
 
-import { useState } from "react";
+import { useActionState, useEffect, useRef, useState } from "react";
+import { useFormStatus } from "react-dom";
 import Link from "next/link";
 import { addContact } from "./actions";
 import type { ImportField } from "./csv";
@@ -14,6 +15,21 @@ import { ImportContactsButton } from "./ImportContactsButton";
 const inputCls =
   "w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] px-2.5 py-1.5 text-[13px] text-[var(--color-ink)] outline-none placeholder:text-[var(--color-faint)] focus:border-[var(--color-accent)]";
 const labelCls = "mb-1 block text-[11px] text-[var(--color-muted)]";
+
+/** Its own component so useFormStatus reports this form's pending state — the
+ *  button disables and says "Saving…" so a slow save is never clicked twice. */
+function SaveButton() {
+  const { pending } = useFormStatus();
+  return (
+    <button
+      type="submit"
+      disabled={pending}
+      className="mt-3 rounded-lg bg-[var(--color-accent)] px-3 py-2 text-[13px] font-medium text-white transition-opacity disabled:opacity-60"
+    >
+      {pending ? "Saving…" : "Save contact"}
+    </button>
+  );
+}
 
 export function ContactsToolbar({
   q,
@@ -31,6 +47,13 @@ export function ContactsToolbar({
   tags: { id: string; name: string }[];
 }) {
   const [adding, setAdding] = useState(false);
+  const [addState, addAction] = useActionState(addContact, {});
+  const addFormRef = useRef<HTMLFormElement>(null);
+  // Clear the fields after a save so the next contact starts blank and the
+  // confirmation is obviously about the one just added.
+  useEffect(() => {
+    if (addState.ok) addFormRef.current?.reset();
+  }, [addState]);
 
   return (
     <div className="mb-4">
@@ -80,7 +103,8 @@ export function ContactsToolbar({
 
       {adding && (
         <form
-          action={addContact}
+          ref={addFormRef}
+          action={addAction}
           className="mt-3 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4"
         >
           <h3 className="mb-3 text-[13px] font-semibold text-[var(--color-ink)]">New contact</h3>
@@ -108,9 +132,19 @@ export function ContactsToolbar({
             Any format is fine — 011-1110 8822, +60 11-1110 8822 and 601111108822 all save as the
             same contact. An existing number is updated, not duplicated.
           </p>
-          <button className="mt-3 rounded-lg bg-[var(--color-accent)] px-3 py-2 text-[13px] font-medium text-white">
-            Save contact
-          </button>
+          <div className="mt-1 flex flex-wrap items-center gap-3">
+            <SaveButton />
+            {addState.ok && (
+              <span className="text-[12px] font-medium text-[var(--color-success)]">
+                Saved {addState.saved}.
+              </span>
+            )}
+            {addState.error && (
+              <span className="text-[12px] font-medium text-[var(--color-danger)]">
+                {addState.error}
+              </span>
+            )}
+          </div>
         </form>
       )}
     </div>

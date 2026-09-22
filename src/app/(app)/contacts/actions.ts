@@ -65,16 +65,29 @@ export async function normalisePhone(raw: string): Promise<string> {
   return d;
 }
 
-export async function addContact(formData: FormData): Promise<void> {
+/** Result of an add, so the form can confirm it worked (it saved silently before,
+ *  which read as "nothing happened" and got clicked again). Shaped for
+ *  useActionState: the first arg is the previous state. */
+export interface AddContactState {
+  ok?: boolean;
+  /** Who was just saved, for the confirmation line. */
+  saved?: string;
+  error?: string;
+}
+
+export async function addContact(
+  _prev: AddContactState,
+  formData: FormData
+): Promise<AddContactState> {
   const c = await ctx();
-  if (!c) return;
+  if (!c) return { error: "Your session has expired. Sign in again." };
   const rawPhone = String(formData.get("phone") ?? "").trim();
   const name = String(formData.get("name") ?? "").trim();
   const email = String(formData.get("email") ?? "").trim();
-  if (!rawPhone) return;
+  if (!rawPhone) return { error: "Enter a phone number." };
 
   const phone = await normalisePhone(rawPhone);
-  if (!phone) return;
+  if (!phone) return { error: "That does not look like a phone number." };
 
   await ensureContactColumns();
   await c.db
@@ -93,6 +106,7 @@ export async function addContact(formData: FormData): Promise<void> {
     });
 
   revalidatePath("/contacts");
+  return { ok: true, saved: name || phone };
 }
 
 /** Block / unblock — Seampify's "Mark as Block". */
