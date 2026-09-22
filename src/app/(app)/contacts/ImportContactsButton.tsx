@@ -68,6 +68,20 @@ function plural(n: number, one: string, many: string): string {
  * 128 MB Worker isolate, so a 4,000-row address book goes as twenty small
  * requests instead of one payload that has to be held whole at both ends.
  */
+/**
+ * The picked file as CSV text. A .csv is already text; a .xlsx is a zip of XML,
+ * so it is decoded to CSV with SheetJS — imported on demand (only when an Excel
+ * file is actually picked) so the CSV path carries none of that weight. Only the
+ * first sheet is read.
+ */
+async function fileToCsvText(file: File): Promise<string> {
+  if (!/\.xlsx?$/i.test(file.name)) return file.text();
+  const XLSX = await import("xlsx");
+  const wb = XLSX.read(await file.arrayBuffer(), { type: "array" });
+  const first = wb.SheetNames[0];
+  return first ? XLSX.utils.sheet_to_csv(wb.Sheets[first]) : "";
+}
+
 export function ImportContactsButton({
   fields,
   tags,
@@ -129,7 +143,7 @@ export function ImportContactsButton({
 
     let text = "";
     try {
-      text = await file.text();
+      text = await fileToCsvText(file);
     } catch {
       setNotice("That file could not be read.");
       return;
@@ -262,7 +276,7 @@ export function ImportContactsButton({
         >
           <div className="border-b border-[var(--color-border)] px-5 py-4">
             <h2 className="text-[14px] font-semibold text-[var(--color-ink)]">
-              Import contacts from a CSV
+              Import contacts from a CSV or Excel file
             </h2>
             <p className="mt-1 text-[11.5px] leading-relaxed text-[var(--color-faint)]">
               Every phone number goes through the same normaliser the rest of the CRM uses, so
@@ -275,11 +289,11 @@ export function ImportContactsButton({
             {/* ── Step 1: pick a file ─────────────────────────────── */}
             {records.length === 0 && (
               <div>
-                <label className={labelCls}>CSV file</label>
+                <label className={labelCls}>CSV or Excel file</label>
                 <input
                   key={nonce}
                   type="file"
-                  accept=".csv,text/csv"
+                  accept=".csv,text/csv,.xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"
                   onChange={(e) => void onPick(e.target.files?.[0] ?? null)}
                   className="block w-full text-[12.5px] text-[var(--color-muted)] file:mr-3 file:rounded-lg file:border file:border-[var(--color-border)] file:bg-[var(--color-surface-2)] file:px-3 file:py-1.5 file:text-[12.5px] file:font-medium file:text-[var(--color-ink)]"
                 />
@@ -294,7 +308,8 @@ export function ImportContactsButton({
                     upload. A bigger file should be split and imported in parts.
                   </p>
                   <p className="mt-2">
-                    Comma, semicolon and tab separated files are all detected. Quoted fields,
+                    Excel (.xlsx / .xls) is read directly — its first sheet is used. For a text
+                    file, comma, semicolon and tab separators are all detected; quoted fields,
                     commas and line breaks inside a quoted field, and Windows line endings are
                     handled. Blank lines are ignored. The first row is treated as the header.
                   </p>
