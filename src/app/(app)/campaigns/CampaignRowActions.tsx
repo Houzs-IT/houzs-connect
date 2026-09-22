@@ -121,7 +121,12 @@ export function DueSendButton({ id, name }: { id: string; name: string }) {
   async function send() {
     setBusy(true);
     setError(null);
-    const res = await sendCampaignNow({ campaignId: id, confirm: "SEND" });
+    // Chunked send (see sendCampaignNow) — loop until nothing remains so one
+    // request never runs the Worker out of budget mid-broadcast.
+    let res = await sendCampaignNow({ campaignId: id, confirm: "SEND" });
+    while (res.ok && (res.remaining ?? 0) > 0) {
+      res = await sendCampaignNow({ campaignId: id, confirm: "SEND" });
+    }
     setBusy(false);
     setArmed(false);
     if (!res.ok) return setError(res.error ?? "The send failed.");

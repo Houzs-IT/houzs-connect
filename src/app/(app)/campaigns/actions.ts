@@ -63,6 +63,13 @@ import {
 /** Statuses a campaign may still be edited, scheduled or sent from. */
 const EDITABLE = ["draft", "scheduled"];
 
+// Recipients sent per request. A whole broadcast in one request runs the Worker
+// out of its CPU/subrequest budget partway through (a 50-recipient send stalled
+// at ~32 on 2026-09-21), leaving the campaign stuck "sending" and the rest
+// unsent. So sendCampaignNow does one chunk and returns how many remain; the
+// caller loops. Kept well under where the single-request send died.
+const SEND_CHUNK = 20;
+
 /** Auth + company scope for every mutation below. Null when not signed in. */
 async function ctx() {
   const me = await getCurrentMember();
@@ -611,7 +618,12 @@ export async function sendCampaignNow(input: {
     return { ok: false, error: "Nobody in this audience can be messaged." };
   }
 
-  // Claim it. Nothing has been sent yet, so losing this race is harmless.
+  // Claim it. A draft/scheduled campaign starts sending; one already "sending" is
+  // THIS send resuming its next chunk. Anything else (completed/failed) is
+  // refused. The atomic status set means two operators cannot both start the same
+  // fresh campaign, and progress carried in stats.doneIds means a resume never
+  // re-sends what an earlier chunk already did.
+  const prevStats = (row.stats ?? null) as CampaignStats | null;
   const [claimed] = await c.db
     .update(campaignTable)
     .set({ status: "sending" })
@@ -619,17 +631,23 @@ export async function sendCampaignNow(input: {
       and(
         eq(campaignTable.id, row.id),
         eq(campaignTable.companyId, c.companyId),
-        inArray(campaignTable.status, EDITABLE)
+        inArray(campaignTable.status, [...EDITABLE, "sending"])
       )
     )
     .returning();
   if (!claimed) {
-    return { ok: false, error: "This campaign is already sending, or has already been sent." };
+    return { ok: false, error: "This campaign has already been sent — duplicate it to send again." };
   }
 
-  const startedAt = new Date().toISOString();
+  // Who is left, tracked by contact id so re-resolving the audience in a
+  // different order across chunks never re-sends or skips anyone.
+  const done = new Set(prevStats?.doneIds ?? []);
+  const pending = resolved.recipients.filter((p) => !done.has(p.id));
+  const batch = pending.slice(0, SEND_CHUNK);
+
+  const startedAt = prevStats?.startedAt ?? new Date().toISOString();
   const msgIds: string[] = [];
-  for (const person of resolved.recipients) {
+  for (const person of batch) {
     const { params } = resolveSendParams(spec.templateBody, varContext(person), ready.bindings);
     const convo = await getOrCreateConversation(row.channelId, person.id);
     // The body recorded on the message row is the RESOLVED template text, so the
@@ -641,29 +659,38 @@ export async function sendCampaignNow(input: {
       template: { name: spec.templateName, lang: ready.language, params },
     });
     if (msg) msgIds.push(msg.id);
+    // Mark ATTEMPTED (a refusal included) so a bad number is not retried next chunk.
+    done.add(person.id);
   }
 
   // `sendOutbound` marks a row FAILED when Meta gives back no message id, so
   // "sent" here means Meta accepted it — not merely that a row was written.
-  const failed = await countFailed(c.db, msgIds);
-  const sent = msgIds.length - failed;
+  const failedThis = await countFailed(c.db, msgIds);
+  const sentThis = msgIds.length - failedThis;
+  const sent = (prevStats?.sent ?? 0) + sentThis;
+  const failed = (prevStats?.failed ?? 0) + failedThis;
+  const remaining = pending.length - batch.length;
 
   const stats: CampaignStats = {
     total: resolved.matched,
     sent,
     startedAt,
-    finishedAt: new Date().toISOString(),
+    ...(remaining > 0 ? {} : { finishedAt: new Date().toISOString() }),
     ...(failed > 0 ? { failed } : {}),
     ...(resolved.blocked > 0 ? { skippedBlocked: resolved.blocked } : {}),
     ...(resolved.optedOut > 0 ? { skippedOptedOut: resolved.optedOut } : {}),
+    doneIds: [...done],
   };
 
   await c.db
     .update(campaignTable)
-    .set({ status: sent === 0 ? "failed" : "completed", stats })
+    .set({
+      status: remaining > 0 ? "sending" : sent === 0 ? "failed" : "completed",
+      stats,
+    })
     .where(eq(campaignTable.id, row.id));
 
   revalidatePath("/campaigns");
   revalidatePath("/inbox");
-  return { ok: true, sent, failed, recipients: resolved.recipients.length };
+  return { ok: true, sent, failed, recipients: resolved.recipients.length, remaining };
 }

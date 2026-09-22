@@ -182,6 +182,10 @@ export interface CampaignStats {
   startedAt?: string;
   finishedAt?: string;
   error?: string;
+  /** Contact ids already ATTEMPTED, so a send that runs in chunks (see
+   *  sendCampaignNow) never re-sends or skips anyone across requests. Internal
+   *  progress state, not shown in the UI. */
+  doneIds?: string[];
 }
 
 // ── Server action payloads ─────────────────────────────────────────────────
@@ -285,6 +289,8 @@ export interface SendResult {
   sent?: number;
   failed?: number;
   recipients?: number;
+  /** Recipients still unsent after this chunk. The caller loops while > 0. */
+  remaining?: number;
   error?: string;
 }
 

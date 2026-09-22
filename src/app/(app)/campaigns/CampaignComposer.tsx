@@ -262,7 +262,12 @@ export function CampaignComposer({
     if (!campaignId) return;
     setBusy(true);
     setError(null);
-    const res = await sendCampaignNow({ campaignId, confirm: "SEND" });
+    // The send runs in chunks (see sendCampaignNow) so one request never runs the
+    // Worker out of budget mid-broadcast; loop until nothing remains.
+    let res = await sendCampaignNow({ campaignId, confirm: "SEND" });
+    while (res.ok && (res.remaining ?? 0) > 0) {
+      res = await sendCampaignNow({ campaignId, confirm: "SEND" });
+    }
     setBusy(false);
     setSendArmed(false);
     if (!res.ok) return setError(res.error ?? "The send failed.");
