@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { and, asc, eq } from "drizzle-orm";
 import { getDb } from "@/db/client";
 import { contactField, conversation, department, member, tag } from "@/db/schema";
+import { MarkRead } from "@/components/inbox/MarkRead";
 import { Thread } from "@/components/inbox/Thread";
 import { Composer } from "@/components/inbox/Composer";
 import { ContactPanel } from "@/components/inbox/ContactPanel";
@@ -115,6 +116,8 @@ export default async function ConversationPage({
 
   return (
     <div className="flex min-w-0 flex-1">
+      {/* Opening a conversation clears its unread badge. */}
+      <MarkRead conversationId={convo.id} />
       {/* Center: thread */}
       <div className="flex min-w-0 flex-1 flex-col bg-[var(--color-canvas)]">
         <div className="flex h-14 shrink-0 items-center gap-3 border-b border-[var(--color-border)] bg-[var(--color-surface)] px-4 md:px-5">

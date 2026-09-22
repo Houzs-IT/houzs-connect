@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, gt } from "drizzle-orm";
 import { getCurrentMember } from "@/lib/current-member";
 import { getDb } from "@/db/client";
 import { contact, conversation, conversationMember, member } from "@/db/schema";
@@ -126,6 +126,25 @@ export async function markConversationUnread(formData: FormData) {
     .where(eq(conversation.id, conversationId));
   revalidatePath(`/inbox/${conversationId}`);
   revalidatePath("/inbox");
+}
+
+/**
+ * Clear the unread badge when a conversation is opened — standard inbox
+ * behaviour. Before this, unread only cleared on a reply, so a thread whose
+ * 24-hour window has closed (you cannot reply, only send a template) stayed
+ * marked unread forever after you read it. Only writes when there is something
+ * to clear, so re-opening an already-read thread is a no-op and never churns
+ * the rail.
+ */
+export async function markConversationRead(conversationId: string): Promise<void> {
+  const auth = await authorizeConversation(conversationId);
+  if (!auth) return;
+  const [changed] = await auth.db
+    .update(conversation)
+    .set({ unreadCount: 0 })
+    .where(and(eq(conversation.id, conversationId), gt(conversation.unreadCount, 0)))
+    .returning({ id: conversation.id });
+  if (changed) revalidatePath("/inbox");
 }
 
 /** Hand a conversation back to the shared queue. */
