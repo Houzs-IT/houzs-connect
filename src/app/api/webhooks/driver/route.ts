@@ -1,15 +1,23 @@
 import { NextRequest, NextResponse } from "next/server";
 import { handleDriverEvent, type DriverEventPayload } from "@/lib/automation/dispatch";
+import { requireConnectKey } from "@/lib/webhook-auth";
 
 /**
  * Driver app / TMS → Houzs Connect. A driver marking en-route / arrived / delivered
  * fires a DRIVER_EVENT automation (messages the customer) and bumps the TMS status.
  *
+ * Auth: shared secret in the `X-Connect-Key` header, checked against
+ * CONNECT_WEBHOOK_KEY (enforced only once that secret is set — see lib/webhook-auth).
+ *
  * Example:
- *   curl -X POST /api/webhooks/driver -H 'content-type: application/json' -d '{
+ *   curl -X POST /api/webhooks/driver -H 'content-type: application/json' \
+ *     -H 'x-connect-key: <secret>' -d '{
  *     "phone":"60127778888","event":"ARRIVED","driverName":"Ah Meng","carPlate":"WXY1234"}'
  */
 export async function POST(req: NextRequest) {
+  const denied = requireConnectKey(req);
+  if (denied) return denied;
+
   let body: DriverEventPayload;
   try {
     body = (await req.json()) as DriverEventPayload;
