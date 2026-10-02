@@ -69,6 +69,11 @@ export const CONTACT_FIELDS: { key: string; name: string; type: FieldType }[] = 
   { key: "got_amend_date", name: "Got Amend Date 1", type: "TEXT" },
   { key: "got_amend_date_2", name: "Got Amend Date 2", type: "TEXT" },
   { key: "got_amend_date_3", name: "Got Amend Date 3", type: "TEXT" },
+  // Houzs addition (not in Seampify): the delivery address shown in the
+  // hc_order_postage_confirm template for the customer to confirm. Already added
+  // to Houzs Century in prod 2026-10-02 via Settings > Contact fields; listed
+  // here so a fresh environment seeds it too.
+  { key: "delivery_address", name: "Delivery Address", type: "TEXT" },
 ];
 
 export type Role =
