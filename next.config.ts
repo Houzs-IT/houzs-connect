@@ -17,6 +17,22 @@ const nextConfig: NextConfig = {
     // cannot be held in memory no matter what this number says.
     serverActions: { bodySizeLimit: "20mb" },
   },
+  // Keep sharp out of the server file trace. On a Linux CI runner this one
+  // package turned "Collecting build traces" into an ~11-minute, ~2 GB crawl:
+  //
+  // - nft special-cases sharp: on reaching sharp/lib/index.js it globs every
+  //   package in sharp's optionalDependencies (@img/sharp-<platform>/**/*).
+  // - pnpm (11.x, Linux) links each optional platform package it skipped to
+  //   `../../../../..` — the repo root. So ~19 of those globs walk the whole
+  //   checkout, node_modules included (which contains the same links again).
+  //   Windows pnpm creates no such links, which is why it builds in ~1.5 min.
+  //
+  // Nothing is lost: next-server only reaches sharp for the image optimizer,
+  // which OpenNext no-ops, and OpenNext already drops node_modules/sharp and
+  // node_modules/@img when it copies traced files into the Worker bundle.
+  outputFileTracingExcludes: {
+    "*": ["**/node_modules/sharp/**", "**/node_modules/@img/**"],
+  },
 };
 
 export default nextConfig;
