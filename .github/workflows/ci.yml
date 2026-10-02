@@ -83,4 +83,8 @@ jobs:
         # (deploy — which needs the token — is NOT run here).
         env:
           CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE: "postgresql://user:pass@localhost:5432/placeholder"
+          # Next's "Collecting build traces" step takes ~11 min on the runner and
+          # peaks right at Node's default ~2 GB heap; it OOM'd on PR #37. 6 GB of
+          # the runner's 16 GB gives it room.
+          NODE_OPTIONS: "--max-old-space-size=6144"
         run: pnpm run cf:build
