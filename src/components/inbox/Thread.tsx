@@ -3,6 +3,7 @@ import { clockTime, stamp } from "@/lib/format";
 import { IconCheck } from "@/components/icons";
 import { isLive } from "@/lib/whatsapp/cloud-api";
 import { getDict, getLang } from "@/lib/i18n/server";
+import { fmt } from "@/lib/i18n/dict";
 import { demoTap } from "@/app/actions";
 
 /**
@@ -105,7 +106,16 @@ type Note = {
   createdAt: Date | string;
 };
 
-export type ThreadItem = Msg | Note;
+/** A flow milestone from automation_run — see lib/automation/progress.ts. */
+type FlowEvent = {
+  kind: "event";
+  id: string;
+  event: "started" | "waiting_button" | "waiting_text" | "waiting_delay" | "completed" | "paused";
+  name: string;
+  createdAt: Date | string;
+};
+
+export type ThreadItem = Msg | Note | FlowEvent;
 
 type Buttons = { kind?: string; buttons?: { id: string; label: string }[] };
 
@@ -129,6 +139,36 @@ export async function Thread({
         const prev = i > 0 ? items[i - 1] : null;
         const newDay = !prev || dayKey(prev.createdAt) !== dayKey(m.createdAt);
         const sep = newDay && <DaySeparator label={dayLabel(m.createdAt, s.today, s.yesterday, locale)} />;
+
+        if (m.kind === "event") {
+          const text = {
+            started: fmt(s.evStarted, { name: m.name }),
+            waiting_button: s.evWaitButton,
+            waiting_text: s.evWaitText,
+            waiting_delay: s.evWaitDelay,
+            completed: fmt(s.evCompleted, { name: m.name }),
+            paused: fmt(s.evPaused, { name: m.name }),
+          }[m.event];
+          return (
+            <Fragment key={`e-${m.id}`}>
+              {sep}
+              <div className="flex justify-center">
+                <span className="flex max-w-full items-center gap-1.5 rounded-full bg-[var(--color-surface-dim)] px-3 py-1 text-[11px] text-[var(--color-muted)]">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--color-accent)" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" className="shrink-0">
+                    <rect x="3" y="4" width="6" height="5" rx="1.5" />
+                    <rect x="15" y="15" width="6" height="5" rx="1.5" />
+                    <rect x="15" y="4" width="6" height="5" rx="1.5" />
+                    <path d="M6 9v3a2 2 0 0 0 2 2h7M18 9v6" />
+                  </svg>
+                  <span className="truncate">{text}</span>
+                  <span className="shrink-0 text-[var(--color-faint)]" title={stamp(m.createdAt)}>
+                    {clockTime(m.createdAt)}
+                  </span>
+                </span>
+              </div>
+            </Fragment>
+          );
+        }
 
         if (m.kind === "note") {
           return (

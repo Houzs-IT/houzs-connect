@@ -18,6 +18,7 @@ import { attrs, initials, stamp, tint, waIdentifier } from "@/lib/format";
 import { bypassReadCache } from "@/db/fresh";
 import { getDict } from "@/lib/i18n/server";
 import { SLA_MINUTES } from "@/lib/sla";
+import { getAutomationEvents, getAutomationProgress } from "@/lib/automation/progress";
 
 /**
  * How much of the thread is rendered. WhatsApp threads with a customer run for
@@ -122,6 +123,14 @@ export default async function ConversationPage({
     }))
     .sort((a, b) => a.name.localeCompare(b.name));
 
+  // Flow milestones since the oldest message on screen, and the customer's
+  // current flow for the panel — both read from automation_run.
+  const since = messages[0]?.createdAt ?? convo.createdAt;
+  const [automationEvents, automation] = await Promise.all([
+    getAutomationEvents(convo.contact.id, since),
+    getAutomationProgress(convo.contact.id),
+  ]);
+
   const items: ThreadItem[] = [
     ...messages.map((m) => ({
       ...m,
@@ -138,6 +147,13 @@ export default async function ConversationPage({
       body: n.body,
       author: memberNames.get(n.memberId) ?? null,
       createdAt: n.createdAt,
+    })),
+    ...automationEvents.map((e) => ({
+      kind: "event" as const,
+      id: e.id,
+      event: e.kind,
+      name: e.name,
+      createdAt: e.at,
     })),
   ].sort((x, y) => new Date(x.createdAt).getTime() - new Date(y.createdAt).getTime());
 
@@ -294,6 +310,7 @@ export default async function ConversationPage({
           status: p.status,
           createdAt: stamp(p.createdAt),
         }))}
+        automation={automation}
       />
     </div>
   );

@@ -425,7 +425,10 @@ export const automationRun = connect.table(
       .defaultNow()
       .$onUpdate(() => new Date()),
   },
-  (t) => ({ automationIdx: index("automation_run_automation_idx").on(t.automationId) })
+  (t) => ({
+    automationIdx: index("automation_run_automation_idx").on(t.automationId),
+    contactIdx: index("automation_run_contact_idx").on(t.contactId),
+  })
 );
 
 export const automationVersion = connect.table(

@@ -1,10 +1,10 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { and, desc, eq, gt } from "drizzle-orm";
+import { and, desc, eq, gt, isNotNull } from "drizzle-orm";
 import { getCurrentMember } from "@/lib/current-member";
 import { getDb } from "@/db/client";
-import { contact, conversation, conversationMember, member } from "@/db/schema";
+import { automationRun, contact, conversation, conversationMember, member } from "@/db/schema";
 import { ensureConversationMemberTable } from "@/db/ensure-conversation-member";
 import { conversationCompanyWhere, conversationVisibilityWhere, getVisibility } from "@/lib/access";
 import type { ConversationListItem } from "@/components/inbox/ConversationList";
@@ -283,4 +283,39 @@ export async function unassignConversation(formData: FormData) {
     .where(eq(conversation.id, conversationId));
   revalidatePath(`/inbox/${conversationId}`);
   revalidatePath("/inbox");
+}
+
+/**
+ * Pause or resume the customer's automation run from the Service panel.
+ *
+ * Paused is a status the engine already ignores: resumeRun only advances a
+ * `waiting` run, so a customer's reply to a paused flow goes to the agent
+ * instead of the bot. The dedupe in dispatch.ts counts `paused` as active, so
+ * the same flow does not simply start over on the next message. Resume puts
+ * the run back to `waiting` on the step it stopped at.
+ *
+ * Only a run that is parked on a step (cursor set) can be paused — a `running`
+ * run is mid-execution for a few milliseconds and has nothing to stop.
+ */
+export async function setAutomationRunPaused(formData: FormData) {
+  const conversationId = String(formData.get("conversationId") ?? "");
+  const runId = String(formData.get("runId") ?? "");
+  const pause = String(formData.get("pause") ?? "") === "1";
+  if (!runId) return;
+  const auth = await authorizeConversation(conversationId);
+  if (!auth) return;
+
+  // The run must belong to THIS conversation's customer.
+  await auth.db
+    .update(automationRun)
+    .set({ status: pause ? "paused" : "waiting" })
+    .where(
+      and(
+        eq(automationRun.id, runId),
+        eq(automationRun.contactId, auth.convo.contactId),
+        eq(automationRun.status, pause ? "waiting" : "paused"),
+        isNotNull(automationRun.cursorNodeId)
+      )
+    );
+  revalidatePath(`/inbox/${conversationId}`);
 }

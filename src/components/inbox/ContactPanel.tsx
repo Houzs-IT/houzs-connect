@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { initials, tint, waIdentifier } from "@/lib/format";
 import { fmt } from "@/lib/i18n/dict";
 import { getDict } from "@/lib/i18n/server";
@@ -10,9 +11,12 @@ import { SubmitSelect } from "./SubmitSelect";
 import {
   addChatMember,
   removeChatMember,
+  setAutomationRunPaused,
   setContactMarketingOptIn,
 } from "@/app/(app)/inbox/actions";
 import { assignConversation, toggleConversationTag } from "@/app/actions";
+import type { AutomationProgress } from "@/lib/automation/progress";
+import type { Dict } from "@/lib/i18n/dict";
 
 type Field = { key: string; name: string };
 type NamedColor = { id: string; name: string; color: string };
@@ -85,6 +89,7 @@ export async function ContactPanel({
   starred,
   firstReply,
   payments,
+  automation,
 }: {
   conversationId: string;
   contactName: string;
@@ -105,6 +110,7 @@ export async function ContactPanel({
   starred: boolean;
   firstReply: FirstReply;
   payments: Payment[];
+  automation: AutomationProgress | null;
 }) {
   const t = await getDict();
   const s = t.service;
@@ -203,6 +209,10 @@ export async function ContactPanel({
           </div>
         </div>
       </section>
+
+      {automation && (
+        <AutomationCard automation={automation} conversationId={conversationId} s={s} />
+      )}
 
       <section>
         <div className={`mb-2 ${EYEBROW}`}>{s.tags}</div>
@@ -388,5 +398,104 @@ export async function ContactPanel({
         ]}
       />
     </aside>
+  );
+}
+
+/**
+ * The customer's flow: name, how far along it is, each step, and Pause /
+ * Resume. Read from automation_run + the automation graph
+ * (lib/automation/progress.ts); nothing here is stored separately.
+ */
+function AutomationCard({
+  automation: a,
+  conversationId,
+  s,
+}: {
+  automation: AutomationProgress;
+  conversationId: string;
+  s: Dict["service"];
+}) {
+  const statusKey =
+    a.status === "waiting" && a.waitingFor ? `waiting_${a.waitingFor}` : a.status;
+  const tone =
+    a.status === "completed"
+      ? "success"
+      : a.status === "paused"
+        ? "neutral"
+        : a.status === "waiting"
+          ? "warning"
+          : "primary";
+  const canToggle = a.status === "waiting" || a.status === "paused";
+  return (
+    <section className="overflow-hidden rounded-[10px] border border-[var(--color-border)]">
+      <div className="flex items-center justify-between border-b border-[var(--color-border-subtle)] bg-[var(--color-surface-2)] px-3 py-2">
+        <span className={EYEBROW}>{s.automation}</span>
+        <Badge tone={tone}>{s.runStatus[statusKey] ?? a.status}</Badge>
+      </div>
+      <div className="flex flex-col gap-2 px-3 py-2.5">
+        <div className="text-[13px] font-semibold text-[var(--color-ink)]">{a.name}</div>
+        {a.steps.length > 0 && (
+          <div className="flex gap-[3px]">
+            {a.steps.map((st) => (
+              <span
+                key={st.id}
+                className={`h-1 flex-1 rounded-[2px] ${
+                  st.state === "todo" ? "bg-[var(--color-border)]" : "bg-[var(--color-accent)]"
+                }`}
+              />
+            ))}
+          </div>
+        )}
+        <div className="flex flex-col gap-[5px] text-[12px]">
+          {a.steps.map((st) => (
+            <div
+              key={st.id}
+              className={`flex items-center gap-2 ${
+                st.state === "todo" ? "text-[var(--color-faint)]" : "text-[var(--color-ink)]"
+              }`}
+            >
+              <span
+                className={`grid h-3.5 w-3.5 shrink-0 place-items-center rounded-full border-[1.5px] text-[8px] text-white ${
+                  st.state === "done"
+                    ? "border-[var(--color-accent)] bg-[var(--color-accent)]"
+                    : st.state === "current"
+                      ? "border-[var(--color-accent)] bg-[var(--color-surface)]"
+                      : "border-[var(--color-border-strong)] bg-[var(--color-surface)]"
+                }`}
+              >
+                {st.state === "done" ? "✓" : ""}
+              </span>
+              <span className={`min-w-0 truncate ${st.state === "current" ? "font-semibold" : ""}`} title={st.label}>
+                {st.label}
+              </span>
+            </div>
+          ))}
+        </div>
+        {a.status === "paused" && (
+          <p className="text-[11px] leading-snug text-[var(--color-faint)]">{s.pausedHint}</p>
+        )}
+        <div className="mt-0.5 flex items-center gap-1.5">
+          {canToggle && (
+            <form action={setAutomationRunPaused}>
+              <input type="hidden" name="conversationId" value={conversationId} />
+              <input type="hidden" name="runId" value={a.runId} />
+              <input type="hidden" name="pause" value={a.status === "paused" ? "0" : "1"} />
+              <button
+                type="submit"
+                className="rounded-[6px] border border-[var(--color-border)] px-2.5 py-1 text-[11.5px] font-medium text-[var(--color-muted)] transition-colors hover:border-[var(--color-border-strong)] hover:bg-[var(--color-surface-2)]"
+              >
+                {a.status === "paused" ? s.resume : s.pause}
+              </button>
+            </form>
+          )}
+          <Link
+            href={`/automations/${a.automationId}`}
+            className="rounded-[6px] px-2.5 py-1 text-[11.5px] font-medium text-[var(--color-accent)] hover:underline"
+          >
+            {s.openFlow}
+          </Link>
+        </div>
+      </div>
+    </section>
   );
 }

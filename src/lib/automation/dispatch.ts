@@ -352,7 +352,9 @@ export async function handleInboundMessage(
       where: and(
         eq(automationRunTable.automationId, a.id),
         eq(automationRunTable.contactId, contactId),
-        inArray(automationRunTable.status, ["running", "waiting"])
+        // A paused run (paused from the Service panel) still counts: pausing
+        // must not let the same flow start over on the next message.
+        inArray(automationRunTable.status, ["running", "waiting", "paused"])
       ),
     });
     if (active) continue;
@@ -392,7 +394,9 @@ export async function handleTagAdded(
       where: and(
         eq(automationRunTable.automationId, a.id),
         eq(automationRunTable.contactId, contactId),
-        inArray(automationRunTable.status, ["running", "waiting"])
+        // A paused run (paused from the Service panel) still counts: pausing
+        // must not let the same flow start over on the next message.
+        inArray(automationRunTable.status, ["running", "waiting", "paused"])
       ),
     });
     if (active) continue;
