@@ -10,18 +10,28 @@
 // write a reply that silently never arrives.
 
 import { useEffect, useState } from "react";
+import { fmt, type Dict } from "@/lib/i18n/dict";
+import { useShell } from "@/components/shell/ShellProvider";
 
-function remaining(expiresAt: Date | null): { label: string; open: boolean } {
-  if (!expiresAt) return { label: "no window", open: false };
+type Left = { open: false; none: boolean } | { open: true; h: number; m: number };
+
+function remaining(expiresAt: Date | null): Left {
+  if (!expiresAt) return { open: false, none: true };
   const ms = expiresAt.getTime() - Date.now();
-  if (ms <= 0) return { label: "window closed", open: false };
+  if (ms <= 0) return { open: false, none: false };
   const totalMinutes = Math.floor(ms / 60000);
-  const h = Math.floor(totalMinutes / 60);
-  const m = totalMinutes % 60;
-  return { label: h > 0 ? `${h}h ${m}m window` : `${m}m window`, open: true };
+  return { open: true, h: Math.floor(totalMinutes / 60), m: totalMinutes % 60 };
 }
 
-export function WindowTimer({ expiresAt }: { expiresAt: string | null }) {
+function label(left: Left, s: Dict["service"]): string {
+  if (!left.open) return left.none ? s.noWindow : s.windowClosed;
+  return left.h > 0 ? fmt(s.windowLeft, { h: left.h, m: left.m }) : fmt(s.windowLeftMin, { m: left.m });
+}
+
+/** `plain` drops the pill — the phone header shows it as a line of text. */
+export function WindowTimer({ expiresAt, plain = false }: { expiresAt: string | null; plain?: boolean }) {
+  const { t } = useShell();
+  const s = t.service;
   const parsed = expiresAt ? new Date(expiresAt) : null;
   const [state, setState] = useState(() => remaining(parsed));
 
@@ -34,20 +44,36 @@ export function WindowTimer({ expiresAt }: { expiresAt: string | null }) {
     return () => clearInterval(id);
   }, [expiresAt]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const text = label(state, s);
+  const title = state.open ? s.windowTip : s.windowClosedTip;
+
+  if (plain) {
+    return (
+      <span
+        suppressHydrationWarning
+        title={title}
+        className={`text-[11px] font-semibold ${state.open ? "text-[var(--color-success)]" : "text-[var(--color-danger)]"}`}
+      >
+        {text}
+      </span>
+    );
+  }
+
   return (
     <span
-      title={
+      suppressHydrationWarning
+      title={title}
+      className={`flex items-center gap-[5px] whitespace-nowrap rounded-full border px-2.5 py-1 text-[11px] font-semibold ${
         state.open
-          ? "Free-form replies are allowed until this expires. After that only an approved template can be sent."
-          : "Outside the 24-hour window — only an approved template message can be sent to this customer."
-      }
-      className={`rounded-full px-2.5 py-1 text-[11px] font-medium ${
-        state.open
-          ? "border border-[color-mix(in_srgb,var(--color-success)_35%,transparent)] bg-[color-mix(in_srgb,var(--color-success)_10%,transparent)] text-[var(--color-success)]"
-          : "border border-[color-mix(in_srgb,var(--color-danger)_35%,transparent)] bg-[color-mix(in_srgb,var(--color-danger)_10%,transparent)] text-[var(--color-danger)]"
+          ? "border-[rgba(47,138,91,0.35)] bg-[rgba(47,138,91,0.1)] text-[var(--color-success)]"
+          : "border-[rgba(178,58,58,0.35)] bg-[rgba(178,58,58,0.08)] text-[var(--color-danger)]"
       }`}
     >
-      {state.label}
+      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round">
+        <circle cx="12" cy="12" r="9" />
+        <path d="M12 7v5l3 2" />
+      </svg>
+      {text}
     </span>
   );
 }

@@ -9,6 +9,7 @@ import { ensureConversationMemberTable } from "@/db/ensure-conversation-member";
 import { conversationCompanyWhere, conversationVisibilityWhere, getVisibility } from "@/lib/access";
 import type { ConversationListItem } from "@/components/inbox/ConversationList";
 import { bypassReadCache } from "@/db/fresh";
+import { attrs } from "@/lib/format";
 
 /**
  * A signed-in member, and the conversation must be in THEIR company.
@@ -66,6 +67,10 @@ export async function fetchConversations(
   });
   const vis = getVisibility(me, allMembers);
 
+  // The watcher links are read below; on a deploy that lands before the
+  // migration the table may not exist yet (see ensure-conversation-member.ts).
+  await ensureConversationMemberTable(db).catch(() => {});
+
   // One row over the page size is how "is there anything older" gets answered
   // without a second COUNT over the same predicate.
   const rows = await db.query.conversation.findMany({
@@ -78,7 +83,9 @@ export async function fetchConversations(
     with: {
       contact: true,
       assignedAgent: true,
+      assignedDepartment: true,
       tagLinks: { with: { tag: true } },
+      memberLinks: { columns: { memberId: true } },
       messages: { orderBy: (m, { desc }) => desc(m.createdAt), limit: 1 },
     },
   });
@@ -88,6 +95,7 @@ export async function fetchConversations(
 
   const items = page.map((c) => {
     const latest = c.messages[0];
+    const a = attrs(c.contact.attributes);
     return {
       id: c.id,
       name: c.contact.name ?? c.contact.phone,
@@ -101,7 +109,16 @@ export async function fetchConversations(
       waitingSince:
         latest && latest.direction === "IN" ? latest.createdAt.toISOString() : null,
       agent: c.assignedAgent?.name ?? null,
-      tags: c.tagLinks.map((t) => ({ name: t.tag.name, color: t.tag.color })),
+      agentId: c.assignedAgentId,
+      departmentId: c.assignedDepartmentId,
+      department: c.assignedDepartment?.name ?? null,
+      tags: c.tagLinks.map((t) => ({ id: t.tag.id, name: t.tag.name, color: t.tag.color })),
+      watcherIds: c.memberLinks.map((l) => l.memberId),
+      // The ERP order event writes these onto the contact (api/webhooks/erp).
+      orderRef: a.ref_1 || null,
+      deliveryDate: a.delivery_date_1 || null,
+      starred: a.starred === "1",
+      lastType: latest?.type ?? null,
     };
   });
 

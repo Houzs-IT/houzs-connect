@@ -7,7 +7,9 @@ import { Topbar } from "@/components/Topbar";
 import { ConversationList } from "@/components/inbox/ConversationList";
 import { ConversationListSkeleton } from "@/components/inbox/ConversationListSkeleton";
 import { LiveRefresh } from "@/components/inbox/LiveRefresh";
-import { InboxPanes } from "@/components/inbox/InboxPanes";
+import { InboxPanes, InboxTopbarSlot } from "@/components/inbox/InboxPanes";
+import { ServiceMenu } from "@/components/inbox/ServiceMenu";
+import { SecondaryMenuSkeleton } from "@/components/shell/SecondaryMenu";
 import { fetchConversations } from "./actions";
 
 /**
@@ -28,7 +30,13 @@ async function ConversationRail() {
   if (!me) return null;
 
   const { items, hasMore } = await fetchConversations(0);
-  return <ConversationList items={items} hasMore={hasMore} />;
+  return (
+    <ConversationList
+      items={items}
+      hasMore={hasMore}
+      me={{ id: me.id, departmentId: me.departmentId }}
+    />
+  );
 }
 
 export default async function InboxLayout({
@@ -41,14 +49,22 @@ export default async function InboxLayout({
 
   const t = await getDict();
   return (
-    <div className="flex min-w-0 flex-1 flex-col">
+    <>
+      {/* Counts are their own queries; the rail and thread must not wait on them. */}
+      <Suspense fallback={<SecondaryMenuSkeleton title={t.nav.inbox} />}>
+        <ServiceMenu me={me} />
+      </Suspense>
+      <div className="flex min-w-0 flex-1 flex-col">
       {/* Poll for new customer messages — no WebSockets in this app yet. */}
       <LiveRefresh seconds={5} />
-      <Topbar
-        crumbs={[t.nav.inbox, t.page.allConversations]}
-        current={me}
-        companies={await companyChoices(getDb(), me)}
-      />
+      <InboxTopbarSlot>
+        <Topbar
+          crumbs={[t.nav.inbox, t.page.allConversations]}
+          mobileTitle={t.nav.inbox}
+          current={me}
+          companies={await companyChoices(getDb(), me)}
+        />
+      </InboxTopbarSlot>
       <InboxPanes
         rail={
           <Suspense fallback={<ConversationListSkeleton />}>
@@ -58,6 +74,7 @@ export default async function InboxLayout({
       >
         {children}
       </InboxPanes>
-    </div>
+      </div>
+    </>
   );
 }

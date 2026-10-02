@@ -6,6 +6,8 @@ import { IconPanelClose } from "../icons";
 import { useShell } from "./ShellProvider";
 
 export type MenuItem = {
+  /** A path, or a `?query` that filters the current page in place
+   *  (`"?"` = no filter). */
   href: string;
   label: string;
   count?: number | string;
@@ -20,6 +22,7 @@ export type MenuItem = {
 export type MenuGroup = { title?: string; items: MenuItem[] };
 
 function hrefActive(item: MenuItem, path: string, search: string) {
+  if (item.href.startsWith("?")) return search === item.href.slice(1);
   const [p, q] = item.href.split("?");
   if (q) return path === p && search === q; // a filter link: path AND query
   if (item.exact) return path === p;
@@ -83,7 +86,7 @@ export function SecondaryMenu({
               return (
                 <Link
                   key={item.href}
-                  href={item.href}
+                  href={item.href.startsWith("?") ? path + (item.href === "?" ? "" : item.href) : item.href}
                   aria-current={on ? "page" : undefined}
                   className={`flex items-center gap-2 rounded-[6px] px-2 py-1.5 text-[12.5px] transition-colors ${
                     on
@@ -113,6 +116,27 @@ export function SecondaryMenu({
       {footer && (
         <div className="border-t border-[var(--color-border)] px-4 py-3">{footer}</div>
       )}
+    </div>
+  );
+}
+
+/** Same footprint as SecondaryMenu while its data loads, so nothing shifts. */
+export function SecondaryMenuSkeleton({ title }: { title: string }) {
+  const { menuCollapsed } = useShell();
+  if (menuCollapsed) return <span data-secondary-menu hidden />;
+  return (
+    <div
+      data-secondary-menu
+      className="hidden w-[208px] shrink-0 flex-col border-r border-[var(--color-border)] bg-[var(--color-surface-2)] md:flex"
+    >
+      <div className="flex h-14 shrink-0 items-center border-b border-[var(--color-border)] pl-4 text-[15px] font-semibold tracking-[-0.01em] text-[var(--color-ink)]">
+        {title}
+      </div>
+      <div className="skeleton-stagger flex flex-col gap-2 px-4 py-4">
+        {Array.from({ length: 7 }, (_, i) => (
+          <div key={i} className="skeleton h-[14px] w-3/4" style={{ "--i": i } as React.CSSProperties} />
+        ))}
+      </div>
     </div>
   );
 }

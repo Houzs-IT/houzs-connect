@@ -1,9 +1,9 @@
 "use client";
 
-// The reply composer, with the "+" menu Seampify has: quick replies, templates,
-// attachments, emoji and contact cards. The one entry still disabled says what
-// it needs — a control that looks live and does nothing is worse than one that
-// admits it.
+// The reply composer. Reply / Private note on top; quick replies, templates,
+// attachments, emoji, voice notes and contact cards sit on the toolbar under
+// the text instead of behind a "+" menu. "Send buttons / Flows" is not offered:
+// Connect has no Flow builder, so there is nothing to send.
 
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { sendMessage, sendTemplateMessage, listQuickReplies, listSendableTemplates } from "@/app/actions";
@@ -13,7 +13,8 @@ import {
   sendContactCard,
   sendVoiceNote,
 } from "@/app/(app)/inbox/media-actions";
-import { IconPaperclip, IconSend } from "@/components/icons";
+import { IconBolt, IconContacts, IconForm, IconPaperclip, IconSend } from "@/components/icons";
+import { useShell } from "@/components/shell/ShellProvider";
 import { EmojiPicker } from "@/components/inbox/EmojiPicker";
 import {
   ATTACHMENT_ACCEPT,
@@ -50,9 +51,6 @@ interface ContactOption {
   phone: string;
   email: string | null;
 }
-
-/** The + menu entries that do something — `null` is the one still unbuilt. */
-type MenuAction = "attach" | "emoji" | "quick" | "contact" | "template" | null;
 
 /** What the composer will accept, spelled out for the operator up front. */
 const LIMITS_HINT = `JPEG or PNG up to ${formatBytes(
@@ -115,7 +113,6 @@ export function Composer({
     return () => clearInterval(id);
   }, [windowExpiresAt]);
   const [kind, setKind] = useState<"reply" | "note">("reply");
-  const [menuOpen, setMenuOpen] = useState(false);
   const [panel, setPanel] = useState<
     null | "quick" | "template" | "emoji" | "attach" | "contact" | "voice"
   >(null);
@@ -138,6 +135,8 @@ export function Composer({
   const textRef = useRef<HTMLTextAreaElement>(null);
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const note = kind === "note";
+  const { t } = useShell();
+  const s = t.service;
 
   // ── Voice notes ────────────────────────────────────────────────────────────
   const voiceSupport = useSyncExternalStore(
@@ -160,7 +159,6 @@ export function Composer({
   const clipUrlRef = useRef<string | null>(null);
 
   async function openQuick() {
-    setMenuOpen(false);
     setPanel("quick");
     if (quickReplies.length === 0) {
       setLoading(true);
@@ -170,7 +168,6 @@ export function Composer({
   }
 
   async function openTemplates() {
-    setMenuOpen(false);
     setPanel("template");
     if (templates.length === 0) {
       setLoading(true);
@@ -182,7 +179,6 @@ export function Composer({
   // ── Attachments ────────────────────────────────────────────────────────────
 
   function openAttachment() {
-    setMenuOpen(false);
     setError(null);
     setFile(null);
     setCaption("");
@@ -443,7 +439,6 @@ export function Composer({
   }
 
   async function openContacts() {
-    setMenuOpen(false);
     setPanel("contact");
     setError(null);
     if (contacts.length === 0 && !contactQuery) await loadContacts("");
@@ -472,55 +467,8 @@ export function Composer({
     setPanel(null);
   }
 
-  /**
-   * The + menu is DATA ONLY — ids and labels, no handlers.
-   *
-   * Handlers used to live on these objects, but `openAttachment` reads a ref
-   * (the hidden file input), which taints the array as ref-derived; iterating it
-   * in render is then a react-hooks/refs error. Dispatching by id keeps the
-   * rendered value plain strings.
-   */
-  const menuItems: {
-    id: MenuAction;
-    label: string;
-    hint: string | null;
-    /** Why a disabled entry is disabled — shown on hover, not just implied. */
-    why: string | null;
-  }[] = [
-    { id: "attach", label: "Attachments", hint: null, why: null },
-    { id: "emoji", label: "Emoji", hint: null, why: null },
-    { id: "quick", label: "Quick Reply", hint: null, why: null },
-    { id: "contact", label: "Send Contact", hint: null, why: null },
-    { id: "template", label: "Send Template Message", hint: null, why: null },
-    {
-      id: null,
-      label: "Send Buttons / Flows",
-      hint: "needs a Flow builder",
-      why: "Not available yet. Interactive buttons and WhatsApp Flows have to be built and submitted to Meta first, and Connect has no Flow builder — so there is nothing to send.",
-    },
-  ];
-
-  function onMenuSelect(id: MenuAction) {
-    switch (id) {
-      case "attach":
-        return openAttachment();
-      case "emoji":
-        setMenuOpen(false);
-        setPanel("emoji");
-        return;
-      case "quick":
-        return void openQuick();
-      case "contact":
-        return void openContacts();
-      case "template":
-        return void openTemplates();
-      default:
-        return;
-    }
-  }
-
   return (
-    <div className="relative shrink-0 border-t border-[var(--color-border)] bg-[var(--color-surface)] px-4 pb-4 pt-3">
+    <div className="relative shrink-0 border-t border-[var(--color-border)] bg-[var(--color-surface)] px-3 pb-3.5 pt-2.5 md:px-4">
       {/* ── Quick replies ── */}
       {panel === "quick" && (
         <Panel title="Quick replies" onClose={() => setPanel(null)}>
@@ -841,62 +789,10 @@ export function Composer({
         className="hidden"
       />
 
-      {/* ── + menu ── */}
-      {menuOpen && (
-        <>
-          <div className="fixed inset-0 z-10" onClick={() => setMenuOpen(false)} />
-          <div className="absolute bottom-[68px] left-4 z-20 w-64 overflow-hidden rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] shadow-card">
-            {menuItems.map((m) => (
-              <button
-                key={m.label}
-                type="button"
-                disabled={!m.id}
-                title={m.why ?? undefined}
-                onClick={() => onMenuSelect(m.id)}
-                className="flex w-full items-center justify-between gap-2 px-3 py-2.5 text-left text-[13px] text-[var(--color-ink)] hover:bg-[var(--color-surface-2)] disabled:cursor-not-allowed disabled:text-[var(--color-faint)] disabled:hover:bg-transparent"
-              >
-                {m.label}
-                {m.hint && <span className="text-[10.5px] text-[var(--color-faint)]">{m.hint}</span>}
-              </button>
-            ))}
-          </div>
-        </>
-      )}
-
-      <div className="mb-2 flex items-center gap-4 text-[12.5px] font-medium">
-        {/* type="button" is load-bearing: these sit a few lines above a real
-            <form>, and an untyped <button> defaults to submit. */}
-        <button
-          type="button"
-          onClick={() => setKind("reply")}
-          className={`border-b-2 pb-1 transition-colors ${
-            !note
-              ? "border-[var(--color-accent)] text-[var(--color-ink)]"
-              : "border-transparent text-[var(--color-muted)]"
-          }`}
-        >
-          Reply
-        </button>
-        <button
-          type="button"
-          onClick={() => setKind("note")}
-          className={`border-b-2 pb-1 transition-colors ${
-            note
-              ? "border-[var(--color-accent)] text-[var(--color-ink)]"
-              : "border-transparent text-[var(--color-muted)]"
-          }`}
-        >
-          Private note
-        </button>
-      </div>
-
       {/* An internal note is ours, so the window never applies to it. */}
       {!windowOpen && !note && (
-        <div className="mb-2 rounded-lg border border-[color-mix(in_srgb,var(--color-warning)_40%,transparent)] bg-[color-mix(in_srgb,var(--color-warning)_8%,transparent)] px-3 py-2 text-[12px] leading-relaxed text-[var(--color-ink)]">
-          <strong>The 24-hour reply window is closed.</strong> WhatsApp will
-          refuse a typed message to this customer — it would look sent here and
-          never arrive. Use <em>+ → Send Template Message</em>, or wait for them
-          to write to you, which reopens the window for 24 hours.
+        <div className="mb-2 rounded-[8px] border border-[rgba(110,77,18,0.35)] bg-[var(--color-warning-soft)] px-3 py-2 text-[12px] leading-relaxed text-[var(--color-ink)]">
+          {s.closedBanner}
         </div>
       )}
 
@@ -907,31 +803,42 @@ export function Composer({
           setDraft("");
           formRef.current?.reset();
         }}
-        className={`flex items-end gap-2 rounded-xl border px-3 py-2 ${
+        className={`flex flex-col rounded-[12px] border shadow-card ${
           note
-            ? "border-[color-mix(in_srgb,var(--color-accent)_45%,transparent)] bg-[var(--color-accent-soft)]/40"
-            : "border-[var(--color-border)] bg-[var(--color-surface-2)]"
+            ? "border-[rgba(110,77,18,0.4)] bg-[color-mix(in_srgb,var(--color-warning-soft)_55%,white)]"
+            : "border-[var(--color-border-strong)] bg-[var(--color-surface)]"
         }`}
       >
         <input type="hidden" name="conversationId" value={conversationId} />
         <input type="hidden" name="kind" value={kind} />
-        <button
-          type="button"
-          onClick={() => setMenuOpen((o) => !o)}
-          aria-label="More"
-          className="grid h-7 w-7 place-items-center rounded-full text-[var(--color-muted)] transition-colors hover:bg-[var(--color-surface)] hover:text-[var(--color-ink)]"
-        >
-          <IconPaperclip width={16} height={16} />
-        </button>
+
+        {/* type="button" is load-bearing: inside a form an untyped button
+            defaults to submit. */}
+        <div className="flex items-center gap-4 px-3 pt-2 text-[12px] font-semibold">
+          {(["reply", "note"] as const).map((k) => (
+            <button
+              key={k}
+              type="button"
+              onClick={() => setKind(k)}
+              className={`border-b-2 pb-[5px] transition-colors ${
+                kind === k
+                  ? `${k === "note" ? "border-[var(--color-warning)]" : "border-[var(--color-accent)]"} text-[var(--color-ink)]`
+                  : "border-transparent text-[var(--color-faint)] hover:text-[var(--color-ink)]"
+              }`}
+            >
+              {k === "reply" ? s.reply : s.note}
+            </button>
+          ))}
+        </div>
+
         <textarea
           ref={textRef}
           name="body"
-          rows={1}
+          rows={2}
           value={draft}
           onChange={(e) => {
             const v = e.target.value;
-            // "/" on an empty composer opens quick replies — the shortcut the
-            // placeholder has always advertised and never implemented.
+            // "/" on an empty composer opens quick replies.
             if (v === "/") {
               setDraft("");
               void openQuick();
@@ -940,14 +847,8 @@ export function Composer({
             setDraft(v);
           }}
           disabled={!windowOpen && !note}
-          placeholder={
-            note
-              ? "Write an internal note (not sent to customer)…"
-              : windowOpen
-                ? "Type a message · / for quick replies"
-                : "Reply window closed — send an approved template instead"
-          }
-          className="max-h-32 min-h-[24px] flex-1 resize-none bg-transparent py-1 text-[13.5px] text-[var(--color-ink)] outline-none placeholder:text-[var(--color-faint)]"
+          placeholder={note ? s.noteMsg : windowOpen ? s.typeMsg : s.closedMsg}
+          className="max-h-40 min-h-[42px] resize-none bg-transparent px-3 pb-1 pt-2 text-[13.5px] text-[var(--color-ink)] outline-none placeholder:text-[var(--color-faint)] disabled:cursor-not-allowed"
           onKeyDown={(e) => {
             if (e.key === "Enter" && !e.shiftKey) {
               e.preventDefault();
@@ -955,40 +856,44 @@ export function Composer({
             }
           }}
         />
-        {/* Seampify's microphone. type="button" again — it sits inside the
-            message form and an untyped button would submit it. */}
-        <button
-          type="button"
-          onClick={() => (voiceState === "recording" ? stopVoice() : void startVoice())}
-          disabled={!!voiceBlocked || busy}
-          aria-label={voiceState === "recording" ? "Stop recording" : "Record a voice note"}
-          title={
-            voiceBlocked ??
-            (voiceState === "recording"
-              ? `Stop recording (${MAX_VOICE_SECONDS / 60} minutes maximum)`
-              : "Record a voice note")
-          }
-          className={`grid h-9 w-9 shrink-0 place-items-center rounded-lg transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
-            voiceState === "recording"
-              ? "animate-pulse bg-[var(--color-danger)] text-white"
-              : "text-[var(--color-muted)] hover:bg-[var(--color-surface)] hover:text-[var(--color-ink)]"
-          }`}
-        >
-          <IconMic width={17} height={17} />
-        </button>
-        <button
-          type="submit"
-          disabled={!windowOpen && !note}
-          title={
-            !windowOpen && !note
-              ? "The 24-hour reply window is closed — WhatsApp would refuse this message."
-              : "Send"
-          }
-          className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-[var(--color-accent)] text-white transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
-          aria-label="Send"
-        >
-          <IconSend width={17} height={17} />
-        </button>
+
+        <div className="flex items-center gap-0.5 border-t border-[var(--color-border-subtle)] px-2 py-1.5">
+          <Tool label={s.tQuick} onClick={() => void openQuick()} showText>
+            <IconBolt width={15} height={15} />
+          </Tool>
+          <Tool label={s.tTpl} onClick={() => void openTemplates()} disabled={note} showText>
+            <IconForm width={15} height={15} />
+          </Tool>
+          <Tool label={s.tAttach} onClick={openAttachment} disabled={note}>
+            <IconPaperclip width={15} height={15} />
+          </Tool>
+          <Tool label={s.tEmoji} onClick={() => setPanel(panel === "emoji" ? null : "emoji")}>
+            <IconSmile width={15} height={15} />
+          </Tool>
+          {/* Recording toggles in place; the review panel opens once stopped. */}
+          <Tool
+            label={s.tVoice}
+            title={voiceBlocked ?? undefined}
+            onClick={() => (voiceState === "recording" ? stopVoice() : void startVoice())}
+            disabled={!!voiceBlocked || busy}
+            danger={voiceState === "recording"}
+          >
+            <IconMic width={15} height={15} />
+          </Tool>
+          <Tool label={s.tContact} onClick={() => void openContacts()} disabled={note}>
+            <IconContacts width={15} height={15} />
+          </Tool>
+
+          <button
+            type="submit"
+            disabled={!windowOpen && !note}
+            title={!windowOpen && !note ? s.closedMsg : undefined}
+            className="ml-auto flex h-8 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-[8px] bg-[var(--color-accent)] px-3 text-[12.5px] font-semibold text-white shadow-[var(--shadow-primary)] transition-colors hover:bg-[var(--color-accent-hi)] disabled:cursor-not-allowed disabled:opacity-40 disabled:shadow-none"
+          >
+            <IconSend width={14} height={14} />
+            {s.send}
+          </button>
+        </div>
       </form>
     </div>
   );
@@ -1055,5 +960,51 @@ function Problem({ children }: { children: React.ReactNode }) {
     <p className="mb-2 rounded-lg bg-[color-mix(in_srgb,#dc2626_10%,transparent)] px-2.5 py-2 text-[12px] leading-relaxed text-[#b91c1c]">
       {children}
     </p>
+  );
+}
+
+/** One toolbar control; `showText` adds the label beside the icon. */
+function Tool({
+  label,
+  title,
+  onClick,
+  disabled = false,
+  danger = false,
+  showText = false,
+  children,
+}: {
+  label: string;
+  title?: string;
+  onClick: () => void;
+  disabled?: boolean;
+  danger?: boolean;
+  showText?: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      aria-label={label}
+      title={title ?? label}
+      className={`flex h-[30px] shrink-0 items-center gap-[5px] whitespace-nowrap rounded-[6px] px-2 text-[12px] font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
+        danger
+          ? "animate-pulse bg-[var(--color-danger)] text-white"
+          : "text-[var(--color-muted)] hover:bg-[var(--color-surface-2)] hover:text-[var(--color-ink)]"
+      }`}
+    >
+      {children}
+      {showText && <span className="hidden sm:inline">{label}</span>}
+    </button>
+  );
+}
+
+function IconSmile(p: React.SVGProps<SVGSVGElement>) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" {...p}>
+      <circle cx="12" cy="12" r="9" />
+      <path d="M8 14s1.5 2 4 2 4-2 4-2M9 9h.01M15 9h.01" />
+    </svg>
   );
 }

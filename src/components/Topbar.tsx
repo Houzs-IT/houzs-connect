@@ -17,10 +17,13 @@ export type Crumb = string | { label: string; href: string };
  */
 export function Topbar({
   crumbs,
+  mobileTitle,
   current,
   companies,
 }: {
   crumbs: Crumb[];
+  /** Phone title; defaults to the last crumb. */
+  mobileTitle?: string;
   current: { name: string; role: string; department?: { name: string } | null };
   /** Companies this person may work in (src/lib/companies.ts). The switcher
    *  only appears when there is somewhere else to go. */
@@ -33,7 +36,7 @@ export function Topbar({
       <MenuExpandButton />
 
       <h1 className="truncate text-[17px] font-semibold tracking-tight text-[var(--color-ink)] md:hidden">
-        {lastLabel}
+        {mobileTitle ?? lastLabel}
       </h1>
       <nav aria-label="Breadcrumb" className="hidden min-w-0 items-center gap-2 text-[13px] md:flex">
         {crumbs.map((c, i) => {
