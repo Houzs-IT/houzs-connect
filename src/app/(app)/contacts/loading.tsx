@@ -11,7 +11,7 @@ import { PageSkeleton, Skel, TableSkeleton } from "@/components/skeleton";
  */
 export default function ContactsLoading() {
   return (
-    <PageSkeleton title="Contacts">
+    <PageSkeleton section="contacts" page="allContacts">
       <div className="p-6">
         <div className="mb-4 flex items-center gap-2">
           <Skel className="h-[34px] w-[248px] rounded-lg" />

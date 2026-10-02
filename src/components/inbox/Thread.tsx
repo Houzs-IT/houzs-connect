@@ -2,6 +2,8 @@ import { Fragment } from "react";
 import { clockTime, stamp } from "@/lib/format";
 import { IconCheck } from "@/components/icons";
 import { isLive } from "@/lib/whatsapp/cloud-api";
+import { getDict, getLang } from "@/lib/i18n/server";
+import { fmt } from "@/lib/i18n/dict";
 import { demoTap } from "@/app/actions";
 
 /**
@@ -19,14 +21,14 @@ function dayKey(d: Date | string): string {
   return date.toLocaleDateString("en-CA", { timeZone: TZ });
 }
 
-function dayLabel(d: Date | string): string {
+function dayLabel(d: Date | string, today: string, yesterday: string, locale: string): string {
   const key = dayKey(d);
   const now = Date.now();
-  if (key === dayKey(new Date(now))) return "Today";
+  if (key === dayKey(new Date(now))) return today;
   // Malaysia has no DST, so a day back is exactly 24 hours back.
-  if (key === dayKey(new Date(now - 86_400_000))) return "Yesterday";
+  if (key === dayKey(new Date(now - 86_400_000))) return yesterday;
   const date = typeof d === "string" ? new Date(d) : d;
-  return date.toLocaleDateString("en-GB", {
+  return date.toLocaleDateString(locale, {
     weekday: "short",
     day: "2-digit",
     month: "short",
@@ -37,7 +39,7 @@ function dayLabel(d: Date | string): string {
 
 function DaySeparator({ label }: { label: string }) {
   return (
-    <div className="my-1.5 flex items-center gap-3">
+    <div className="my-1 flex items-center gap-3">
       <span className="h-px flex-1 bg-[var(--color-border)]" />
       <span className="rounded-full border border-[var(--color-border)] bg-[var(--color-surface)] px-2.5 py-0.5 text-[10.5px] font-medium text-[var(--color-muted)]">
         {label}
@@ -49,9 +51,8 @@ function DaySeparator({ label }: { label: string }) {
 
 /**
  * What Meta says happened to an outbound message — the tick every WhatsApp user
- * already reads without being taught. This used to be a single grey check on
- * every outbound message regardless of status, so a FAILED send looked exactly
- * like a delivered one.
+ * already reads without being taught. A FAILED send must never look like a
+ * delivered one.
  */
 function DeliveryState({ status }: { status: string }) {
   if (status === "FAILED") {
@@ -61,17 +62,12 @@ function DeliveryState({ status }: { status: string }) {
       </span>
     );
   }
-  if (status === "READ") {
+  if (status === "READ" || status === "DELIVERED") {
     return (
-      <span title="Read by the customer" className="flex text-[var(--color-info,#3b82f6)]">
-        <IconCheck width={12} height={12} />
-        <IconCheck width={12} height={12} className="-ml-[7px]" />
-      </span>
-    );
-  }
-  if (status === "DELIVERED") {
-    return (
-      <span title="Delivered to the customer's phone" className="flex">
+      <span
+        title={status === "READ" ? "Read by the customer" : "Delivered to the customer's phone"}
+        className={`flex ${status === "READ" ? "text-[var(--color-accent)]" : ""}`}
+      >
         <IconCheck width={12} height={12} />
         <IconCheck width={12} height={12} className="-ml-[7px]" />
       </span>
@@ -81,13 +77,14 @@ function DeliveryState({ status }: { status: string }) {
     return <span title="Waiting to be sent">·</span>;
   }
   return (
-    <span title="Sent to WhatsApp">
+    <span title="Sent to WhatsApp" className="flex">
       <IconCheck width={12} height={12} />
     </span>
   );
 }
 
 type Msg = {
+  kind: "message";
   id: string;
   direction: string;
   type: string;
@@ -100,59 +97,119 @@ type Msg = {
   senderName?: string | null;
 };
 
+/** An internal note: written in the composer's "Private note" tab, never sent. */
+type Note = {
+  kind: "note";
+  id: string;
+  body: string;
+  author: string | null;
+  createdAt: Date | string;
+};
+
+/** A flow milestone from automation_run — see lib/automation/progress.ts. */
+type FlowEvent = {
+  kind: "event";
+  id: string;
+  event: "started" | "waiting_button" | "waiting_text" | "waiting_delay" | "completed" | "paused";
+  name: string;
+  createdAt: Date | string;
+};
+
+export type ThreadItem = Msg | Note | FlowEvent;
+
 type Buttons = { kind?: string; buttons?: { id: string; label: string }[] };
 
-export function Thread({
-  messages,
+export async function Thread({
+  items,
   conversationId,
 }: {
-  messages: Msg[];
-  contactName: string;
+  items: ThreadItem[];
   conversationId: string;
 }) {
   // Server component, so this reads the Worker's env directly — no prop drilling
   // and no way for the client to disagree with it.
   const live = isLive();
+  const t = await getDict();
+  const s = t.service;
+  const locale = (await getLang()) === "zh" ? "zh-CN" : "en-GB";
+
   return (
-    <div className="scroll-thin flex min-h-0 flex-1 flex-col gap-2.5 overflow-y-auto px-6 py-6">
-      {messages.map((m, i) => {
+    <div className="scroll-thin flex min-h-0 flex-1 flex-col gap-2.5 overflow-y-auto px-4 py-5 md:px-6">
+      {items.map((m, i) => {
+        const prev = i > 0 ? items[i - 1] : null;
+        const newDay = !prev || dayKey(prev.createdAt) !== dayKey(m.createdAt);
+        const sep = newDay && <DaySeparator label={dayLabel(m.createdAt, s.today, s.yesterday, locale)} />;
+
+        if (m.kind === "event") {
+          const text = {
+            started: fmt(s.evStarted, { name: m.name }),
+            waiting_button: s.evWaitButton,
+            waiting_text: s.evWaitText,
+            waiting_delay: s.evWaitDelay,
+            completed: fmt(s.evCompleted, { name: m.name }),
+            paused: fmt(s.evPaused, { name: m.name }),
+          }[m.event];
+          return (
+            <Fragment key={`e-${m.id}`}>
+              {sep}
+              <div className="flex justify-center">
+                <span className="flex max-w-full items-center gap-1.5 rounded-full bg-[var(--color-surface-dim)] px-3 py-1 text-[11px] text-[var(--color-muted)]">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--color-accent)" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" className="shrink-0">
+                    <rect x="3" y="4" width="6" height="5" rx="1.5" />
+                    <rect x="15" y="15" width="6" height="5" rx="1.5" />
+                    <rect x="15" y="4" width="6" height="5" rx="1.5" />
+                    <path d="M6 9v3a2 2 0 0 0 2 2h7M18 9v6" />
+                  </svg>
+                  <span className="truncate">{text}</span>
+                  <span className="shrink-0 text-[var(--color-faint)]" title={stamp(m.createdAt)}>
+                    {clockTime(m.createdAt)}
+                  </span>
+                </span>
+              </div>
+            </Fragment>
+          );
+        }
+
+        if (m.kind === "note") {
+          return (
+            <Fragment key={`n-${m.id}`}>
+              {sep}
+              <div className="flex justify-center">
+                <div className="w-full max-w-[72%] rounded-[12px] border border-[rgba(110,77,18,0.3)] bg-[var(--color-warning-soft)] px-3.5 py-2.5 text-[13px] leading-[1.55] text-[var(--color-ink)]">
+                  <div className="mb-1 flex items-center gap-1.5 text-[10.5px] font-semibold uppercase tracking-[0.06em] text-[var(--color-warning)]">
+                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <rect x="3" y="11" width="18" height="11" rx="2" />
+                      <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+                    </svg>
+                    {s.noteBadge}
+                    {m.author && <span className="font-medium normal-case tracking-normal">· {m.author}</span>}
+                    <span className="ml-auto font-normal normal-case tracking-normal text-[var(--color-faint)]" title={stamp(m.createdAt)}>
+                      {clockTime(m.createdAt)}
+                    </span>
+                  </div>
+                  <p className="whitespace-pre-wrap">{m.body}</p>
+                </div>
+              </div>
+            </Fragment>
+          );
+        }
+
         const out = m.direction === "OUT";
         const payload = (m.interactivePayload as Buttons | null) ?? null;
         const buttons = payload?.buttons ?? [];
-        const prev = i > 0 ? messages[i - 1] : null;
-        const newDay = !prev || dayKey(prev.createdAt) !== dayKey(m.createdAt);
         return (
           <Fragment key={m.id}>
-            {newDay && <DaySeparator label={dayLabel(m.createdAt)} />}
+            {sep}
             <div className={`flex ${out ? "justify-end" : "justify-start"}`}>
-              <div className="max-w-[62%]">
+              <div className={`flex max-w-[78%] flex-col md:max-w-[64%] ${out ? "items-end" : "items-start"}`}>
                 <div
-                  className={`rounded-2xl px-3.5 py-2.5 text-[13.5px] leading-relaxed shadow-sm ring-1 ${
+                  className={`px-[13px] py-[9px] text-[13.5px] leading-[1.55] ${
                     out
-                      ? "rounded-br-md bg-[var(--color-out)] text-[var(--color-accent-ink)] ring-[color-mix(in_srgb,var(--color-accent)_25%,transparent)]"
-                      : "rounded-bl-md bg-[var(--color-in)] text-[var(--color-ink)] ring-[var(--color-border)]"
+                      ? "rounded-[14px_14px_4px_14px] bg-[var(--color-out)] text-[var(--color-accent-ink)] shadow-[0_0_0_1px_rgba(30,111,128,0.25),0_1px_2px_rgba(0,0,0,0.05)]"
+                      : "rounded-[14px_14px_14px_4px] bg-[var(--color-in)] text-[var(--color-ink)] shadow-[0_0_0_1px_var(--color-border),0_1px_2px_rgba(0,0,0,0.05)]"
                   }`}
                 >
-                  {m.isBot && (
-                    <div className="mb-1 flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-[var(--color-accent-ink)]">
-                      <span className="h-1.5 w-1.5 rounded-full bg-[var(--color-accent)]" />
-                      Bot
-                    </div>
-                  )}
                   <p className="whitespace-pre-wrap">{m.body}</p>
-                  <div
-                    className={`mt-1 flex items-center gap-1 text-[10px] ${
-                      out
-                        ? "justify-end text-[color-mix(in_srgb,var(--color-accent-ink)_60%,transparent)]"
-                        : "text-[var(--color-faint)]"
-                    }`}
-                  >
-                    {out && m.senderName && (
-                      <span className="font-medium">{m.senderName}</span>
-                    )}
-                    <span title={stamp(m.createdAt)}>{clockTime(m.createdAt)}</span>
-                    {out && <DeliveryState status={m.status} />}
-                  </div>
                 </div>
 
                 {/* Quick-reply buttons. On DEMO these are tappable so one person
@@ -167,7 +224,7 @@ export function Thread({
                         <span
                           key={b.id}
                           title="The customer taps this on their phone."
-                          className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-1.5 text-[12px] font-medium text-[var(--color-muted)]"
+                          className="rounded-[8px] border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-1.5 text-[12px] font-medium text-[var(--color-muted)]"
                         >
                           {b.label}
                         </span>
@@ -178,7 +235,7 @@ export function Thread({
                           <input type="hidden" name="buttonLabel" value={b.label} />
                           <button
                             type="submit"
-                            className="rounded-lg border border-[color-mix(in_srgb,var(--color-accent)_40%,transparent)] bg-[var(--color-surface)] px-3 py-1.5 text-[12px] font-medium text-[var(--color-accent-ink)] shadow-sm transition-colors hover:bg-[var(--color-accent-soft)]"
+                            className="rounded-[8px] border border-[rgba(30,111,128,0.4)] bg-[var(--color-surface)] px-3 py-1.5 text-[12px] font-medium text-[var(--color-accent-ink)] transition-colors hover:bg-[var(--color-accent-soft)]"
                           >
                             {b.label}
                           </button>
@@ -187,6 +244,19 @@ export function Thread({
                     )}
                   </div>
                 )}
+
+                <div className="mt-1 flex items-center gap-[5px] px-1 text-[10.5px] text-[var(--color-faint)]">
+                  {m.isBot ? (
+                    <span className="flex items-center gap-[3px] font-semibold text-[var(--color-accent-ink)]">
+                      <span className="h-[5px] w-[5px] rounded-full bg-[var(--color-accent)]" />
+                      {s.bot}
+                    </span>
+                  ) : (
+                    out && m.senderName && <span className="font-medium text-[var(--color-muted)]">{m.senderName}</span>
+                  )}
+                  <span title={stamp(m.createdAt)}>{clockTime(m.createdAt)}</span>
+                  {out && <DeliveryState status={m.status} />}
+                </div>
               </div>
             </div>
           </Fragment>

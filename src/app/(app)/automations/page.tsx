@@ -111,10 +111,7 @@ export default async function AutomationsPage() {
   const liveCount = cards.filter((c) => c.enabled).length;
 
   return (
-    <PageChrome
-      title="Automations"
-      subtitle="Follow-up flows — what happens on its own, without anyone typing"
-    >
+    <PageChrome section="automations" page="allFlows">
       <div className="grid gap-6 p-6 lg:grid-cols-[380px_1fr]">
         {/* ── New automation ─────────────────────────────────── */}
         <form

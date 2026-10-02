@@ -7,10 +7,7 @@ import { PageSkeleton, Skel } from "@/components/skeleton";
  */
 export default function FormsLoading() {
   return (
-    <PageSkeleton
-      title="WhatsApp Forms"
-      subtitle="Questions customers answer inside the chat — every answer files itself onto their contact"
-    >
+    <PageSkeleton section="templates" page="forms">
       <div className="grid gap-6 p-6 lg:grid-cols-[380px_1fr]">
         <div className="h-fit rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4 shadow-card">
           <h3 className="mb-1 text-[13px] font-semibold text-[var(--color-ink)]">

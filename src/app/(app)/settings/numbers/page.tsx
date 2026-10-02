@@ -19,10 +19,7 @@ export default async function NumbersPage() {
   const view = await fetchNumbers();
 
   return (
-    <PageChrome
-      title="Phone numbers"
-      subtitle="The numbers on this WhatsApp Business Account, and what each one still needs"
-    >
+    <PageChrome section="settings" page="channels">
       <div className="p-6">
         {!view.permitted ? (
           <p className="text-[13px] text-[var(--color-muted)]">

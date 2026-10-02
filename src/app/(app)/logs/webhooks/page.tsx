@@ -4,7 +4,6 @@ import { webhookEvent } from "@/db/schema";
 import { PageChrome } from "@/components/PageChrome";
 import { getCurrentMember } from "@/lib/current-member";
 import { relTime } from "@/lib/format";
-import { LogTabs } from "../LogTabs";
 import { summarise } from "../humanise";
 
 // Always fresh — this page exists to answer "did that just arrive?".
@@ -40,11 +39,7 @@ export default async function WebhookDeliveriesPage() {
   const signatureVerifiedRecently = verified.length > 0;
 
   return (
-    <PageChrome
-      title="System Logs"
-      subtitle="Everything WhatsApp and the ERP sent us, and what we did with it"
-    >
-      <LogTabs />
+    <PageChrome section="logs" page="webhooks">
       <div className="p-6">
         {!process.env.WHATSAPP_APP_SECRET ? (
           <div className="mb-4 rounded-xl border border-[color-mix(in_srgb,var(--color-danger)_35%,transparent)] bg-[color-mix(in_srgb,var(--color-danger)_6%,transparent)] px-4 py-3 text-[12.5px] text-[var(--color-danger)]">

@@ -36,10 +36,7 @@ export default async function AutoRepliesPage() {
   const canEdit = me.role === "OWNER" || me.role === "ADMIN";
 
   return (
-    <PageChrome
-      title="Auto replies"
-      subtitle={`What customers of ${companyName} receive automatically when they message its WhatsApp number`}
-    >
+    <PageChrome section="settings" page="autoReplies">
       <div className="max-w-3xl p-6">
         {!saved && (
           <div className="mb-4 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-3 text-[12.5px] text-[var(--color-muted)]">

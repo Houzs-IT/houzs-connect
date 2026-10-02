@@ -89,8 +89,8 @@ export default async function AutomationDetail({
   const runTest = testRunAutomation.bind(null, automation.id);
 
   return (
-    <>
-      <header className="flex h-16 shrink-0 items-center gap-4 border-b border-[var(--color-border)] bg-[var(--color-surface)] px-5">
+    <div className="flex min-w-0 flex-1 flex-col">
+      <header className="flex h-14 shrink-0 items-center gap-4 border-b border-[var(--color-border)] bg-[var(--color-surface)] px-5">
         <Link
           href="/automations"
           className="shrink-0 text-[13px] text-[var(--color-muted)] hover:text-[var(--color-ink)]"
@@ -166,6 +166,6 @@ export default async function AutomationDetail({
         automations={otherAutomations}
         campaigns={campaigns}
       />
-    </>
+    </div>
   );
 }

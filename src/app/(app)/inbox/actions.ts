@@ -1,14 +1,15 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { and, desc, eq, gt } from "drizzle-orm";
+import { and, desc, eq, gt, isNotNull } from "drizzle-orm";
 import { getCurrentMember } from "@/lib/current-member";
 import { getDb } from "@/db/client";
-import { contact, conversation, conversationMember, member } from "@/db/schema";
+import { automationRun, contact, conversation, conversationMember, member } from "@/db/schema";
 import { ensureConversationMemberTable } from "@/db/ensure-conversation-member";
 import { conversationCompanyWhere, conversationVisibilityWhere, getVisibility } from "@/lib/access";
 import type { ConversationListItem } from "@/components/inbox/ConversationList";
 import { bypassReadCache } from "@/db/fresh";
+import { attrs } from "@/lib/format";
 
 /**
  * A signed-in member, and the conversation must be in THEIR company.
@@ -66,6 +67,10 @@ export async function fetchConversations(
   });
   const vis = getVisibility(me, allMembers);
 
+  // The watcher links are read below; on a deploy that lands before the
+  // migration the table may not exist yet (see ensure-conversation-member.ts).
+  await ensureConversationMemberTable(db).catch(() => {});
+
   // One row over the page size is how "is there anything older" gets answered
   // without a second COUNT over the same predicate.
   const rows = await db.query.conversation.findMany({
@@ -78,7 +83,9 @@ export async function fetchConversations(
     with: {
       contact: true,
       assignedAgent: true,
+      assignedDepartment: true,
       tagLinks: { with: { tag: true } },
+      memberLinks: { columns: { memberId: true } },
       messages: { orderBy: (m, { desc }) => desc(m.createdAt), limit: 1 },
     },
   });
@@ -88,6 +95,7 @@ export async function fetchConversations(
 
   const items = page.map((c) => {
     const latest = c.messages[0];
+    const a = attrs(c.contact.attributes);
     return {
       id: c.id,
       name: c.contact.name ?? c.contact.phone,
@@ -101,7 +109,16 @@ export async function fetchConversations(
       waitingSince:
         latest && latest.direction === "IN" ? latest.createdAt.toISOString() : null,
       agent: c.assignedAgent?.name ?? null,
-      tags: c.tagLinks.map((t) => ({ name: t.tag.name, color: t.tag.color })),
+      agentId: c.assignedAgentId,
+      departmentId: c.assignedDepartmentId,
+      department: c.assignedDepartment?.name ?? null,
+      tags: c.tagLinks.map((t) => ({ id: t.tag.id, name: t.tag.name, color: t.tag.color })),
+      watcherIds: c.memberLinks.map((l) => l.memberId),
+      // The ERP order event writes these onto the contact (api/webhooks/erp).
+      orderRef: a.ref_1 || null,
+      deliveryDate: a.delivery_date_1 || null,
+      starred: a.starred === "1",
+      lastType: latest?.type ?? null,
     };
   });
 
@@ -266,4 +283,39 @@ export async function unassignConversation(formData: FormData) {
     .where(eq(conversation.id, conversationId));
   revalidatePath(`/inbox/${conversationId}`);
   revalidatePath("/inbox");
+}
+
+/**
+ * Pause or resume the customer's automation run from the Service panel.
+ *
+ * Paused is a status the engine already ignores: resumeRun only advances a
+ * `waiting` run, so a customer's reply to a paused flow goes to the agent
+ * instead of the bot. The dedupe in dispatch.ts counts `paused` as active, so
+ * the same flow does not simply start over on the next message. Resume puts
+ * the run back to `waiting` on the step it stopped at.
+ *
+ * Only a run that is parked on a step (cursor set) can be paused — a `running`
+ * run is mid-execution for a few milliseconds and has nothing to stop.
+ */
+export async function setAutomationRunPaused(formData: FormData) {
+  const conversationId = String(formData.get("conversationId") ?? "");
+  const runId = String(formData.get("runId") ?? "");
+  const pause = String(formData.get("pause") ?? "") === "1";
+  if (!runId) return;
+  const auth = await authorizeConversation(conversationId);
+  if (!auth) return;
+
+  // The run must belong to THIS conversation's customer.
+  await auth.db
+    .update(automationRun)
+    .set({ status: pause ? "paused" : "waiting" })
+    .where(
+      and(
+        eq(automationRun.id, runId),
+        eq(automationRun.contactId, auth.convo.contactId),
+        eq(automationRun.status, pause ? "waiting" : "paused"),
+        isNotNull(automationRun.cursorNodeId)
+      )
+    );
+  revalidatePath(`/inbox/${conversationId}`);
 }

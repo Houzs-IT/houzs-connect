@@ -21,6 +21,7 @@
 // Docs: https://developers.facebook.com/documentation/business-messaging/whatsapp/business-phone-numbers
 
 import { graph, type GraphResult } from "./graph";
+import { metaToken } from "./token";
 
 // v23.0 to match cloud-api.ts. Mixing versions across modules is how you get a
 // field that exists in one call and is silently absent in the next.
@@ -35,7 +36,7 @@ export interface WabaConfig {
  *  render "not connected yet" rather than throwing. */
 export function wabaConfig(): WabaConfig | null {
   const wabaId = process.env.WHATSAPP_WABA_ID;
-  const token = process.env.WHATSAPP_TOKEN;
+  const token = metaToken();
   if (!wabaId || !token) return null;
   return { wabaId, token };
 }

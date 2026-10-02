@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { IBM_Plex_Sans, IBM_Plex_Mono } from "next/font/google";
+import { getLang } from "@/lib/i18n/server";
 import "./globals.css";
 
 /*
@@ -52,12 +53,13 @@ export const metadata: Metadata = {
     "Houzs Century internal WhatsApp communication & automation platform.",
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
+  const lang = await getLang();
   return (
     <html
-      lang="en"
+      lang={lang === "zh" ? "zh-CN" : "en"}
       className={`${plexSans.variable} ${plexMono.variable} h-full antialiased`}
     >
       <body className="min-h-full">{children}</body>

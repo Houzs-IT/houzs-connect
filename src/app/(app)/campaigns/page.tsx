@@ -180,7 +180,7 @@ export default async function CampaignsPage({
   }
 
   return (
-    <PageChrome title="Campaigns" subtitle="One-time WhatsApp broadcasts">
+    <PageChrome section="campaigns" page="allCampaigns">
       <div className="p-6">
         {due.length > 0 && (
           <div

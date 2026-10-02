@@ -1,6 +1,9 @@
 import { redirect } from "next/navigation";
 import { and, gt, ne } from "drizzle-orm";
 import { Sidebar } from "@/components/Sidebar";
+import { MobileTabBar } from "@/components/shell/MobileTabBar";
+import { ShellProvider } from "@/components/shell/ShellProvider";
+import { getLang, getMenuCollapsed } from "@/lib/i18n/server";
 import { getDb } from "@/db/client";
 import { ensureContactColumns } from "@/db/ensure";
 import { ensureChannelColumns } from "@/db/ensure-channel";
@@ -55,10 +58,21 @@ export default async function AppLayout({
     )
   );
 
+  const live = process.env.WHATSAPP_MODE === "LIVE";
+
+  // Shell: 64px rail · [module secondary menu] · page column, with the phone
+  // tab bar underneath below `md`. Module layouts render their SecondaryMenu
+  // as the first child of the row; every page renders its own column
+  // (PageChrome), so the two simply sit side by side.
   return (
-    <div className="flex h-screen overflow-hidden">
-      <Sidebar unread={unread} live={process.env.WHATSAPP_MODE === "LIVE"} />
-      <div className="flex min-w-0 flex-1 flex-col">{children}</div>
-    </div>
+    <ShellProvider lang={await getLang()} menuCollapsed={await getMenuCollapsed()}>
+      <div data-shell className="flex h-dvh flex-col overflow-hidden">
+        <div className="flex min-h-0 flex-1">
+          <Sidebar unread={unread} live={live} me={{ name: me.name }} />
+          <div className="flex min-w-0 flex-1">{children}</div>
+        </div>
+        <MobileTabBar unread={unread} />
+      </div>
+    </ShellProvider>
   );
 }

@@ -38,3 +38,13 @@ export function InboxPanes({
     </div>
   );
 }
+
+/**
+ * The page Topbar, dropped on a phone while a conversation is open: the thread
+ * carries its own header (back, customer, window) and needs the height.
+ */
+export function InboxTopbarSlot({ children }: { children: React.ReactNode }) {
+  const path = usePathname();
+  const detail = /^\/inbox\/[^/]+/.test(path);
+  return <div className={detail ? "hidden md:block" : undefined}>{children}</div>;
+}

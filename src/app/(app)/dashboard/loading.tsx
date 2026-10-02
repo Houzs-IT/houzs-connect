@@ -15,10 +15,7 @@ export default function DashboardLoading() {
   ];
 
   return (
-    <PageSkeleton
-      title="Dashboard"
-      subtitle="Conversations, delivery and message analytics"
-    >
+    <PageSkeleton section="dashboard" page="overview">
       <div className="p-6">
         <div className="mb-5 flex flex-wrap gap-1 border-b border-[var(--color-border)]">
           {tabs.map((t, i) => (

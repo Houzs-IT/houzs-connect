@@ -15,10 +15,7 @@ export default async function TeamPage() {
   const view = await fetchTeam();
 
   return (
-    <PageChrome
-      title="Team & access"
-      subtitle="Everyone in the workspace, and which companies each person can read — across all companies"
-    >
+    <PageChrome section="settings" page="team">
       <div className="p-6">
         {!view.permitted ? (
           <p className="text-[13px] text-[var(--color-muted)]">

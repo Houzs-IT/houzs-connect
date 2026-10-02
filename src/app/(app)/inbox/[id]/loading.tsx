@@ -12,7 +12,7 @@ const BUBBLES = [
 
 /**
  * Conversation thread loading state — the centre column (chat header, bubbles,
- * composer) plus the 300px contact panel. Switching between two chats now
+ * composer) plus the 320px contact panel. Switching between two chats now
  * repaints this shape instantly instead of holding the previous thread on
  * screen while the server reads messages.
  */
@@ -21,7 +21,7 @@ export default function ConversationLoading() {
     <div className="flex min-w-0 flex-1">
       <div className="flex min-w-0 flex-1 flex-col bg-[var(--color-canvas)]">
         {/* Chat header */}
-        <div className="flex h-14 shrink-0 items-center gap-3 border-b border-[var(--color-border)] bg-[var(--color-surface)] px-5">
+        <div className="flex h-[60px] shrink-0 items-center gap-3 border-b border-[var(--color-border)] bg-[var(--color-surface)] px-4">
           <Skel className="h-8 w-8 shrink-0 rounded-full" />
           <div className="min-w-0">
             <Skel className="h-[16px] w-36" />
@@ -61,7 +61,7 @@ export default function ConversationLoading() {
       </div>
 
       {/* Contact / order panel */}
-      <aside className="hidden w-[300px] shrink-0 overflow-hidden border-l border-[var(--color-border)] bg-[var(--color-surface)] xl:block">
+      <aside className="hidden w-[320px] shrink-0 overflow-hidden border-l border-[var(--color-border)] bg-[var(--color-surface)] xl:block">
         <div className="flex flex-col items-center gap-2 border-b border-[var(--color-border)] px-5 py-6">
           <Skel className="h-14 w-14 rounded-full" />
           <Skel className="h-[18px] w-36" />

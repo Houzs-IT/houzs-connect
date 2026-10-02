@@ -1,0 +1,79 @@
+name: Preview
+
+# A clickable preview for every PR. Uploads the PR's build as a NON-production
+# version of the houzs-connect Worker with a `pr-<number>` alias, then comments
+# the URL on the PR. Production traffic (chat.houzscentury.com) keeps running
+# the deployed version — `versions upload` never shifts it; only deploy.yml on
+# main does.
+#
+# A preview shares the production database (same Hyperdrive binding), so data
+# changes made there are real. What it can NOT do is reach WhatsApp:
+#   - WHATSAPP_MODE=DEMO stubs every message send, and
+#   - CONNECT_PREVIEW=1 makes metaToken() (src/lib/whatsapp/token.ts) return
+#     nothing, so template submits, number/profile edits and media uploads see
+#     "WhatsApp not connected" instead of calling Meta with the live token.
+#
+# Same-repo PRs only: a fork's PR gets no secrets, and must not get a deploy.
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+
+concurrency:
+  group: preview-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  preview:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    env:
+      CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE: "postgresql://user:pass@localhost:5432/placeholder"
+      ALIAS: pr-${{ github.event.pull_request.number }}
+      HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - name: Install deps
+        run: pnpm install --frozen-lockfile
+      - name: Build (OpenNext, Linux)
+        run: pnpm run cf:build
+
+      - name: Upload preview version
+        id: upload
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: "816e457307d7fa0491c2a08a72ad5dcd"
+        run: |
+          set -o pipefail
+          node node_modules/@opennextjs/cloudflare/dist/cli/index.js upload \
+            --preview-alias "$ALIAS" \
+            --tag "$ALIAS" \
+            --message "PR #${{ github.event.pull_request.number }} @ ${HEAD_SHA::7}" \
+            --var WHATSAPP_MODE:DEMO \
+            --var CONNECT_PREVIEW:1 \
+            2>&1 | tee upload.log
+          url=$(grep -oE "https://${ALIAS}-[a-z0-9.-]+\.workers\.dev" upload.log | head -n1 || true)
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+
+      - name: Comment preview URL
+        if: steps.upload.outputs.url != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          URL: ${{ steps.upload.outputs.url }}
+        run: |
+          body="**Preview:** $URL
+
+          Commit ${HEAD_SHA::7}. WhatsApp is off here (DEMO, no Meta token), but the database is production — changes you make are real."
+          gh pr comment "${{ github.event.pull_request.number }}" --repo "$GITHUB_REPOSITORY" \
+            --edit-last --create-if-none --body "$body"

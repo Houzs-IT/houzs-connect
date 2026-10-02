@@ -1,4 +1,6 @@
-import { IconSearch } from "./icons";
+import type { Dict } from "@/lib/i18n/dict";
+import type { NavKey } from "./shell/nav";
+import { TopbarSkeleton } from "./shell/TopbarSkeleton";
 
 /*
   Skeleton primitives.
@@ -20,71 +22,25 @@ export function Skel({ className = "" }: { className?: string }) {
 }
 
 /**
- * Sync stand-in for `Topbar`. The title/subtitle of a route are known before
- * its data is, so they render for real — the header is never a grey bar. Only
- * the signed-in member's chip (which needs a session lookup) is placeholder.
- */
-export function TopbarSkeleton({
-  title,
-  subtitle,
-}: {
-  title: string;
-  /** Omit when the real subtitle is data-derived (e.g. "128 contacts"). */
-  subtitle?: string;
-}) {
-  return (
-    <header className="flex h-16 shrink-0 items-center gap-4 border-b border-[var(--color-border)] bg-[var(--color-surface)] px-6">
-      <div className="min-w-0">
-        <h1 className="truncate text-[17px] font-semibold tracking-tight text-[var(--color-ink)]">
-          {title}
-        </h1>
-        {subtitle ? (
-          <p className="truncate text-xs text-[var(--color-muted)]">{subtitle}</p>
-        ) : (
-          <Skel className="mt-1 h-[11px] w-44" />
-        )}
-      </div>
-
-      <div className="ml-auto flex items-center gap-3">
-        {/* The search affordance is static in the real Topbar — render it. */}
-        <div className="hidden items-center gap-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] px-3 py-2 text-sm text-[var(--color-faint)] md:flex">
-          <IconSearch width={16} height={16} />
-          <span>Search…</span>
-        </div>
-
-        <div className="flex items-center gap-2.5">
-          <Skel className="h-8 w-8 rounded-full" />
-          <div className="hidden leading-tight sm:block">
-            <Skel className="h-[13px] w-24" />
-            <Skel className="mt-1 h-[11px] w-14" />
-          </div>
-          <Skel className="h-[33px] w-[82px] rounded-lg" />
-        </div>
-      </div>
-    </header>
-  );
-}
-
-/**
- * Sync stand-in for `PageChrome` — the same header + scrollable main, so a
- * route's chrome is on screen the instant the link is clicked.
+ * Sync stand-in for `PageChrome` — the same column of header + scrollable
+ * main, so a route's chrome is on screen the instant the link is clicked.
  */
 export function PageSkeleton({
-  title,
-  subtitle,
+  section,
+  page,
   children,
 }: {
-  title: string;
-  subtitle?: string;
+  section: NavKey;
+  page?: keyof Dict["page"];
   children: React.ReactNode;
 }) {
   return (
-    <>
-      <TopbarSkeleton title={title} subtitle={subtitle} />
+    <div className="flex min-w-0 flex-1 flex-col">
+      <TopbarSkeleton section={section} page={page} />
       <main className="scroll-thin min-h-0 flex-1 overflow-y-auto">
         {children}
       </main>
-    </>
+    </div>
   );
 }
 

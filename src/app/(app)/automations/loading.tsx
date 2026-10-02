@@ -38,10 +38,7 @@ function AutomationCardSkeleton({ i }: { i: number }) {
  */
 export default function AutomationsLoading() {
   return (
-    <PageSkeleton
-      title="Automations"
-      subtitle="Follow-up flows — what happens on its own, without anyone typing"
-    >
+    <PageSkeleton section="automations" page="allFlows">
       <div className="grid gap-6 p-6 lg:grid-cols-[380px_1fr]">
         <div className="h-fit rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4 shadow-card">
           <h3 className="mb-1 text-[13px] font-semibold text-[var(--color-ink)]">

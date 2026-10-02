@@ -19,8 +19,8 @@ export default function AutomationDetailLoading() {
   ];
 
   return (
-    <>
-      <header className="flex h-16 shrink-0 items-center gap-4 border-b border-[var(--color-border)] bg-[var(--color-surface)] px-5">
+    <div className="flex min-w-0 flex-1 flex-col">
+      <header className="flex h-14 shrink-0 items-center gap-4 border-b border-[var(--color-border)] bg-[var(--color-surface)] px-5">
         <Link
           href="/automations"
           className="text-[13px] text-[var(--color-muted)] hover:text-[var(--color-ink)]"
@@ -100,6 +100,6 @@ export default function AutomationDetailLoading() {
           </div>
         </div>
       </div>
-    </>
+    </div>
   );
 }
