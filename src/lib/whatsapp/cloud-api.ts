@@ -3,11 +3,12 @@
 // no-ops so the app runs without a Meta account; flip the env to go live with no other
 // code change. Docs: https://developers.facebook.com/docs/whatsapp/cloud-api
 import type { FlowButton } from "@/lib/automation/types";
+import { metaToken } from "./token";
 
 export function isLive(): boolean {
   return (
     process.env.WHATSAPP_MODE === "LIVE" &&
-    !!process.env.WHATSAPP_TOKEN &&
+    !!metaToken() &&
     !!process.env.WHATSAPP_PHONE_NUMBER_ID
   );
 }
@@ -78,7 +79,7 @@ async function post(
   from?: string
 ): Promise<string | null> {
   const phoneId = from ?? process.env.WHATSAPP_PHONE_NUMBER_ID!;
-  const token = process.env.WHATSAPP_TOKEN!;
+  const token = metaToken()!;
   const to = typeof payload.to === "string" ? payload.to : "";
   // `to` is re-added by addressing() only when it is a phone number. Deleting it
   // here is what keeps it out of a username send — Meta says that if both `to`
@@ -170,7 +171,7 @@ export interface PhoneNumberInfo {
 export async function phoneNumberInfo(): Promise<PhoneNumberInfo | null> {
   if (!isLive()) return null;
   const phoneId = process.env.WHATSAPP_PHONE_NUMBER_ID!;
-  const token = process.env.WHATSAPP_TOKEN!;
+  const token = metaToken()!;
   // `status` and `messaging_limit_tier` are the two that explain a message Meta
   // accepts (returns an id for) and then never delivers: an unverified business
   // is capped to a small allow-list, and a number that is not CONNECTED sends

@@ -13,6 +13,7 @@
 
 import { MAX_CAPTION_CHARS, type AttachmentKind } from "./media-limits";
 import { addressing } from "./cloud-api";
+import { metaToken } from "./token";
 
 // v23.0 to match cloud-api.ts. The `recipient` field that addresses a WhatsApp
 // username was verified against v23.0; v21.0 predates usernames entirely, so
@@ -33,7 +34,7 @@ export function mediaConfig(senderId?: string | null): MediaApiConfig | null {
   // A media id belongs to the number it was uploaded under, so the upload and
   // the send must both use the conversation's own number (channels.ts).
   const phoneId = senderId ?? process.env.WHATSAPP_PHONE_NUMBER_ID;
-  const token = process.env.WHATSAPP_TOKEN;
+  const token = metaToken();
   if (!phoneId || !token) return null;
   return { phoneId, token };
 }

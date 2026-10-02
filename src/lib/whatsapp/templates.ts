@@ -14,6 +14,7 @@
 // Docs: https://developers.facebook.com/docs/whatsapp/business-management-api/message-templates
 
 import { graph } from "./graph";
+import { metaToken } from "./token";
 
 const GRAPH = "https://graph.facebook.com/v21.0";
 
@@ -143,7 +144,7 @@ export interface TemplateApiConfig {
  *  callers surface that as "not connected yet" rather than throwing. */
 export function templateConfig(): TemplateApiConfig | null {
   const wabaId = process.env.WHATSAPP_WABA_ID;
-  const token = process.env.WHATSAPP_TOKEN;
+  const token = metaToken();
   if (!wabaId || !token) return null;
   return { wabaId, token };
 }
