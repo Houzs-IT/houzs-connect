@@ -4,7 +4,6 @@ import { contact, conversation, message } from "@/db/schema";
 import { PageChrome } from "@/components/PageChrome";
 import { getCurrentMember } from "@/lib/current-member";
 import { phoneNumberInfo, type PhoneNumberInfo } from "@/lib/whatsapp/cloud-api";
-import { LogTabs } from "./LogTabs";
 
 // The delivery ledger: what went out, what came in, and what Meta did with it.
 // Seampify's equivalent (System Logs → Message History) is the page their team
@@ -164,8 +163,7 @@ export default async function MessageHistoryPage() {
     : [];
 
   return (
-    <PageChrome title="System Logs" subtitle="Every message in and out, with Meta's delivery status">
-      <LogTabs />
+    <PageChrome section="logs" page="messages">
       <div className="px-6 pt-6">
         <ConnectionCard info={wa} />
       </div>

@@ -1,49 +1,55 @@
 @import "tailwindcss";
 
 /*
-  Houzs Connect — "Ink & Petrol" (matches the Houzs ERP brand).
-  Dark ink-green sidebar against a warm-sage workspace. Petrol is the only
+  Houzs Connect — 6a "Ink Orbit".
+  Deep-space ink rail against a cool grey workspace. Petrol is the only
   functional accent (if it's petrol, you can act on it). Brass gold is the brand
-  signature and never a call to action. Tokens are the contract — components read
-  these, never a hardcoded hex.
+  signature (logo, doc numbers, eyebrows) and never a call to action. Tokens are
+  the contract — components read these, never a hardcoded hex.
+
+  These values are Connect's own. Do not copy them into the Houzs ERP theme,
+  and do not pull ERP theme colours in here (design_handoff PALETTE.md).
 */
 
 @theme {
-  --color-canvas: #eef0ec; /* app background, warm sage */
+  --color-canvas: #eef1f4; /* app background */
   --color-surface: #ffffff; /* cards, panels */
-  --color-surface-2: #f4f6f3; /* insets, table headers, search */
-  --color-surface-dim: #e3e6e0;
+  --color-surface-2: #f5f7f9; /* secondary menu, insets, table headers, search */
+  --color-surface-dim: #e5e9ee;
 
-  --color-ink: #11140f; /* primary text */
-  --color-muted: #414539; /* secondary text */
-  --color-faint: #767b6e; /* tertiary / placeholders */
+  --color-ink: #111722; /* primary text */
+  --color-muted: #3f4757; /* secondary text */
+  --color-faint: #737c8c; /* tertiary / placeholders */
 
-  --color-border: #d6d9d2; /* hairlines */
-  --color-border-subtle: #e3e6e0;
-  --color-border-strong: #c2c6bd;
+  --color-border: #d7dce3; /* hairlines */
+  --color-border-subtle: #e5e9ee;
+  --color-border-strong: #c3c9d3;
 
-  /* PRIMARY — petrol/teal. Functional: buttons, active, links, selected rows.
-     Kept under the `accent` name so every existing CTA re-themes to petrol. */
-  --color-accent: #16695f;
-  --color-accent-hi: #16695f;
-  --color-accent-soft: #e1efed;
-  --color-accent-ink: #0c3f39;
+  /* PRIMARY — petrol. Functional: buttons, active, links, selected rows.
+     Kept under the `accent` name so every existing CTA re-themes with it. */
+  --color-accent: #1e6f80;
+  --color-accent-hi: #0d3f4a; /* primary button hover */
+  --color-accent-soft: #e0eff2;
+  --color-accent-ink: #0d3f4a;
+  --color-accent-ring: rgba(30, 111, 128, 0.25);
 
-  /* BRAND — brass gold. Brand signature only (logo, a few headers). Never a CTA. */
+  /* BRAND — brass gold. Brand signature only (logo, doc numbers). Never a CTA. */
   --color-brand: #a16a2e;
-  --color-brand-bright: #d8a85a; /* gold on the dark sidebar */
+  --color-brand-bright: #d8a85a; /* gold on the dark rail */
   --color-brand-soft: #f3ece0;
   --color-brand-ink: #5a3a14;
 
-  /* Sidebar — dark ink-green slab. */
-  --color-rail: #13201c;
-  --color-rail-2: #1c2b26; /* hover */
-  --color-rail-ink: #e7eae4;
-  --color-rail-faint: #8c968a;
-  --color-rail-active: rgba(22, 105, 95, 0.22); /* active row = petrol 22% */
+  /* Rail — the 64px icon column. Solid fallback + the orbit gradient. */
+  --color-rail: #0b1020;
+  --color-rail-2: #1a2744; /* hover */
+  --color-rail-ink: #e3e8f0;
+  --color-rail-icon: #8590a6;
+  --color-rail-faint: #8590a6;
+  --color-rail-active: rgba(56, 160, 184, 0.24); /* active icon tile */
+  --rail-gradient: linear-gradient(180deg, #1a2744 0%, #111a30 45%, #0b1020 100%);
 
   --color-in: #ffffff; /* inbound chat bubble */
-  --color-out: #e1efed; /* outbound bubble — petrol soft tint */
+  --color-out: #e0eff2; /* outbound bubble — petrol soft tint */
 
   --color-success: #2f8a5b;
   --color-success-soft: #e2f0e9;
@@ -51,7 +57,21 @@
   --color-danger-soft: #f8eaea;
   --color-warning: #6e4d12;
   --color-warning-soft: #f6efd9;
-  --color-info: #16695f;
+  --color-info: #1e6f80;
+
+  /* Pastel icon set (bg / ink) — icon dots, avatars, stat-card gradients. */
+  --color-pastel-blue: #e6edfc;
+  --color-pastel-blue-ink: #2f5bd8;
+  --color-pastel-green: #e3f5ea;
+  --color-pastel-green-ink: #1f9d55;
+  --color-pastel-orange: #fdf1e0;
+  --color-pastel-orange-ink: #d9822b;
+  --color-pastel-purple: #efe9fb;
+  --color-pastel-purple-ink: #7a4fd6;
+  --color-pastel-pink: #fde8f1;
+  --color-pastel-pink-ink: #d63f86;
+  --color-pastel-cyan: #e2f4fa;
+  --color-pastel-cyan-ink: #1593c4;
 
   /* ── Type ──────────────────────────────────────────────────────────────
      One face with the Houzs ERP: IBM Plex Sans for body, display AND the
@@ -103,6 +123,10 @@
 
   --shadow-card: 0 1px 0 rgba(17, 24, 16, 0.04),
     0 4px 18px -8px rgba(17, 24, 16, 0.12);
+  --shadow-primary: 0 4px 14px -4px rgba(30, 111, 128, 0.6); /* primary button glow */
+  --shadow-logo: 0 0 14px rgba(103, 190, 214, 0.35);
+  --shadow-popover: 0 18px 40px -12px rgba(17, 24, 16, 0.28);
+  --shadow-modal: 0 30px 80px -20px rgba(11, 16, 32, 0.6);
 }
 
 @layer base {
@@ -142,9 +166,9 @@
   * {
     border-color: var(--color-border);
   }
-  /* Brass focus ring + brass selection (Houzs ERP posture). */
+  /* Petrol focus ring (6a); brass selection stays the brand signature. */
   :focus-visible {
-    outline: 2px solid var(--color-brand);
+    outline: 2px solid var(--color-accent);
     outline-offset: 1px;
   }
   ::selection {
@@ -181,6 +205,17 @@
     background: var(--color-faint);
     background-clip: content-box;
   }
+  /* Topbar "show menu" button: only when this page has a secondary menu and
+     it is collapsed (SecondaryMenu leaves a hidden marker), desktop only. */
+  @media (min-width: 48rem) {
+    [data-shell]:has([data-secondary-menu][hidden]) .menu-expand {
+      display: grid;
+    }
+  }
+  .bg-rail {
+    background: var(--color-rail);
+    background-image: var(--rail-gradient);
+  }
   .dot-grid {
     background-image: radial-gradient(
       var(--color-border-strong) 1px,
@@ -211,7 +246,7 @@
    navigation paints its own layout instantly instead of freezing on the old
    screen. One primitive does all the work: an inset block on `surface-2` that
    breathes, with a single soft `surface` sweep travelling across it. Tokens
-   only — skeletons re-theme with the rest of Ink & Petrol, and there is no
+   only — skeletons re-theme with the rest of Ink Orbit, and there is no
    spinner anywhere.
    ───────────────────────────────────────────────────────────── */
 @keyframes skeletonBreathe {

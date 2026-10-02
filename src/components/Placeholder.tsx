@@ -1,18 +1,23 @@
+import type { Dict } from "@/lib/i18n/dict";
 import { PageChrome } from "./PageChrome";
+import type { NavKey } from "./shell/nav";
 
+/** A module that is on the rail but not built yet: what it will do, honestly. */
 export function Placeholder({
+  section,
+  page,
   title,
-  subtitle,
   phase,
   points,
 }: {
+  section: NavKey;
+  page?: keyof Dict["page"];
   title: string;
-  subtitle: string;
   phase: string;
   points: string[];
 }) {
   return (
-    <PageChrome title={title} subtitle={subtitle}>
+    <PageChrome section={section} page={page}>
       <div className="grid min-h-full place-items-center p-6">
         <div className="dot-grid w-full max-w-lg rounded-2xl border border-dashed border-[var(--color-border-strong)] bg-[var(--color-surface)] p-8 text-center">
           <span className="inline-block rounded-full bg-[var(--color-accent-soft)] px-3 py-1 text-[11px] font-semibold uppercase tracking-wide text-[var(--color-accent-ink)]">

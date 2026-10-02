@@ -11,7 +11,7 @@ import { PageSkeleton, Skel, TableSkeleton } from "@/components/skeleton";
  */
 export default function CampaignsLoading() {
   return (
-    <PageSkeleton title="Campaigns" subtitle="One-time WhatsApp broadcasts">
+    <PageSkeleton section="campaigns" page="allCampaigns">
       <div className="p-6">
         <div className="grid gap-6 lg:grid-cols-[420px_1fr]">
           {/* Wizard */}

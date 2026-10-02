@@ -53,10 +53,7 @@ export default function SettingsLoading() {
   const tiles = ["Team members", "Custom fields", "Tags", "Quick replies"];
 
   return (
-    <PageSkeleton
-      title="Settings"
-      subtitle="Org chart, custom fields, tags, quick replies"
-    >
+    <PageSkeleton section="settings" page="general">
       <div className="space-y-6 p-6">
         <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
           {tiles.map((label) => (

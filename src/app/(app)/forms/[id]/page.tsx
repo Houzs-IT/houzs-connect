@@ -57,10 +57,7 @@ export default async function FormDetail({
     // The Topbar keeps the section's identity (it is known before the data is,
     // so the loading state can render it for real); the form's own name leads
     // the page body.
-    <PageChrome
-      title="WhatsApp Forms"
-      subtitle="One form — its questions, what the customer sees, and the answers"
-    >
+    <PageChrome section="templates" page="forms">
       <div className="flex flex-col gap-6 p-6">
         {/* ── Header: back, name, status, actions ───────────── */}
         <div>

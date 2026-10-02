@@ -6,10 +6,7 @@ import { PageSkeleton, Skel, TableSkeleton } from "@/components/skeleton";
  */
 export default function PaymentsLoading() {
   return (
-    <PageSkeleton
-      title="Payments"
-      subtitle="Receipts customers sent in chat, read automatically"
-    >
+    <PageSkeleton section="payments" page="receipts">
       <div className="p-6">
         <div className="mb-4 flex gap-4">
           {["Confirmed total", "Still to check"].map((label) => (

@@ -172,14 +172,7 @@ export default async function ContactsPage({
   }
 
   return (
-    <PageChrome
-      title="Contacts"
-      subtitle={
-        q
-          ? `${total} matching "${q}" · dynamic custom fields`
-          : `${total} contacts · dynamic custom fields`
-      }
-    >
+    <PageChrome section="contacts" page="allContacts">
       <div className="p-6">
         <ContactsToolbar
           q={q}

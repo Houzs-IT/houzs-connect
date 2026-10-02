@@ -192,10 +192,7 @@ export default async function TemplatesPage({
   const unmapped = rows.filter((r) => templateBindingGaps(r.body, r.bindings).length > 0);
 
   return (
-    <PageChrome
-      title="Templates"
-      subtitle="WhatsApp message templates — create, submit for Meta review, track status"
-    >
+    <PageChrome section="templates" page="templates">
       <div className="grid gap-6 p-6 lg:grid-cols-[400px_1fr]">
         <div className="flex flex-col gap-4">
           <TemplateComposer fields={fields} sample={sample} />

@@ -8,10 +8,7 @@ import { PageSkeleton, Skel } from "@/components/skeleton";
  */
 export default function FormDetailLoading() {
   return (
-    <PageSkeleton
-      title="WhatsApp Forms"
-      subtitle="One form — its questions, what the customer sees, and the answers"
-    >
+    <PageSkeleton section="templates" page="forms">
       <div className="flex flex-col gap-6 p-6">
         <div>
           <Link

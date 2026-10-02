@@ -1,100 +1,69 @@
-import { logout } from "@/app/login/actions";
-import { switchCompany } from "@/app/company-actions";
+import Link from "next/link";
 import type { CompanyChoice } from "@/lib/companies";
-import { initials, tint } from "@/lib/format";
+import { LangToggle, MenuExpandButton, UserMenu } from "./shell/TopbarControls";
 
-const ROLE_LABEL: Record<string, string> = {
-  OWNER: "Owner",
-  ADMIN: "Admin",
-  MANAGER: "Manager",
-  AGENT: "Agent",
-  SALES: "Sales",
-  DRIVER: "Driver",
-  VIEWER: "Viewer",
-};
+export type Crumb = string | { label: string; href: string };
 
+/**
+ * The 56px page header: breadcrumbs on the left; language, then the signed-in
+ * member (whose menu holds the company switcher and sign out) on the right.
+ *
+ * On a phone only the last crumb shows, as the page title — the language
+ * switch and the rest of the navigation live in the tab bar's "More" sheet.
+ *
+ * No notification bell yet: there is no notification feed to point it at, and
+ * a bell that never rings is worse than none (same reason the old fake search
+ * box was removed).
+ */
 export function Topbar({
-  title,
-  subtitle,
+  crumbs,
   current,
   companies,
 }: {
-  title: string;
-  subtitle?: string;
-  current: { id: string; name: string; role: string; title: string | null };
-  /** Companies this person may work in (src/lib/companies.ts). The switcher only
-   *  appears when there is somewhere else to go. */
+  crumbs: Crumb[];
+  current: { name: string; role: string; department?: { name: string } | null };
+  /** Companies this person may work in (src/lib/companies.ts). The switcher
+   *  only appears when there is somewhere else to go. */
   companies?: CompanyChoice[];
 }) {
-  const here = companies?.find((c) => c.current);
+  const last = crumbs[crumbs.length - 1];
+  const lastLabel = typeof last === "string" ? last : last?.label;
   return (
-    <header className="flex h-16 shrink-0 items-center gap-2 border-b border-[var(--color-border)] bg-[var(--color-surface)] pl-14 pr-3 md:gap-4 md:px-6">
-      <div className="min-w-0">
-        <h1 className="truncate text-[15px] font-semibold tracking-tight text-[var(--color-ink)] md:text-[17px]">
-          {title}
-        </h1>
-        {subtitle && (
-          <p className="hidden truncate text-xs text-[var(--color-muted)] sm:block">{subtitle}</p>
-        )}
-      </div>
+    <header className="flex h-14 shrink-0 items-center gap-3 border-b border-[var(--color-border)] bg-[var(--color-surface)] px-4">
+      <MenuExpandButton />
 
-      {/* There was a "Search…" box here. It was a <div> — no input, no handler,
-          no destination — sitting in the chrome of every page and looking
-          exactly like the search field in the inbox rail, which is real. There
-          is no global search to point it at, so it is gone rather than faked.
-          Search lives where it works: the conversation rail, and the phone
-          filter on Contacts. */}
-      <div className="ml-auto flex items-center gap-1.5 md:gap-3">
-        {companies && companies.length > 1 && here && (
-          // A <details> menu of plain forms: no client JavaScript, and each choice
-          // is a POST the server re-checks against the same eligibility list.
-          <details className="relative">
-            <summary className="flex cursor-pointer list-none items-center gap-1.5 rounded-lg border border-[var(--color-border)] px-2.5 py-1.5 text-[12px] font-medium text-[var(--color-ink)] transition-colors hover:bg-[var(--color-surface-2)] md:gap-2 md:px-3 md:py-2">
-              <span className="hidden text-[var(--color-faint)] sm:inline">Company</span>
-              <span className="max-w-[92px] truncate md:max-w-none">{here.name}</span>
-              <span aria-hidden className="text-[var(--color-faint)]">▾</span>
-            </summary>
-            <div className="absolute right-0 z-30 mt-1 min-w-48 overflow-hidden rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] py-1 shadow-lg">
-              {companies.map((c) => (
-                <form key={c.id} action={switchCompany}>
-                  <input type="hidden" name="companyId" value={c.id} />
-                  <button
-                    type="submit"
-                    disabled={c.current}
-                    className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-[13px] text-[var(--color-ink)] hover:bg-[var(--color-surface-2)] disabled:cursor-default disabled:text-[var(--color-faint)] disabled:hover:bg-transparent"
-                  >
-                    <span>{c.name}</span>
-                    {c.current && <span className="text-[11px]">current</span>}
-                  </button>
-                </form>
-              ))}
-            </div>
-          </details>
-        )}
-        <div className="flex items-center gap-1.5 md:gap-2.5">
-          <div
-            className="grid h-8 w-8 shrink-0 place-items-center rounded-full text-xs font-semibold text-white"
-            style={{ background: tint(current.name) }}
-          >
-            {initials(current.name).toUpperCase()}
-          </div>
-          <div className="hidden leading-tight sm:block">
-            <div className="text-[13px] font-medium text-[var(--color-ink)]">
-              {current.name}
-            </div>
-            <div className="text-[11px] text-[var(--color-faint)]">
-              {ROLE_LABEL[current.role] ?? current.role}
-            </div>
-          </div>
-          <form action={logout}>
-            <button
-              type="submit"
-              className="rounded-lg border border-[var(--color-border)] px-2.5 py-1.5 text-[12px] font-medium text-[var(--color-muted)] transition-colors hover:bg-[var(--color-surface-2)] hover:text-[var(--color-ink)] md:px-3 md:py-2"
-            >
-              Sign out
-            </button>
-          </form>
-        </div>
+      <h1 className="truncate text-[17px] font-semibold tracking-tight text-[var(--color-ink)] md:hidden">
+        {lastLabel}
+      </h1>
+      <nav aria-label="Breadcrumb" className="hidden min-w-0 items-center gap-2 text-[13px] md:flex">
+        {crumbs.map((c, i) => {
+          const isLast = i === crumbs.length - 1;
+          const label = typeof c === "string" ? c : c.label;
+          return (
+            <span key={i} className="flex min-w-0 items-center gap-2">
+              {i > 0 && <span className="text-[var(--color-border-strong)]">/</span>}
+              {isLast ? (
+                <span className="truncate font-semibold text-[var(--color-ink)]" aria-current="page">
+                  {label}
+                </span>
+              ) : typeof c === "string" ? (
+                <span className="truncate text-[var(--color-muted)]">{label}</span>
+              ) : (
+                <Link href={c.href} className="truncate text-[var(--color-muted)] hover:text-[var(--color-ink)]">
+                  {label}
+                </Link>
+              )}
+            </span>
+          );
+        })}
+      </nav>
+
+      <div className="ml-auto flex items-center gap-2">
+        <LangToggle className="hidden md:flex" />
+        <UserMenu
+          current={{ name: current.name, role: current.role, department: current.department?.name }}
+          companies={companies}
+        />
       </div>
     </header>
   );

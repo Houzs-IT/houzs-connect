@@ -190,10 +190,7 @@ export default async function DashboardPage({
   };
 
   return (
-    <PageChrome
-      title="Dashboard"
-      subtitle="Conversations, delivery and message analytics"
-    >
+    <PageChrome section="dashboard" page="overview">
       <DashboardTabs
         kpis={kpis}
         initialTab={tab}

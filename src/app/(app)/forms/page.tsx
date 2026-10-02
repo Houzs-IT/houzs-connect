@@ -45,10 +45,7 @@ export default async function FormsPage() {
   const inUse = forms.filter((f) => f.published).length;
 
   return (
-    <PageChrome
-      title="WhatsApp Forms"
-      subtitle="Questions customers answer inside the chat — every answer files itself onto their contact"
-    >
+    <PageChrome section="templates" page="forms">
       <div className="grid gap-6 p-6 lg:grid-cols-[380px_1fr]">
         {/* ── New form ───────────────────────────────────────── */}
         <form

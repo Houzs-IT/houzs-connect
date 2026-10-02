@@ -87,10 +87,7 @@ export default async function PaymentsPage() {
   const toCheck = totals[0].pending;
 
   return (
-    <PageChrome
-      title="Payments"
-      subtitle="Receipts customers sent in chat, read automatically"
-    >
+    <PageChrome section="payments" page="receipts">
       <div className="p-6">
         <div className="mb-4 flex gap-4">
           <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-3">

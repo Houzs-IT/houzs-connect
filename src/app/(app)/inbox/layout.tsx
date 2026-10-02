@@ -2,6 +2,7 @@ import { Suspense } from "react";
 import { getDb } from "@/db/client";
 import { getCurrentMember } from "@/lib/current-member";
 import { companyChoices } from "@/lib/companies";
+import { getDict } from "@/lib/i18n/server";
 import { Topbar } from "@/components/Topbar";
 import { ConversationList } from "@/components/inbox/ConversationList";
 import { ConversationListSkeleton } from "@/components/inbox/ConversationListSkeleton";
@@ -38,13 +39,13 @@ export default async function InboxLayout({
   const me = await getCurrentMember();
   if (!me) return null; // the (app) layout redirects unauthenticated users to /login
 
+  const t = await getDict();
   return (
-    <>
+    <div className="flex min-w-0 flex-1 flex-col">
       {/* Poll for new customer messages — no WebSockets in this app yet. */}
       <LiveRefresh seconds={5} />
       <Topbar
-        title="Inbox"
-        subtitle="Shared team inbox"
+        crumbs={[t.nav.inbox, t.page.allConversations]}
         current={me}
         companies={await companyChoices(getDb(), me)}
       />
@@ -57,6 +58,6 @@ export default async function InboxLayout({
       >
         {children}
       </InboxPanes>
-    </>
+    </div>
   );
 }
