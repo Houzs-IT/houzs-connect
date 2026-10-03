@@ -242,7 +242,10 @@ WhatsApp Business phone app **or** the Cloud API, never both — already the cas
    `https://chat.houzscentury.com/api/webhooks/erp` is a one-line change and is what
    actually cuts Seampify out of the loop. Payload contract is in
    `docs/seampify-research.md`; the `status` field is the Action Callback Id the flows
-   match on.
+   match on. The endpoint now requires a shared secret, so the script must also send
+   the header `x-connect-key: <ERP_WEBHOOK_SECRET>` (in `UrlFetchApp.fetch`'s
+   `headers`; keep the value in the script's Script Properties, not in the code).
+   Without it every call gets 401.
 8. **Enable the flows** — they are all Draft. Review each in the builder, then Publish live.
 
 ### Read receipts
@@ -377,8 +380,22 @@ node scripts/smoke-rest-api.mjs
 ```
 
 Secrets live on the `houzs-connect` Worker: `SESSION_SECRET`, `ERP_SERVICE_TOKEN`,
-`SYNC_ADMIN_TOKEN`, and (once live) the four `WHATSAPP_*` values. `DATABASE_URL` in
-`.dev.vars` is for scripts only.
+`SYNC_ADMIN_TOKEN`, `ERP_WEBHOOK_SECRET`, `DRIVER_WEBHOOK_SECRET`, and (once live) the
+four `WHATSAPP_*` values. `DATABASE_URL` in `.dev.vars` is for scripts only.
+
+The two webhook secrets guard `POST /api/webhooks/erp` and `/api/webhooks/driver`
+(`src/lib/webhook-auth.ts`). Callers send `x-connect-key: <secret>` or
+`Authorization: Bearer <secret>`; a wrong or missing key is 401. If a secret is not
+set, that endpoint refuses every call with 503 (and logs why) unless
+`WHATSAPP_MODE=DEMO`.
+
+```bash
+wrangler secret put ERP_WEBHOOK_SECRET
+wrangler secret put DRIVER_WEBHOOK_SECRET
+curl -X POST https://chat.houzscentury.com/api/webhooks/erp \
+  -H 'content-type: application/json' -H 'x-connect-key: <ERP_WEBHOOK_SECRET>' \
+  -d '{"phone":"60123456789","automation":"New Delivery Follow-up"}'
+```
 
 **Outstanding security item:** the Hyperdrive/Supabase password for Connect is still the
 temporary one set during cutover and should be rotated.
@@ -401,9 +418,9 @@ In rough priority order:
    the Sheet's finer state machine (To Send Delivery Date / To Remind Customer Reply /
    Pending Reschedule / Done Balance Collection / …). `docs/seampify-research.md` has the
    full payload contract.
-2. **Authenticate the inbound webhooks.** `/api/webhooks/erp` and `/api/webhooks/driver`
-   have **no auth at all** today — they only require a `phone` field. Add a shared secret
-   before anything external points at them.
+2. ~~**Authenticate the inbound webhooks.**~~ Done: `/api/webhooks/erp` and
+   `/api/webhooks/driver` require `ERP_WEBHOOK_SECRET` / `DRIVER_WEBHOOK_SECRET` (§6).
+   The ERP sender service in item 1 must send `x-connect-key`.
 3. **A real LLM behind `AI Agent Reply`** — `src/lib/ai.ts` is designed to be swapped
    without touching the node. Consider reusing the ERP's existing trainable-agent rules
    rather than maintaining a second set.

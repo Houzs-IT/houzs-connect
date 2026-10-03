@@ -72,6 +72,11 @@ jobs:
       - name: Webhook signature smoke test (pure, no DB)
         run: node scripts/smoke-webhook-signature.mjs
 
+      # /api/webhooks/erp and /driver message customers in LIVE: a wrong or
+      # missing key, or a Worker with no secret set, must be refused.
+      - name: Inbound webhook shared-secret smoke test (pure, no DB)
+        run: node scripts/smoke-webhook-auth.mjs
+
       # Hermetic: every endpoint it calls is a loopback server the script itself
       # starts, so CI never hits the owner's real Apps Script webhooks.
       - name: call_rest_api smoke test (loopback only, no internet)

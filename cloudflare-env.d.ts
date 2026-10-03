@@ -29,4 +29,9 @@ interface CloudflareEnv {
   ERP_SERVICE_TOKEN?: string;
   // Guards POST /api/admin/sync-org (x-sync-token header must equal this).
   SYNC_ADMIN_TOKEN?: string;
+
+  // Shared secrets for the inbound automation webhooks (see src/lib/webhook-auth.ts).
+  // Callers send them as `x-connect-key` or `Authorization: Bearer`.
+  ERP_WEBHOOK_SECRET?: string; // POST /api/webhooks/erp
+  DRIVER_WEBHOOK_SECRET?: string; // POST /api/webhooks/driver
 }
