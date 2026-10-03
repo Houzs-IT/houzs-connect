@@ -1,49 +1,31 @@
-import { PageSkeleton, Skel, TableSkeleton } from "@/components/skeleton";
+import { PageSkeleton, Skel } from "@/components/skeleton";
 
-/**
- * Payments loading state — the two summary tiles above the receipts table.
- * The tiles keep the real `px-4 py-3` box so the table never shifts up.
- */
+/** Payments loading state: KPI row, then the queue beside the review panel. */
 export default function PaymentsLoading() {
   return (
     <PageSkeleton section="payments" page="receipts">
-      <div className="p-6">
-        <div className="mb-4 flex gap-4">
-          {["Confirmed total", "Still to check"].map((label) => (
-            <div
-              key={label}
-              className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-3"
-            >
-              <div className="text-[11px] text-[var(--color-muted)]">{label}</div>
-              <Skel className="mt-1 h-[26px] w-32" />
-            </div>
+      <div className="flex flex-col gap-4 p-4">
+        <div className="hidden grid-cols-2 gap-3 md:grid xl:grid-cols-4">
+          {[0, 1, 2, 3].map((i) => (
+            <Skel key={i} className="h-[78px] rounded-[12px]" />
           ))}
         </div>
-
-        <div className="overflow-hidden rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)]">
-          <TableSkeleton
-            headers={[
-              "Customer",
-              "Amount",
-              "Reference",
-              "Paid by",
-              "Order",
-              "Received",
-              "Status",
-              "Action",
-            ]}
-            widths={[
-              "w-28",
-              "w-20",
-              "w-24",
-              "w-16",
-              "w-16",
-              "w-16",
-              "w-16",
-              "w-24",
-            ]}
-            rows={8}
-          />
+        <div className="flex gap-4">
+          <div className="w-full overflow-hidden rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)] lg:w-[360px]">
+            <div className="border-b border-[var(--color-border)] p-3">
+              <Skel className="h-[36px] w-full rounded-[8px]" />
+            </div>
+            {[0, 1, 2, 3, 4, 5].map((i) => (
+              <div key={i} className="flex gap-3 border-b border-[var(--color-border-subtle)] px-4 py-3">
+                <Skel className="h-8 w-8 rounded-full" />
+                <div className="flex-1">
+                  <Skel className="h-[14px] w-32" />
+                  <Skel className="mt-1.5 h-[11px] w-24" />
+                </div>
+              </div>
+            ))}
+          </div>
+          <Skel className="hidden h-[620px] flex-1 rounded-[12px] lg:block" />
         </div>
       </div>
     </PageSkeleton>
