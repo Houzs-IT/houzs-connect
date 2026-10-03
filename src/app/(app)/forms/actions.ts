@@ -49,7 +49,7 @@ export async function createForm(formData: FormData) {
     .returning();
 
   revalidatePath("/forms");
-  if (row) redirect(`/forms/${row.id}`);
+  if (row) redirect(`/forms?f=${row.id}`);
 }
 
 /** Rename a form and replace its questions. */

@@ -25,25 +25,6 @@ export async function LogsMenu() {
   );
 }
 
-/** Templates and WhatsApp forms are one module with two sub-pages. */
-export async function TemplatesFormsMenu() {
-  const t = await getDict();
-  return (
-    <SecondaryMenu
-      title={t.nav.templates}
-      groups={[
-        {
-          title: t.menu.content,
-          items: [
-            { href: "/templates", label: t.page.templates },
-            { href: "/forms", label: t.page.forms },
-          ],
-        },
-      ]}
-    />
-  );
-}
-
 /**
  * Settings, grouped as in the redesign. Only the pages that exist today are
  * listed; Personal, Roles, Departments, Billing and the rest arrive with the

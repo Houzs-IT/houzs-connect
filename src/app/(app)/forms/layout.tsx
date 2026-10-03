@@ -1,9 +1,15 @@
-import { TemplatesFormsMenu } from "@/components/shell/menus/ModuleMenus";
+import { Suspense } from "react";
+import { SecondaryMenuSkeleton } from "@/components/shell/SecondaryMenu";
+import { getDict } from "@/lib/i18n/server";
+import { TFMenu } from "@/app/(app)/templates/TFMenu";
 
-export default function Layout({ children }: { children: React.ReactNode }) {
+export default async function Layout({ children }: { children: React.ReactNode }) {
+  const t = await getDict();
   return (
     <>
-      <TemplatesFormsMenu />
+      <Suspense fallback={<SecondaryMenuSkeleton title={t.nav.templates} />}>
+        <TFMenu />
+      </Suspense>
       {children}
     </>
   );

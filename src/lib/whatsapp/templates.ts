@@ -287,6 +287,25 @@ function buildComponents(
   return { ok: true, components };
 }
 
+/**
+ * The exact request createTemplate would send, without sending it — for the
+ * editor's "Copy as cURL". Same name cleaning and the same components.
+ */
+export function templateRequest(
+  wabaId: string,
+  draft: TemplateDraft
+): { ok: true; url: string; body: Record<string, unknown> } | { ok: false; error: string } {
+  const name = normaliseTemplateName(draft.name);
+  if (!name) return { ok: false, error: "Template name is empty after cleaning." };
+  const built = buildComponents(draft);
+  if (!built.ok) return built;
+  return {
+    ok: true,
+    url: `${GRAPH}/${wabaId}/message_templates`,
+    body: { name, language: draft.language, category: draft.category, components: built.components },
+  };
+}
+
 export async function createTemplate(
   cfg: TemplateApiConfig,
   draft: TemplateDraft

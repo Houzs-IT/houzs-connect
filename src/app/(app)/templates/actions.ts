@@ -7,6 +7,7 @@ import {
   deleteTemplate,
   listTemplates,
   templateConfig,
+  templateRequest,
   updateTemplate,
   type RemoteTemplate,
   type TemplateCategory,
@@ -113,6 +114,37 @@ export async function submitTemplateWithBinding(
   }
 
   return await submitTemplate(draft);
+}
+
+/**
+ * The submit request as a cURL command, for the editor's "Copy as cURL". The
+ * access token is never included — the command reads it from $WHATSAPP_TOKEN.
+ */
+export async function templateCurl(payload: ComposerPayload): Promise<{ ok: boolean; curl?: string; error?: string }> {
+  if (!(await requireMember())) return { ok: false, error: "Not signed in." };
+  const req = templateRequest(templateConfig()?.wabaId ?? "<WABA_ID>", {
+    name: payload.name,
+    language: payload.language,
+    category: payload.category,
+    header: payload.header?.trim() || undefined,
+    body: payload.body,
+    footer: payload.footer?.trim() || undefined,
+    examples: payload.examples,
+    buttons: payload.buttons.slice(0, 3).map((text) => ({ type: "QUICK_REPLY" as const, text })),
+  });
+  if (!req.ok) return { ok: false, error: req.error };
+  // Close the shell's single quote, emit an escaped quote, reopen: ' -> '\''
+  const json = JSON.stringify(req.body, null, 2).replace(/'/g, `'\\''`);
+  const bs = "\\";
+  return {
+    ok: true,
+    curl: [
+      `curl -X POST '${req.url}' ${bs}`,
+      `  -H "Authorization: Bearer $WHATSAPP_TOKEN" ${bs}`,
+      `  -H 'Content-Type: application/json' ${bs}`,
+      `  -d '${json}'`,
+    ].join("\n"),
+  };
 }
 
 /** Save (or replace) the {{n}} → field mapping for one existing template. */
