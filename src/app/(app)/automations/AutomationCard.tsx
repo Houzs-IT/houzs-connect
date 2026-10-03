@@ -4,7 +4,9 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { ActionConfirm, ActionDialog } from "@/components/ActionConfirm";
-import { IconBolt } from "@/components/icons";
+import { IconBolt, IconDots } from "@/components/icons";
+import { fmt } from "@/lib/i18n/dict";
+import { useShell } from "@/components/shell/ShellProvider";
 import { type FlowGap } from "./copy";
 import { FlowChecks } from "./FlowChecks";
 import { PublishControl } from "./PublishControl";
@@ -46,6 +48,11 @@ export interface AutomationCardData {
   messageSteps: number;
   apiSteps: number;
   gaps: FlowGap[];
+  /** Runs started per Malaysian day, oldest first (7 values). */
+  daily: number[];
+  runs7: number;
+  /** The second line under the trigger: action id, tag, keyword… */
+  triggerDetail: string | null;
 }
 
 type Mode = "none" | "delete" | "edit";
@@ -58,6 +65,11 @@ export function AutomationCard({ a }: { a: AutomationCardData }) {
   const [flash, setFlash] = useState<string | null>(null);
   const [draftName, setDraftName] = useState(a.name);
   const [draftNote, setDraftNote] = useState(a.note);
+  const [menu, setMenu] = useState(false);
+  const { t } = useShell();
+  const L = t.autos;
+  // The "what needs checking" explainer opens from the yellow badge.
+  const [showChecks, setShowChecks] = useState(false);
 
   const close = () => {
     setMode("none");
@@ -111,112 +123,124 @@ export function AutomationCard({ a }: { a: AutomationCardData }) {
     .filter((g) => g.severity === "stops")
     .reduce((n, g) => n + g.count, 0);
 
+  const max = Math.max(1, ...a.daily);
+  const spark = a.daily
+    .map((v, i) => `${(i / Math.max(1, a.daily.length - 1)) * 56},${18 - (v / max) * 16}`)
+    .join(" ");
+
   return (
-    <div className="animate-rise rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] shadow-card">
-      <div className="flex items-start gap-3 p-4">
-        <div className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-[var(--color-accent-soft)] text-[var(--color-accent)]">
-          <IconBolt width={18} height={18} />
-        </div>
-
-        <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-2">
-            <Link
-              href={`/automations/${a.id}`}
-              className="text-[14px] font-semibold text-[var(--color-ink)] hover:underline"
-            >
-              {a.name}
-            </Link>
-            <span
-              className={`rounded-full px-2 py-0.5 text-[10.5px] font-medium ${
-                a.enabled
-                  ? "bg-[color-mix(in_srgb,var(--color-success)_12%,transparent)] text-[var(--color-success)]"
-                  : "bg-[var(--color-surface-2)] text-[var(--color-faint)]"
-              }`}
-            >
-              {a.enabled ? "Live" : "Draft"}
-            </span>
+    <div className="relative grid grid-cols-[minmax(0,2.4fr)_minmax(0,1.7fr)_minmax(0,1.1fr)_minmax(0,0.8fr)_minmax(0,0.9fr)_36px] items-center gap-3 border-b border-[var(--color-border-subtle)] px-4 py-3.5 last:border-b-0 hover:bg-[var(--color-surface-2)]">
+      <div className="flex min-w-0 items-center gap-3">
+        <span
+          className={`grid h-9 w-9 shrink-0 place-items-center rounded-[10px] ${
+            a.enabled ? "bg-[var(--color-accent-soft)] text-[var(--color-accent)]" : "bg-[var(--color-surface-2)] text-[var(--color-faint)]"
+          }`}
+        >
+          <IconBolt width={17} height={17} />
+        </span>
+        <div className="min-w-0">
+          <Link href={`/automations/${a.id}`} className="block truncate text-[13.5px] font-semibold text-[var(--color-ink)] hover:underline">
+            {a.name}
+          </Link>
+          <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[11.5px] text-[var(--color-faint)]">
+            {fmt(L.steps, { n: a.nodeCount })}
+            {gapCount > 0 && (
+              <button type="button" onClick={() => setShowChecks((v) => !v)} className="rounded-full bg-[var(--color-warning-soft)] px-1.5 text-[10.5px] font-semibold text-[var(--color-warning)] hover:underline">
+                {fmt(L.needAgent, { n: gapCount })}
+              </button>
+            )}
+            {a.importApproximations != null && (
+              <button type="button" onClick={() => setShowChecks((v) => !v)} className="rounded-full bg-[var(--color-warning-soft)] px-1.5 text-[10.5px] font-semibold text-[var(--color-warning)] hover:underline">
+                {fmt(L.imported, { n: a.importApproximations })}
+              </button>
+            )}
           </div>
-
-          <p className="mt-1 text-[12px] text-[var(--color-muted)]">
-            Runs {a.triggerSentence}.
-          </p>
-          <p className="mt-0.5 text-[11.5px] text-[var(--color-faint)]">
-            {a.channelName} · {a.enabled
-              ? "customers receive its messages"
-              : "switched off — no customer sees it"}
-          </p>
-
-          {a.note && (
-            <p className="mt-2 text-[12px] text-[var(--color-muted)]">{a.note}</p>
-          )}
-
-          {(a.gaps.length > 0 || a.importApproximations != null) && (
-            <div className="mt-2">
-              <FlowChecks
-                name={a.name}
-                gaps={a.gaps}
-                importApproximations={a.importApproximations}
-              />
-            </div>
-          )}
         </div>
       </div>
 
-      <div className="flex flex-wrap items-center gap-1.5 border-t border-[var(--color-border)] px-4 py-2.5">
-        <span className="mr-auto font-mono text-[11px] text-[var(--color-faint)]">
-          {a.nodeCount} steps · {a.edgeCount} links · v{a.version} · {a.runCount} runs ·
-          edited {a.updatedLabel}
-        </span>
+      <div className="min-w-0">
+        <div className="truncate text-[12.5px] text-[var(--color-ink)]">{L.triggers[a.triggerLabel] ?? a.triggerLabel}</div>
+        <div className="truncate text-[11.5px] text-[var(--color-faint)]" title={a.triggerSentence}>
+          {a.triggerDetail ?? a.channelName}
+        </div>
+      </div>
 
-        <Link
-          href={`/automations/${a.id}`}
-          className="rounded-md border border-[var(--color-border)] px-2.5 py-1 text-[11.5px] text-[var(--color-ink)] hover:bg-[var(--color-surface-2)]"
-        >
-          Open builder
-        </Link>
+      <div className="flex items-center gap-2.5">
+        <svg width="56" height="20" viewBox="0 0 56 20" className="shrink-0" aria-hidden>
+          <polyline points={spark} fill="none" stroke={a.runs7 ? "var(--color-accent)" : "var(--color-border-strong)"} strokeWidth="1.4" strokeLinejoin="round" />
+        </svg>
+        <div className="leading-tight">
+          <div className="text-[12.5px] font-semibold tabular-nums text-[var(--color-ink)]">{a.runs7}</div>
+          <div className="text-[10.5px] text-[var(--color-faint)]">{L.last7}</div>
+        </div>
+      </div>
+
+      <div className="leading-tight">
+        <div className="text-[12.5px] text-[var(--color-ink)]">{a.updatedLabel}</div>
+        <div className="text-[10.5px] text-[var(--color-faint)]">v{a.version}</div>
+      </div>
+
+      <PublishControl
+        size="toggle"
+        liveLabel={L.live}
+        draftLabel={L.draft}
+        facts={{
+          id: a.id,
+          name: a.name,
+          enabled: a.enabled,
+          triggerSentence: a.triggerSentence,
+          messageSteps: a.messageSteps,
+          apiSteps: a.apiSteps,
+          gapCount,
+          stopCount,
+        }}
+      />
+
+      <div className="relative">
         <button
           type="button"
-          onClick={openEdit}
-          className="rounded-md border border-[var(--color-border)] px-2.5 py-1 text-[11.5px] text-[var(--color-ink)] hover:bg-[var(--color-surface-2)]"
+          aria-label="Actions"
+          onClick={() => setMenu((v) => !v)}
+          className="grid h-7 w-7 place-items-center rounded-[6px] text-[var(--color-muted)] hover:bg-[var(--color-surface-dim)]"
         >
-          Rename
+          <IconDots width={15} height={15} />
         </button>
-        <button
-          type="button"
-          onClick={duplicate}
-          disabled={pending}
-          className="rounded-md border border-[var(--color-border)] px-2.5 py-1 text-[11.5px] text-[var(--color-ink)] hover:bg-[var(--color-surface-2)] disabled:opacity-60"
-        >
-          Duplicate
-        </button>
-        <PublishControl
-          facts={{
-            id: a.id,
-            name: a.name,
-            enabled: a.enabled,
-            triggerSentence: a.triggerSentence,
-            messageSteps: a.messageSteps,
-            apiSteps: a.apiSteps,
-            gapCount,
-            stopCount,
-          }}
-        />
-        <button
-          type="button"
-          onClick={() => setMode("delete")}
-          className="rounded-md px-2.5 py-1 text-[11.5px] font-medium text-[var(--color-faint)] hover:bg-[var(--color-danger-soft)] hover:text-[var(--color-danger)]"
-        >
-          Delete
-        </button>
+        {menu && (
+          <>
+            <div className="fixed inset-0 z-20" onClick={() => setMenu(false)} />
+            <div className="absolute right-0 z-30 mt-1 w-44 rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)] py-1 shadow-[var(--shadow-popover)]">
+              <Link href={`/automations/${a.id}`} className="block px-3 py-2 text-[13px] text-[var(--color-ink)] hover:bg-[var(--color-surface-2)]">
+                {L.open}
+              </Link>
+              {[
+                [L.rename, () => { setMenu(false); openEdit(); }],
+                [L.duplicate, () => { setMenu(false); duplicate(); }],
+                [L.delete, () => { setMenu(false); setMode("delete"); }],
+              ].map(([label, fn]) => (
+                <button
+                  key={label as string}
+                  type="button"
+                  onClick={fn as () => void}
+                  className={`block w-full px-3 py-2 text-left text-[13px] hover:bg-[var(--color-surface-2)] ${
+                    label === L.delete ? "text-[var(--color-danger)]" : "text-[var(--color-ink)]"
+                  }`}
+                >
+                  {label as string}
+                </button>
+              ))}
+            </div>
+          </>
+        )}
       </div>
 
       {(error || flash) && (
-        <div
-          className={`border-t border-[var(--color-border)] px-4 py-2 text-[11.5px] ${
-            error ? "text-[var(--color-danger)]" : "text-[var(--color-muted)]"
-          }`}
-        >
+        <div className={`col-span-6 text-[11.5px] ${error ? "text-[var(--color-danger)]" : "text-[var(--color-muted)]"}`}>
           {error ?? flash}
+        </div>
+      )}
+      {(a.gaps.length > 0 || a.importApproximations != null) && showChecks && (
+        <div className="col-span-6">
+          <FlowChecks name={a.name} gaps={a.gaps} importApproximations={a.importApproximations} />
         </div>
       )}
 

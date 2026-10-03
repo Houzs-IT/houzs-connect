@@ -1,12 +1,16 @@
 import { notFound } from "next/navigation";
-import { asc, count, desc, eq, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, gte, sql } from "drizzle-orm";
 import { getDb } from "@/db/client";
 import { automation, automationRun, channel } from "@/db/schema";
 import { PageChrome } from "@/components/PageChrome";
 import { relTime } from "@/lib/format";
 import { getCurrentMember } from "@/lib/current-member";
-import { createAutomation } from "./actions";
 import { AutomationCard, type AutomationCardData } from "./AutomationCard";
+import { NewAutomation } from "./NewAutomation";
+import { SecondaryMenu } from "@/components/shell/SecondaryMenu";
+import { IconSearch } from "@/components/icons";
+import { fmt } from "@/lib/i18n/dict";
+import { getDict } from "@/lib/i18n/server";
 import {
   CREATABLE_TRIGGERS,
   findFlowGaps,
@@ -17,7 +21,12 @@ import {
   type TriggerConfigShape,
 } from "./copy";
 
-export default async function AutomationsPage() {
+export default async function AutomationsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ q?: string; status?: string; trigger?: string }>;
+}) {
+  const sp = await searchParams;
   // This page listed EVERY company's automations: no `getCurrentMember()`, no
   // company filter, just `.from(automation).innerJoin(channel)`. One tenant's
   // flow names, trigger types and node counts were on another tenant's screen,
@@ -27,7 +36,9 @@ export default async function AutomationsPage() {
   if (!me) notFound();
   const db = getDb();
 
-  const [rows, runCounts, defaultChannel] = await Promise.all([
+  const week = last7();
+  const dayExpr = sql<string>`to_char(date_trunc('day', ${automationRun.createdAt} at time zone 'Asia/Kuala_Lumpur'), 'YYYY-MM-DD')`;
+  const [rows, runCounts, defaultChannel, daily] = await Promise.all([
     db
       .select({
         id: automation.id,
@@ -78,7 +89,20 @@ export default async function AutomationsPage() {
       where: eq(channel.companyId, me.companyId),
       orderBy: [desc(channel.isDefault), asc(channel.displayName)],
     }),
+    // Runs started per day over the last seven Malaysian days, for the sparkline.
+    db
+      .select({ automationId: automationRun.automationId, day: dayExpr, n: count() })
+      .from(automationRun)
+      .innerJoin(automation, eq(automation.id, automationRun.automationId))
+      .where(and(eq(automation.companyId, me.companyId), gte(automationRun.createdAt, week.since)))
+      .groupBy(automationRun.automationId, dayExpr),
   ]);
+  const dailyBy = new Map<string, Map<string, number>>();
+  for (const d of daily) {
+    const m = dailyBy.get(d.automationId) ?? new Map<string, number>();
+    m.set(d.day, d.n);
+    dailyBy.set(d.automationId, m);
+  }
 
   const runsByAutomation = new Map(runCounts.map((r) => [r.automationId, r.n]));
 
@@ -105,122 +129,115 @@ export default async function AutomationsPage() {
       messageSteps: sends.messageSteps,
       apiSteps: sends.apiSteps,
       gaps: findFlowGaps(probes),
+      daily: week.days.map((k) => dailyBy.get(a.id)?.get(k) ?? 0),
+      runs7: week.days.reduce((n, k) => n + (dailyBy.get(a.id)?.get(k) ?? 0), 0),
+      triggerDetail: cfg?.callbackId || (cfg?.keywords?.length ? cfg.keywords.join(", ") : null),
     };
   });
 
   const liveCount = cards.filter((c) => c.enabled).length;
+  const needs = (c: AutomationCardData) => c.gaps.length > 0 || c.importApproximations != null;
+  const q = (sp.q ?? "").trim().toLowerCase();
+  const shown = cards.filter((c) => {
+    if (sp.status === "live" && !c.enabled) return false;
+    if (sp.status === "draft" && c.enabled) return false;
+    if (sp.status === "check" && !needs(c)) return false;
+    if (sp.trigger && c.triggerLabel !== sp.trigger) return false;
+    if (q && !c.name.toLowerCase().includes(q)) return false;
+    return true;
+  });
+  const t = await getDict();
+  const L = t.autos;
+  const byTrigger = new Map<string, number>();
+  for (const c of cards) byTrigger.set(c.triggerLabel, (byTrigger.get(c.triggerLabel) ?? 0) + 1);
+  const cols =
+    "grid-cols-[minmax(0,2.4fr)_minmax(0,1.7fr)_minmax(0,1.1fr)_minmax(0,0.8fr)_minmax(0,0.9fr)_36px]";
 
   return (
-    <PageChrome section="automations" page="allFlows">
-      <div className="grid gap-6 p-6 lg:grid-cols-[380px_1fr]">
-        {/* ── New automation ─────────────────────────────────── */}
-        <form
-          action={createAutomation}
-          className="h-fit rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4 shadow-card"
-        >
-          <h3 className="mb-1 text-[13px] font-semibold text-[var(--color-ink)]">
-            New automation
-          </h3>
-          <p className="mb-3 text-[11px] text-[var(--color-faint)]">
-            It starts as a draft and is switched off. Nothing is sent until you
-            publish it.
-          </p>
+    <>
+      <SecondaryMenu
+        title={t.nav.automations}
+        groups={[
+          {
+            title: L.status,
+            items: [
+              { href: "?", label: L.all, count: cards.length },
+              { href: "?status=live", label: L.live, count: liveCount, dot: "var(--color-success)" },
+              { href: "?status=draft", label: L.draft, count: cards.length - liveCount, dot: "var(--color-border-strong)" },
+              { href: "?status=check", label: L.needsCheck, count: cards.filter(needs).length, dot: "var(--color-pastel-orange-ink)" },
+            ],
+          },
+          {
+            title: L.trigger,
+            items: [...byTrigger.entries()].map(([k, n]) => ({
+              href: `?trigger=${encodeURIComponent(k)}`,
+              label: L.triggers[k] ?? k,
+              count: n,
+            })),
+          },
+          {
+            title: L.tools,
+            items: [
+              { href: "/settings/auto-replies", label: L.autoReplies },
+              { href: "/logs", label: L.runLogs, exact: true },
+            ],
+          },
+        ]}
+      />
+      <PageChrome
+        section="automations"
+        page="allFlows"
+        actions={<NewAutomation triggers={CREATABLE_TRIGGERS} canCreate={!!defaultChannel} />}
+      >
+        <div className="flex flex-col gap-4 p-4 md:p-6">
+          <div className="flex flex-wrap items-center gap-3">
+            <form className="flex h-[38px] w-full max-w-[320px] items-center gap-2 rounded-[8px] border border-[var(--color-border)] bg-[var(--color-surface)] px-3 focus-within:border-[var(--color-accent)]">
+              {sp.status && <input type="hidden" name="status" value={sp.status} />}
+              {sp.trigger && <input type="hidden" name="trigger" value={sp.trigger} />}
+              <IconSearch width={15} height={15} className="text-[var(--color-faint)]" />
+              <input
+                name="q"
+                defaultValue={sp.q ?? ""}
+                placeholder={L.search}
+                className="w-full bg-transparent text-[13px] outline-none placeholder:text-[var(--color-faint)]"
+              />
+            </form>
+            <span className="ml-auto text-[12px] text-[var(--color-faint)]">
+              {fmt(L.summary, { n: cards.length, live: liveCount })}
+            </span>
+          </div>
 
-          <label className="mb-1 block text-[11px] text-[var(--color-muted)]">Name</label>
-          <input
-            name="name"
-            required
-            placeholder="e.g. Delivery date confirmation"
-            className="mb-3 w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] px-2.5 py-1.5 text-[13px] text-[var(--color-ink)] outline-none focus:border-[var(--color-accent)]"
-          />
-
-          <label className="mb-1 block text-[11px] text-[var(--color-muted)]">
-            When should it run?
-          </label>
-          <select
-            name="triggerType"
-            defaultValue="NEW_INCOMING_MESSAGE"
-            className="mb-2 w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] px-2.5 py-1.5 text-[13px] text-[var(--color-ink)] outline-none focus:border-[var(--color-accent)]"
-          >
-            {CREATABLE_TRIGGERS.map((t) => (
-              <option key={t.value} value={t.value}>
-                {t.label}
-              </option>
-            ))}
-          </select>
-          <ul className="mb-3 flex flex-col gap-1">
-            {CREATABLE_TRIGGERS.map((t) => (
-              <li key={t.value} className="text-[10.5px] leading-snug text-[var(--color-faint)]">
-                <span className="text-[var(--color-muted)]">{t.label}</span> — {t.hint}
-              </li>
-            ))}
-          </ul>
-
-          <label className="mb-1 block text-[11px] text-[var(--color-muted)]">
-            Action id (only for “The ERP sends an action”)
-          </label>
-          <input
-            name="callbackId"
-            placeholder="e.g. To Send Delivery Date"
-            className="mb-3 w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] px-2.5 py-1.5 text-[13px] text-[var(--color-ink)] outline-none focus:border-[var(--color-accent)]"
-          />
-
-          <label className="mb-1 block text-[11px] text-[var(--color-muted)]">
-            Note (optional)
-          </label>
-          <textarea
-            name="description"
-            rows={2}
-            placeholder="What this flow is for, in your own words"
-            className="mb-3 w-full resize-none rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] p-2 text-[13px] text-[var(--color-ink)] outline-none placeholder:text-[var(--color-faint)] focus:border-[var(--color-accent)]"
-          />
-
-          <button
-            type="submit"
-            disabled={!defaultChannel}
-            className="w-full rounded-lg bg-[var(--color-accent)] px-3 py-2 text-[13px] font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-50"
-          >
-            Create draft &amp; open builder
-          </button>
-          {!defaultChannel && (
-            <p className="mt-2 text-[11px] text-[var(--color-danger)]">
-              This company has no WhatsApp number connected yet, so an automation
-              has nothing to send from.
-            </p>
-          )}
-        </form>
-
-        {/* ── The list ───────────────────────────────────────── */}
-        <div className="flex min-w-0 flex-col gap-3">
-          {cards.length > 0 && (
-            <p className="text-[11.5px] text-[var(--color-faint)]">
-              {cards.length} automation{cards.length === 1 ? "" : "s"} ·{" "}
-              {liveCount === 0
-                ? "none is live — nothing runs on its own yet"
-                : `${liveCount} live, ${cards.length - liveCount} draft`}
-            </p>
-          )}
-
-          {cards.length === 0 && (
-            <div className="dot-grid grid min-h-[200px] place-items-center rounded-xl border border-dashed border-[var(--color-border-strong)] bg-[var(--color-surface)] text-center">
-              <div className="px-6">
-                <p className="text-[13px] font-medium text-[var(--color-ink)]">
-                  No automations yet
-                </p>
-                <p className="mt-1 text-[12px] text-[var(--color-muted)]">
-                  Make one on the left. You get a flow builder — a searchable list
-                  of steps, message and tag steps, branching, drafts and version
-                  history — and nothing is sent to anyone until you publish it.
-                </p>
+          <div className="overflow-x-auto rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)]">
+            <div className="min-w-[900px]">
+              <div
+                className={`grid ${cols} gap-3 border-b border-[var(--color-border)] px-4 py-2.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--color-faint)]`}
+              >
+                <span>{L.colName}</span>
+                <span>{L.colWhen}</span>
+                <span>{L.colRuns}</span>
+                <span>{L.colEdited}</span>
+                <span>{L.colStatus}</span>
+                <span />
               </div>
+              {shown.length === 0 ? (
+                <p className="px-4 py-10 text-center text-[13px] text-[var(--color-faint)]">
+                  {cards.length ? L.noMatch : L.none}
+                </p>
+              ) : (
+                shown.map((a) => <AutomationCard key={a.id} a={a} />)
+              )}
             </div>
-          )}
-
-          {cards.map((a) => (
-            <AutomationCard key={a.id} a={a} />
-          ))}
+          </div>
         </div>
-      </div>
-    </PageChrome>
+      </PageChrome>
+    </>
   );
+}
+
+/** The last seven Malaysian days (keys YYYY-MM-DD) and the instant they start. */
+function last7() {
+  const key = (d: Date) => d.toLocaleDateString("en-CA", { timeZone: "Asia/Kuala_Lumpur" });
+  const today = new Date(`${key(new Date())}T00:00:00+08:00`);
+  const days = Array.from({ length: 7 }, (_, i) => key(new Date(today.getTime() - (6 - i) * 86_400_000)));
+  return { since: new Date(today.getTime() - 6 * 86_400_000), days };
 }
