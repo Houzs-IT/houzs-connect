@@ -7,6 +7,7 @@ import { conversationCompanyWhere, conversationVisibilityWhere, getVisibility } 
 import type { CurrentMember } from "@/lib/current-member";
 import { getDict } from "@/lib/i18n/server";
 import { SecondaryMenu } from "@/components/shell/SecondaryMenu";
+import { can } from "@/lib/permissions";
 
 /** Status dots, in the redesign's colours. */
 const STATUS_DOT: Record<string, string> = {
@@ -30,7 +31,7 @@ export async function ServiceMenu({ me }: { me: CurrentMember }) {
   const t = await getDict();
   const db = getDb();
   const allMembers = await db.query.member.findMany({ columns: { id: true, managerId: true } });
-  const vis = getVisibility(me, allMembers);
+  const vis = getVisibility(me, allMembers, await can(me, "seeAll"));
   await ensureConversationMemberTable(db).catch(() => {});
 
   const base = (...extra: (SQL | undefined)[]) =>

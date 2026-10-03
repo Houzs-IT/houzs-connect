@@ -28,7 +28,7 @@ function one(v: string | string[] | undefined): string {
   return (Array.isArray(v) ? v[0] : v) ?? "";
 }
 
-const MANAGERS = new Set(["OWNER", "ADMIN", "MANAGER"]);
+const MANAGERS = new Set(["SUPER_ADMIN", "OWNER", "ADMIN", "MANAGER"]);
 
 export default async function CampaignsPage({
   searchParams,

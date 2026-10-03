@@ -17,6 +17,7 @@ import {
   conversationVisibilityWhere,
   getVisibility,
 } from "@/lib/access";
+import { can } from "@/lib/permissions";
 
 // This is a live, data-driven console backed by per-request Cloudflare bindings
 // (Hyperdrive). Nothing here is static — force dynamic rendering for the whole
@@ -50,7 +51,7 @@ export default async function AppLayout({
   const allMembers = await db.query.member.findMany({
     columns: { id: true, managerId: true },
   });
-  const vis = getVisibility(me, allMembers);
+  const vis = getVisibility(me, allMembers, await can(me, "seeAll"));
   const unread = await db.$count(
     conversation,
     and(

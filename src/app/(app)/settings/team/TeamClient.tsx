@@ -6,21 +6,22 @@ import { RoleSelect } from "./RoleSelect";
 
 // Server-rendered. Access ticks are <form action={serverAction}> so they post
 // without depending on client hydration; only the role pill is a client island.
-export function TeamClient({ companies, people, L }: { companies: TeamCompany[]; people: Person[]; L: Dict["set"] }) {
+export function TeamClient({
+  companies,
+  people,
+  L,
+  canSuper,
+  requests,
+}: {
+  companies: TeamCompany[];
+  people: Person[];
+  L: Dict["set"];
+  canSuper: boolean;
+  requests: React.ReactNode;
+}) {
   return (
     <div className="flex flex-col gap-4">
-      <div className="rounded-[12px] border border-dashed border-[var(--color-border-strong)] bg-[var(--color-surface)] px-4 py-3.5">
-        <div className="flex items-center gap-3">
-          <span className="grid h-8 w-8 place-items-center rounded-full bg-[var(--color-pastel-orange)] text-[14px] font-bold text-[var(--color-pastel-orange-ink)]">+</span>
-          <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2 text-[14px] font-semibold text-[var(--color-ink)]">
-              {L.accessReq}
-              <span className="rounded-full bg-[var(--color-brand-soft)] px-2 py-px text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--color-brand-ink)]">{L.proposal}</span>
-            </div>
-            <div className="text-[12px] text-[var(--color-faint)]">{L.accessReqBody}</div>
-          </div>
-        </div>
-      </div>
+      {requests}
 
       <form action={syncFromErp} className="flex flex-wrap items-center gap-3 rounded-[12px] border border-[#f0dcb4] bg-[#fdf6ea] px-4 py-3">
         <span className="grid h-8 w-8 place-items-center rounded-full bg-[var(--color-pastel-orange)] text-[14px] font-bold text-[var(--color-pastel-orange-ink)]">⇄</span>
@@ -68,7 +69,7 @@ export function TeamClient({ companies, people, L }: { companies: TeamCompany[];
                     </div>
                   </td>
                   <td className="px-4 py-2.5">
-                    <RoleSelect email={p.email} name={p.name} role={p.role} />
+                    <RoleSelect email={p.email} name={p.name} role={p.role} canSuper={canSuper} />
                   </td>
                   <td className="px-4 py-2.5 text-[var(--color-ink)]">{p.department ?? "—"}</td>
                   <td className="px-4 py-2.5 text-[var(--color-ink)]">{p.reportsTo ?? "—"}</td>

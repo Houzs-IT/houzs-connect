@@ -10,6 +10,7 @@ import { conversationCompanyWhere, conversationVisibilityWhere, getVisibility } 
 import type { ConversationListItem } from "@/components/inbox/ConversationList";
 import { bypassReadCache } from "@/db/fresh";
 import { attrs } from "@/lib/format";
+import { can } from "@/lib/permissions";
 
 /**
  * A signed-in member, and the conversation must be in THEIR company.
@@ -65,7 +66,7 @@ export async function fetchConversations(
   const allMembers = await db.query.member.findMany({
     columns: { id: true, managerId: true },
   });
-  const vis = getVisibility(me, allMembers);
+  const vis = getVisibility(me, allMembers, await can(me, "seeAll"));
 
   // The watcher links are read below; on a deploy that lands before the
   // migration the table may not exist yet (see ensure-conversation-member.ts).

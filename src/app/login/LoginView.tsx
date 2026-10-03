@@ -4,6 +4,7 @@ import { useActionState, useState } from "react";
 import { useShell } from "@/components/shell/ShellProvider";
 import { fmt } from "@/lib/i18n/dict";
 import { login } from "./actions";
+import { submitAccessRequest } from "./request-actions";
 
 /*
   Sign in with a Houzs ERP account, on the Connect palette: deep ink-blue sky,
@@ -49,7 +50,20 @@ export function LoginView() {
   const L = t.login;
   const [state, formAction, pending] = useActionState(login, {});
   const [show, setShow] = useState(false);
-  const [panel, setPanel] = useState<"none" | "forgot" | "request">("none");
+  const [panel, setPanel] = useState<"none" | "forgot" | "request" | "sent">("none");
+  const [req, setReq] = useState({ name: "", email: "", phone: "", department: "", note: "" });
+  const [reqErr, setReqErr] = useState<string | null>(null);
+  const [reqBusy, setReqBusy] = useState(false);
+  const sendRequest = async () => {
+    setReqBusy(true);
+    setReqErr(null);
+    const res = await submitAccessRequest(req);
+    setReqBusy(false);
+    if (res.ok) return setPanel("sent");
+    setReqErr(res.error === "email" ? L.errEmail : res.error === "rate" ? L.errRate : res.error === "closed" ? L.errClosed : L.errName);
+  };
+  const plainInput =
+    "h-[44px] w-full rounded-[10px] border border-[var(--color-border)] bg-white px-3.5 text-[14px] text-[var(--color-ink)] outline-none placeholder:text-[var(--color-faint)] focus:border-[var(--color-accent)] focus:shadow-[0_0_0_3px_var(--color-accent-ring)]";
   const year = new Date().getFullYear();
   const error = state.error ? (lang === "zh" ? (ZH_ERRORS[state.error] ?? state.error) : state.error) : null;
 
@@ -195,18 +209,86 @@ export function LoginView() {
                   </button>
                 </div>
               </form>
-            ) : (
+            ) : panel === "forgot" ? (
               <div className="mt-6">
                 <div className="rounded-[12px] border border-[var(--color-border)] bg-white p-4">
-                  <div className="mb-1.5 text-[13.5px] font-semibold text-[var(--color-ink)]">{panel === "forgot" ? L.forgot : L.request}</div>
-                  <p className="text-[13px] leading-relaxed text-[var(--color-muted)]">{panel === "forgot" ? L.forgotBody : L.requestBody}</p>
+                  <div className="mb-1.5 text-[13.5px] font-semibold text-[var(--color-ink)]">{L.forgot}</div>
+                  <p className="text-[13px] leading-relaxed text-[var(--color-muted)]">{L.forgotBody}</p>
                 </div>
                 <button
                   type="button"
                   onClick={() => setPanel("none")}
                   className="mt-4 h-[44px] w-full rounded-[10px] bg-[var(--color-accent)] text-[14px] font-semibold text-white shadow-[var(--shadow-primary)] hover:bg-[var(--color-accent-hi)]"
                 >
-                  {panel === "forgot" ? L.gotIt : L.back}
+                  {L.gotIt}
+                </button>
+              </div>
+            ) : panel === "request" ? (
+              <div className="mt-5 flex flex-col gap-3">
+                <p className="text-[12.5px] leading-relaxed text-[var(--color-muted)]">{L.requestBody}</p>
+                {(
+                  [
+                    ["name", L.fullName, "text", ""],
+                    ["email", L.workEmail, "email", "you@houzscentury.com"],
+                    ["phone", L.phone, "tel", "+60"],
+                    ["department", L.department, "text", ""],
+                    ["note", L.note, "text", L.notePh],
+                  ] as [keyof typeof req, string, string, string][]
+                ).map(([k, l, type, ph]) => (
+                  <div key={k}>
+                    <label className={label} htmlFor={`req-${k}`}>
+                      {l}
+                    </label>
+                    <input
+                      id={`req-${k}`}
+                      type={type}
+                      value={req[k]}
+                      placeholder={ph}
+                      onChange={(e) => setReq((r) => ({ ...r, [k]: e.target.value }))}
+                      className={plainInput}
+                    />
+                  </div>
+                ))}
+                {reqErr && <p className="rounded-[8px] bg-[var(--color-danger-soft)] px-3 py-2 text-[12.5px] text-[var(--color-danger)]">{reqErr}</p>}
+                <button
+                  type="button"
+                  disabled={reqBusy}
+                  onClick={() => void sendRequest()}
+                  className="h-[46px] w-full rounded-[10px] bg-[var(--color-accent)] text-[14px] font-semibold text-white shadow-[var(--shadow-primary)] hover:bg-[var(--color-accent-hi)] disabled:opacity-60"
+                >
+                  {reqBusy ? L.sending : L.send}
+                </button>
+                <button type="button" onClick={() => setPanel("none")} className="text-[13px] font-semibold text-[var(--color-accent)]">
+                  {L.back}
+                </button>
+              </div>
+            ) : (
+              <div className="mt-6">
+                <div className="flex items-center gap-2.5">
+                  <span className="grid h-9 w-9 place-items-center rounded-full bg-[var(--color-success-soft)] text-[16px] text-[var(--color-success)]">✓</span>
+                  <div className="text-[15px] font-semibold text-[var(--color-ink)]">{L.sentTitle}</div>
+                </div>
+                <p className="mt-2 text-[13px] leading-relaxed text-[var(--color-muted)]">{L.sentBody}</p>
+                <ol className="mt-4 flex flex-col gap-2.5">
+                  {[L.step1, L.step2].map((st, i) => (
+                    <li key={st} className="flex items-center gap-3 rounded-[10px] border border-[var(--color-border)] bg-white px-3 py-2.5">
+                      <span
+                        className={`grid h-6 w-6 place-items-center rounded-full text-[11px] font-bold ${
+                          i === 0 ? "bg-[var(--color-pastel-orange)] text-[var(--color-pastel-orange-ink)]" : "bg-[var(--color-surface-2)] text-[var(--color-faint)]"
+                        }`}
+                      >
+                        {i + 1}
+                      </span>
+                      <span className="text-[13px] text-[var(--color-ink)]">{st}</span>
+                    </li>
+                  ))}
+                </ol>
+                <button
+                  type="button"
+                  onClick={() => setPanel("none")}
+                  className="mt-4 h-[44px] w-full rounded-[10px] bg-[var(--color-accent)] text-[14px] font-semibold text-white shadow-[var(--shadow-primary)] hover:bg-[var(--color-accent-hi)]"
+                >
+                  {L.back}
                 </button>
               </div>
             )}

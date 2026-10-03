@@ -30,6 +30,9 @@ export const connect = pgSchema("connect");
 // ─────────────────────────── Enums ───────────────────────────
 
 export const roleEnum = connect.enum("Role", [
+  // Added by migration 0012: every permission, plus final approval of access
+  // requests and control of roles, billing and channels.
+  "SUPER_ADMIN",
   "OWNER",
   "ADMIN",
   "MANAGER",

@@ -17,6 +17,7 @@ import { and, asc, eq } from "drizzle-orm";
 import type { DB } from "@/db/client";
 import { bypassReadCache } from "@/db/fresh";
 import { company, member } from "@/db/schema";
+import { isAdminRole } from "@/lib/permissions";
 
 export interface CompanyChoice {
   id: string;
@@ -33,7 +34,7 @@ interface Who {
 }
 
 export function isOwnerOrAdmin(role: string): boolean {
-  return role === "OWNER" || role === "ADMIN";
+  return isAdminRole(role);
 }
 
 export async function companyChoices(db: DB, me: Who): Promise<CompanyChoice[]> {

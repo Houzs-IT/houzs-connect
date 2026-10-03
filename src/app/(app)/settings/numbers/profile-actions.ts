@@ -29,10 +29,11 @@ import {
   type BusinessProfile,
   type ProfileInput,
 } from "@/lib/whatsapp/profile-limits";
+import { isAdminRole } from "@/lib/permissions";
 
 async function requireAdmin(): Promise<boolean> {
   const me = await getCurrentMember();
-  return !!me && (me.role === "OWNER" || me.role === "ADMIN");
+  return !!me && isAdminRole(me.role);
 }
 
 export interface ProfileResult {

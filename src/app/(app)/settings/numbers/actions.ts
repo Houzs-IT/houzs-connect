@@ -24,6 +24,7 @@ import {
   type CodeMethod,
   type WabaNumber,
 } from "@/lib/whatsapp/numbers";
+import { isAdminRole } from "@/lib/permissions";
 
 /**
  * Only OWNER and ADMIN.
@@ -34,7 +35,7 @@ import {
  */
 async function requireAdmin(): Promise<boolean> {
   const me = await getCurrentMember();
-  return !!me && (me.role === "OWNER" || me.role === "ADMIN");
+  return !!me && isAdminRole(me.role);
 }
 
 /** Where a number's messages go, as the page shows it. */

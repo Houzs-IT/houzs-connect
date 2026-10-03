@@ -60,6 +60,7 @@ import {
   type SendResult,
   type TestSendResult,
 } from "./spec";
+import { can } from "@/lib/permissions";
 
 /** Statuses a campaign may still be edited, scheduled or sent from. */
 const EDITABLE = ["draft", "scheduled"];
@@ -74,7 +75,7 @@ const SEND_CHUNK = 20;
 /** Auth + company scope for every mutation below. Null when not signed in. */
 async function ctx() {
   const me = await getCurrentMember();
-  if (!me) return null;
+  if (!me || !(await can(me, "campaigns"))) return null;
   return { db: getDb(), companyId: me.companyId, memberId: me.id, role: me.role };
 }
 
@@ -325,7 +326,7 @@ export async function duplicateCampaign(formData: FormData): Promise<void> {
 }
 
 /** Who may approve a campaign that is held for approval. */
-const APPROVERS = new Set(["OWNER", "ADMIN", "MANAGER"]);
+const APPROVERS = new Set(["SUPER_ADMIN", "OWNER", "ADMIN", "MANAGER"]);
 
 /** Approve a draft or scheduled campaign that requires it. Managers and up. */
 export async function approveCampaign(formData: FormData): Promise<void> {

@@ -5,12 +5,13 @@ import { and, desc, eq, ilike, or } from "drizzle-orm";
 import { getDb } from "@/db/client";
 import { contact, conversation, payment } from "@/db/schema";
 import { getCurrentMember } from "@/lib/current-member";
+import { can } from "@/lib/permissions";
 
 /** The member, and the payment must belong to a contact in their company. */
 async function authorize(paymentId: string) {
   if (!paymentId) return null;
   const me = await getCurrentMember();
-  if (!me) return null;
+  if (!me || !(await can(me, "payments"))) return null;
   const db = getDb();
   const row = await db.query.payment.findFirst({ where: eq(payment.id, paymentId), with: { contact: true } });
   if (!row || row.contact.companyId !== me.companyId) return null;
@@ -89,6 +90,7 @@ export async function recordPayment(input: {
 }): Promise<{ ok: boolean; id?: string; error?: string }> {
   const me = await getCurrentMember();
   if (!me) return { ok: false, error: "Not signed in." };
+  if (!(await can(me, "payments"))) return { ok: false, error: "Your role cannot record payments." };
   const db = getDb();
   const who = await db.query.contact.findFirst({
     where: and(eq(contact.id, input.contactId), eq(contact.companyId, me.companyId)),

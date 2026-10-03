@@ -14,6 +14,7 @@ import { AutoRepliesForm } from "./AutoRepliesForm";
 import { bypassReadCache } from "@/db/fresh";
 import { getDict } from "@/lib/i18n/server";
 import { SettingsHead } from "../ui";
+import { isAdminRole } from "@/lib/permissions";
 
 export const dynamic = "force-dynamic";
 
@@ -35,7 +36,7 @@ export default async function AutoRepliesPage() {
     : null;
   const settings = saved ?? defaultAutoReplies(companyName);
   const openNow = settings.hours ? isOpen(new Date(), settings.hours, settings.timezone) : true;
-  const canEdit = me.role === "OWNER" || me.role === "ADMIN";
+  const canEdit = isAdminRole(me.role);
   const t = await getDict();
 
   return (

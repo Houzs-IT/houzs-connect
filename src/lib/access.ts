@@ -2,6 +2,7 @@ import { eq, inArray, or, type SQL } from "drizzle-orm";
 import type { InferSelectModel } from "drizzle-orm";
 import type { DB } from "@/db/client";
 import { channel, conversation, member } from "@/db/schema";
+import { isAdminRole } from "@/lib/permissions";
 
 type Member = InferSelectModel<typeof member>;
 
@@ -45,9 +46,11 @@ export function subtreeMemberIds(
 
 export function getVisibility(
   me: Pick<Member, "id" | "role" | "departmentId">,
-  allMembers: Pick<Member, "id" | "managerId">[]
+  allMembers: Pick<Member, "id" | "managerId">[],
+  /** "See every chat" from the company's role matrix (lib/permissions). */
+  seeAll = false
 ): Visibility {
-  if (me.role === "OWNER" || me.role === "ADMIN") return { scope: "all" };
+  if (seeAll || isAdminRole(me.role)) return { scope: "all" };
   if (me.role === "DRIVER")
     return { scope: "scoped", memberIds: [me.id], departmentIds: [] };
 
