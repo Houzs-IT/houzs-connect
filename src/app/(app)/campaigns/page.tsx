@@ -1,83 +1,34 @@
 import { and, asc, count, desc, eq, gte, ilike, lte, sql } from "drizzle-orm";
 import Link from "next/link";
 import { getDb } from "@/db/client";
-import { campaign, channel, contact, contactField, contactTag, tag } from "@/db/schema";
+import { campaign, contact, contactTag, tag } from "@/db/schema";
 import { PageChrome } from "@/components/PageChrome";
+import { SecondaryMenu } from "@/components/shell/SecondaryMenu";
+import { IconSearch } from "@/components/icons";
 import { getCurrentMember } from "@/lib/current-member";
-import { relTime, stamp } from "@/lib/format";
-import { isLive } from "@/lib/whatsapp/cloud-api";
-import { templateConfig } from "@/lib/whatsapp/templates";
-import { BUILT_IN_FIELDS } from "@/lib/automation/vars";
-import type { FieldOption } from "@/app/(app)/templates/types";
-import { CampaignComposer, type CampaignDraft } from "./CampaignComposer";
-import { CampaignRowActions, DueSendButton } from "./CampaignRowActions";
-import { listCampaignTemplates } from "./actions";
-import { audienceLabel, unpackSpec, type CampaignStats } from "./spec";
+import { campaignCounts } from "@/lib/campaign-messages";
+import { fmt } from "@/lib/i18n/dict";
+import { getDict } from "@/lib/i18n/server";
+import { resolveAudience } from "./audience";
+import { unpackSpec, type CampaignStats } from "./spec";
+import { CampaignRowMenu } from "./CampaignRowMenu";
+import { DueBanner } from "./DueBanner";
+import { RangePicker } from "./RangePicker";
+import { CampIcon, StatusBadge, campStatus, whenLabel, type CampStatus } from "./ui";
 
-// The approved-template list is remote state that changes on Meta's side, and
-// the recipient counts change whenever anyone edits a contact. Neither may be
-// served from a cache on the page whose whole job is to tell an operator what a
-// send will really do.
+// Recipient counts change whenever anyone edits a contact, and "due" is a
+// question about the clock — never serve this page from a cache.
 export const dynamic = "force-dynamic";
 
 /** Campaign history rows rendered — newest first. */
 const CAMPAIGN_HISTORY_LIMIT = 200;
-
-// Status → token colour. Campaign.status is free-form text (no enum) so the
-// known lifecycle values are mapped and anything else falls back to neutral.
-const STATUS_COLOR: Record<string, string> = {
-  draft: "var(--color-faint)",
-  scheduled: "var(--color-warning)",
-  sending: "var(--color-accent)",
-  completed: "var(--color-success)",
-  sent: "var(--color-success)",
-  failed: "var(--color-danger)",
-};
-
-/** …and the same lifecycle in words an operator would use. */
-const STATUS_LABEL: Record<string, string> = {
-  draft: "Draft",
-  scheduled: "Scheduled",
-  sending: "Sending now",
-  completed: "Sent",
-  sent: "Sent",
-  failed: "Did not send",
-};
-
-/**
- * Per-campaign read and reply counts are not recorded anywhere, so these columns
- * are a constant dash and the footnote under the table says why.
- *
- * WhatsApp reports delivery and read receipts against an individual message id;
- * no column links a message row back to the campaign that sent it. A zero would
- * be an invented figure dressed up as a measurement, which is worse than an
- * empty column. Wiring it up needs `message.campaign_id` — see the report.
- */
-const NOT_RECORDED = "—";
-
-/** A stored UTC instant as Malaysian wall clock, for <input type="datetime-local">. */
-function toMalaysianInput(d: Date | null): string {
-  if (!d) return "";
-  const parts = new Intl.DateTimeFormat("en-CA", {
-    timeZone: "Asia/Kuala_Lumpur",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  }).formatToParts(d);
-  const g = (t: string) => parts.find((p) => p.type === t)?.value ?? "";
-  return `${g("year")}-${g("month")}-${g("day")}T${g("hour")}:${g("minute")}`;
-}
 
 /** `?q=` / `?from=` / `?to=` may arrive repeated; take the first. */
 function one(v: string | string[] | undefined): string {
   return (Array.isArray(v) ? v[0] : v) ?? "";
 }
 
-const th = "px-4 py-3 font-medium";
-const td = "px-4 py-3";
+const MANAGERS = new Set(["OWNER", "ADMIN", "MANAGER"]);
 
 export default async function CampaignsPage({
   searchParams,
@@ -88,353 +39,360 @@ export default async function CampaignsPage({
   if (!me) return null;
   const db = getDb();
   const sp = await searchParams;
+  const t = await getDict();
+  const L = t.camp;
 
   const q = one(sp.q).trim();
   const from = one(sp.from);
   const to = one(sp.to);
-  const editId = one(sp.edit);
+  const statusFilter = one(sp.status);
 
   const filters = [eq(campaign.companyId, me.companyId)];
   if (q) filters.push(ilike(campaign.name, `%${q}%`));
   if (from) filters.push(gte(campaign.createdAt, new Date(`${from}T00:00:00+08:00`)));
   if (to) filters.push(lte(campaign.createdAt, new Date(`${to}T23:59:59+08:00`)));
 
-  const [campaigns, due, channels, tagOpts, fields, templates] = await Promise.all([
-    db.query.campaign.findMany({
-      where: and(...filters),
-      orderBy: desc(campaign.createdAt),
-      limit: CAMPAIGN_HISTORY_LIMIT,
-    }),
-    // Scheduled campaigns whose time has passed. "Has it passed" is a question
-    // about the clock, and a component must not ask the clock while rendering,
-    // so Postgres answers it — which is also the right clock, since it is the
-    // one `schedule_at` was written against.
-    db.query.campaign.findMany({
-      where: and(
-        eq(campaign.companyId, me.companyId),
-        eq(campaign.status, "scheduled"),
-        lte(campaign.scheduleAt, sql`now()`)
-      ),
-      orderBy: asc(campaign.scheduleAt),
-    }),
-    db.query.channel.findMany({
-      where: eq(channel.companyId, me.companyId),
-      orderBy: desc(channel.isDefault),
-    }),
-    // Reachable count per tag, in Postgres rather than by loading every link row
-    // into the Worker. The blocked / opted-out filter is in the JOIN, not the
-    // WHERE, so a tag whose contacts are all excluded still lists — at zero,
-    // which is the honest answer rather than a missing row.
+  const [rows, tagCounts, [reachable]] = await Promise.all([
     db
-      .select({ name: tag.name, color: tag.color, count: count(contact.id) })
+      .select({
+        id: campaign.id,
+        name: campaign.name,
+        templateName: campaign.templateName,
+        audience: campaign.audience,
+        status: campaign.status,
+        scheduleAt: campaign.scheduleAt,
+        stats: campaign.stats,
+        requiresApproval: campaign.requiresApproval,
+        approvedByMemberId: campaign.approvedByMemberId,
+        createdAt: campaign.createdAt,
+        // "Has its time passed" is a clock question; Postgres answers it, on
+        // the same clock `schedule_at` was written against.
+        isDue: sql<boolean>`(${campaign.status} = 'scheduled' and ${campaign.scheduleAt} <= now())`,
+      })
+      .from(campaign)
+      .where(and(...filters))
+      .orderBy(desc(campaign.createdAt))
+      .limit(CAMPAIGN_HISTORY_LIMIT),
+    // Reachable people per tag, with the same exclusions the send applies.
+    db
+      .select({ name: tag.name, color: tag.color, n: count(contact.id) })
       .from(tag)
       .leftJoin(contactTag, eq(contactTag.tagId, tag.id))
       .leftJoin(
         contact,
-        and(
-          eq(contact.id, contactTag.contactId),
-          eq(contact.blocked, false),
-          eq(contact.marketingOptIn, true)
-        )
+        and(eq(contact.id, contactTag.contactId), eq(contact.blocked, false), eq(contact.marketingOptIn, true))
       )
       .where(eq(tag.companyId, me.companyId))
       .groupBy(tag.id, tag.name, tag.color)
       .orderBy(asc(tag.name)),
-    db.query.contactField.findMany({
-      where: eq(contactField.companyId, me.companyId),
-      orderBy: asc(contactField.key),
-    }),
-    listCampaignTemplates(),
+    db
+      .select({ n: count() })
+      .from(contact)
+      .where(and(eq(contact.companyId, me.companyId), eq(contact.blocked, false), eq(contact.marketingOptIn, true))),
   ]);
 
-  const channelName = new Map(channels.map((c) => [c.id, c.displayName]));
+  const tagBy = new Map(tagCounts.map((r) => [r.name, r]));
+  const counts = await campaignCounts(rows.map((r) => r.id));
 
-  // The placeholder dropdowns offer the same two groups the Templates page
-  // offers, from the same source of truth — built-ins every contact has, then
-  // this company's configured contact fields.
-  const attributeFields: FieldOption[] = fields.map((f) => ({ key: f.key, name: f.name }));
-  const fieldOptions: FieldOption[] = [
-    ...BUILT_IN_FIELDS.map((f) => ({ ...f, builtin: true })),
-    ...attributeFields,
-  ];
+  type Row = (typeof rows)[number] & { s: CampStatus; waiting: boolean };
+  const all: Row[] = rows.map((r) => {
+    const s = campStatus(r.status, !!r.isDue);
+    const open = s === "draft" || s === "scheduled" || s === "due";
+    return { ...r, s, waiting: open && r.requiresApproval && !r.approvedByMemberId };
+  });
 
-  // Editing target, if any. Fetched on its own rather than picked out of the
-  // filtered list — a search or date filter must not silently swallow the row
-  // the URL says to edit. A campaign that has already been sent is not editable;
-  // the wizard opens fresh and the row offers Duplicate instead.
-  let initial: CampaignDraft | null = null;
-  if (editId) {
-    const row = await db.query.campaign.findFirst({
-      where: and(eq(campaign.id, editId), eq(campaign.companyId, me.companyId)),
-    });
-    const spec = row ? unpackSpec(row.audience) : null;
-    if (row && spec && (row.status === "draft" || row.status === "scheduled")) {
-      initial = {
-        id: row.id,
-        name: row.name,
-        channelId: row.channelId,
-        spec,
-        scheduleAt: toMalaysianInput(row.scheduleAt),
-      };
+  const n = (k: CampStatus) => all.filter((r) => r.s === k).length;
+  const shown = all.filter((r) => {
+    if (!statusFilter) return true;
+    if (statusFilter === "approval") return r.waiting;
+    if (statusFilter === "sent") return r.s === "sent" || r.s === "sending";
+    return r.s === statusFilter;
+  });
+  const due = all.filter((r) => r.s === "due");
+
+  // Who each row reaches. Sent rows say who they matched at send time; unsent
+  // rows are counted now. An attribute audience has no SQL shortcut, so it runs
+  // the real resolver — only for the few unsent rows on screen.
+  const attrCounts = new Map<string, number>();
+  await Promise.all(
+    shown
+      .filter((r) => r.s !== "sent" && r.s !== "failed" && r.s !== "sending")
+      .map(async (r) => {
+        const spec = unpackSpec(r.audience);
+        if (spec?.audience.kind === "attribute") {
+          const res = await resolveAudience(db, me.companyId, spec.audience);
+          attrCounts.set(r.id, res.recipients.length);
+        }
+      })
+  );
+
+  const audienceOf = (r: Row) => {
+    const spec = unpackSpec(r.audience);
+    const stats = (r.stats as CampaignStats | null) ?? {};
+    const a = spec?.audience;
+    let label = L.everyone;
+    let dot: string | null = null;
+    let people: number | null = reachable?.n ?? null;
+    if (a?.kind === "tag" && a.tag) {
+      const tg = tagBy.get(a.tag);
+      label = fmt(L.tagAud, { tag: a.tag });
+      dot = tg?.color ?? "var(--color-border-strong)";
+      people = tg?.n ?? 0;
+    } else if (a?.kind === "attribute" && a.attrKey) {
+      label = a.attrValue ? `${a.attrKey} = ${a.attrValue}` : a.attrKey;
+      people = attrCounts.get(r.id) ?? null;
+    } else if (!spec) {
+      // Rows from before the composer stored a spec carry only a label.
+      const legacy = (r.audience ?? {}) as { kind?: string; value?: string };
+      if (legacy.kind === "tag" && legacy.value) label = fmt(L.tagAud, { tag: legacy.value });
     }
-  }
+    if (r.s === "sent" || r.s === "failed" || r.s === "sending") people = stats.total ?? people;
+    return { label, dot, people };
+  };
+
+  const canApprove = MANAGERS.has(me.role);
+  const cols = "grid-cols-[minmax(0,2.3fr)_minmax(0,1.3fr)_minmax(0,2fr)_minmax(0,1.1fr)_minmax(0,1.1fr)_36px]";
 
   return (
-    <PageChrome section="campaigns" page="allCampaigns">
-      <div className="p-6">
-        {due.length > 0 && (
-          <div
-            className="mb-4 rounded-xl border p-4"
-            style={{
-              borderColor: "color-mix(in srgb, var(--color-warning) 40%, transparent)",
-              background: "var(--color-warning-soft)",
-            }}
+    <>
+      <SecondaryMenu
+        title={t.nav.campaigns}
+        groups={[
+          {
+            title: L.status,
+            items: [
+              { href: "?", label: L.all, count: all.length },
+              { href: "?status=draft", label: L.draft, count: n("draft"), dot: "var(--color-border-strong)" },
+              { href: "?status=scheduled", label: L.scheduled, count: n("scheduled"), dot: "var(--color-pastel-orange-ink)" },
+              { href: "?status=due", label: L.due, count: n("due"), dot: "var(--color-danger)" },
+              { href: "?status=sent", label: L.sent, count: n("sent") + n("sending"), dot: "var(--color-success)" },
+              { href: "?status=failed", label: L.failed, count: n("failed"), dot: "var(--color-danger)" },
+            ],
+          },
+          {
+            title: L.approval,
+            items: [{ href: "?status=approval", label: L.waiting, count: all.filter((r) => r.waiting).length }],
+          },
+        ]}
+      />
+      <PageChrome
+        section="campaigns"
+        page="allCampaigns"
+        actions={
+          <Link
+            href="/campaigns/new"
+            className="flex h-[34px] items-center gap-1.5 rounded-[8px] bg-[var(--color-accent)] px-3.5 text-[13px] font-semibold text-white shadow-[var(--shadow-primary)] hover:bg-[var(--color-accent-hi)]"
           >
-            <h3 className="mb-2 text-[13px] font-semibold text-[var(--color-ink)]">
-              {due.length} scheduled {due.length === 1 ? "campaign is" : "campaigns are"} due
-            </h3>
-            <p className="mb-3 text-[11.5px] leading-relaxed text-[var(--color-muted)]">
-              Nothing sends these on a timer — this Worker has no scheduled trigger. They wait here
-              until someone reviews and sends them.
-            </p>
-            <div className="flex flex-col gap-3">
-              {due.map((c) => (
-                <DueSendButton key={c.id} id={c.id} name={c.name} />
-              ))}
-            </div>
-          </div>
-        )}
+            <span className="text-[16px] leading-none">+</span>
+            {L.newCampaign}
+          </Link>
+        }
+      >
+        <div className="flex flex-col gap-3.5 p-4 md:p-6">
+          {due.length > 0 && (
+            <DueBanner
+              items={due.map((d) => ({ id: d.id, name: d.name, when: whenLabel(d.scheduleAt), waiting: d.waiting }))}
+            />
+          )}
 
-        {editId && !initial && (
-          <p className="mb-4 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-3 text-[12.5px] leading-relaxed text-[var(--color-muted)]">
-            That campaign cannot be opened for editing. Either it has already been sent — a sent
-            campaign is the record of what customers received, so duplicate it instead — or it was
-            created before this page stored the message, in which case there is nothing to load.
-          </p>
-        )}
-
-        <div className="grid gap-6 lg:grid-cols-[420px_1fr]">
-          {/* Keyed so switching between "new" and a specific campaign builds a
-              fresh wizard: the step, the bindings and the review all live in
-              state that useState initialisers set once. */}
-          <CampaignComposer
-            key={initial?.id ?? "new"}
-            channels={channels.map((c) => ({
-              id: c.id,
-              displayName: c.displayName,
-              phone: c.phone,
-              isDefault: c.isDefault,
-            }))}
-            tags={tagOpts}
-            fields={fieldOptions}
-            attributeFields={attributeFields}
-            templates={templates}
-            templatesConfigured={!!templateConfig()}
-            live={isLive()}
-            initial={initial}
-          />
-
-          <div className="min-w-0">
-            {/* Search + date range, as a plain GET form: the result is a real
-                URL, so it is refreshable, linkable, and survives the revalidate
-                after a delete or a duplicate. */}
-            <form method="get" action="/campaigns" className="mb-3 flex flex-wrap items-end gap-2">
-              <div>
-                <label
-                  htmlFor="campaign-search"
-                  className="mb-1 block text-[11px] text-[var(--color-muted)]"
-                >
-                  Search
-                </label>
-                <input
-                  id="campaign-search"
-                  name="q"
-                  defaultValue={q}
-                  placeholder="Campaign name"
-                  className="w-[200px] rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-2.5 py-1.5 text-[13px] text-[var(--color-ink)] outline-none placeholder:text-[var(--color-faint)] focus:border-[var(--color-accent)]"
-                />
-              </div>
-              <div>
-                <label htmlFor="from" className="mb-1 block text-[11px] text-[var(--color-muted)]">
-                  From
-                </label>
-                <input
-                  id="from"
-                  type="date"
-                  name="from"
-                  defaultValue={from}
-                  className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-2.5 py-1.5 text-[13px] text-[var(--color-ink)] outline-none focus:border-[var(--color-accent)]"
-                />
-              </div>
-              <div>
-                <label htmlFor="to" className="mb-1 block text-[11px] text-[var(--color-muted)]">
-                  To
-                </label>
-                <input
-                  id="to"
-                  type="date"
-                  name="to"
-                  defaultValue={to}
-                  className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-2.5 py-1.5 text-[13px] text-[var(--color-ink)] outline-none focus:border-[var(--color-accent)]"
-                />
-              </div>
-              <button className="rounded-lg bg-[var(--color-accent)] px-3 py-1.5 text-[12.5px] font-medium text-white">
-                Filter
-              </button>
-              {(q || from || to) && (
-                <Link
-                  href="/campaigns"
-                  className="px-1 pb-1.5 text-[12px] text-[var(--color-muted)] hover:text-[var(--color-ink)]"
-                >
-                  Clear
-                </Link>
-              )}
+          <div className="flex flex-wrap items-center gap-2">
+            <form className="flex h-[36px] w-full max-w-[300px] items-center gap-2 rounded-[8px] border border-[var(--color-border)] bg-[var(--color-surface)] px-3 focus-within:border-[var(--color-accent)]">
+              {statusFilter && <input type="hidden" name="status" value={statusFilter} />}
+              {from && <input type="hidden" name="from" value={from} />}
+              {to && <input type="hidden" name="to" value={to} />}
+              <IconSearch width={15} height={15} className="text-[var(--color-faint)]" />
+              <input
+                name="q"
+                defaultValue={q}
+                placeholder={L.search}
+                className="w-full bg-transparent text-[13px] outline-none placeholder:text-[var(--color-faint)]"
+              />
             </form>
+            <RangePicker from={from} to={to} />
+          </div>
 
-            <div className="overflow-x-auto rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)]">
-              <table className="w-full min-w-[1080px] text-left text-[13px]">
-                <thead>
-                  <tr className="border-b border-[var(--color-border)] text-[11px] uppercase tracking-wide text-[var(--color-faint)]">
-                    <th className={th}>Campaign</th>
-                    <th className={th}>Channel</th>
-                    <th className={th}>Sent to</th>
-                    <th className={th}>People</th>
-                    <th className={th}>Messages sent</th>
-                    <th className={th}>Read</th>
-                    <th className={th}>Wrote back</th>
-                    <th className={th}>Schedule</th>
-                    <th className={th}>Started</th>
-                    <th className={th}>Ended</th>
-                    <th className={th}>Status</th>
-                    <th className={th}>Approval</th>
-                    <th className={`${th} text-right`}>Action</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {campaigns.length === 0 && (
-                    <tr>
-                      <td colSpan={13} className="px-4 py-8 text-center text-[var(--color-faint)]">
-                        {q || from || to
-                          ? "No campaigns match that filter."
-                          : "No campaigns yet. Build one on the left."}
-                      </td>
-                    </tr>
-                  )}
-                  {campaigns.map((c) => {
-                    const stats = (c.stats as CampaignStats | null) ?? {};
-                    const color = STATUS_COLOR[c.status] ?? "var(--color-muted)";
-                    const editable = c.status === "draft" || c.status === "scheduled";
-                    return (
-                      <tr
-                        key={c.id}
-                        className="border-b border-[var(--color-border)] last:border-0"
-                      >
-                        <td className={`${td} font-medium text-[var(--color-ink)]`}>
-                          <div className="flex flex-wrap items-center gap-1.5">
-                            {c.name}
-                            {!c.scheduleAt && (
-                              <span className="rounded-full bg-[var(--color-surface-2)] px-1.5 py-0.5 text-[9.5px] font-semibold uppercase tracking-wide text-[var(--color-faint)]">
-                                Immediately
-                              </span>
-                            )}
-                          </div>
-                          {c.templateName && (
-                            <span className="font-code text-[10px] text-[var(--color-faint)]">
-                              {c.templateName}
-                            </span>
-                          )}
-                          {stats.error && (
-                            <span className="mt-0.5 block text-[11px] font-normal text-[var(--color-danger)]">
-                              {stats.error}
-                            </span>
-                          )}
+          <div className="overflow-x-auto rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)]">
+            <div className="min-w-[980px]">
+              <div
+                className={`grid ${cols} gap-3 border-b border-[var(--color-border)] bg-[var(--color-surface-2)] px-4 py-2.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--color-faint)]`}
+              >
+                <span>{L.colCampaign}</span>
+                <span>{L.colAudience}</span>
+                <span>{L.colResult}</span>
+                <span>{L.colWhen}</span>
+                <span>{L.colStatus}</span>
+                <span />
+              </div>
+
+              {shown.length === 0 && (
+                <p className="px-4 py-10 text-center text-[13px] text-[var(--color-faint)]">
+                  {all.length && (q || from || to || statusFilter) ? L.noMatch : L.none}
+                </p>
+              )}
+
+              {shown.map((r, i) => {
+                const stats = (r.stats as CampaignStats | null) ?? {};
+                const aud = audienceOf(r);
+                const c = counts.get(r.id);
+                const sentState = r.s === "sent" || r.s === "sending" || r.s === "failed";
+                const editable = r.s === "draft" || r.s === "scheduled" || r.s === "due";
+                const href = editable ? `/campaigns/new?edit=${r.id}` : `/campaigns/${r.id}`;
+                return (
+                  <div
+                    key={r.id}
+                    className={`grid ${cols} items-center gap-3 border-b border-[var(--color-border-subtle)] px-4 py-3.5 last:border-b-0 hover:bg-[var(--color-surface-2)]`}
+                  >
+                    <div className="flex min-w-0 items-center gap-3">
+                      <CampIcon seed={i} />
+                      <div className="min-w-0">
+                        <Link
+                          href={href}
+                          className="block truncate text-[13.5px] font-semibold text-[var(--color-ink)] hover:underline"
+                        >
+                          {r.name}
+                        </Link>
+                        <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[11.5px]">
+                          <span className="rounded-[4px] border border-[var(--color-border)] px-1.5 py-px text-[11px] text-[var(--color-faint)]">
+                            {r.templateName || "—"}
+                          </span>
                           {!!stats.failed && (
-                            <span className="mt-0.5 block text-[11px] font-normal text-[var(--color-danger)]">
-                              {stats.failed} refused by WhatsApp
+                            <span className="text-[var(--color-danger)]">{fmt(L.refused, { n: stats.failed })}</span>
+                          )}
+                          {stats.error && <span className="text-[var(--color-danger)]">{stats.error}</span>}
+                          {!!stats.skippedOptedOut && (
+                            <span className="text-[var(--color-faint)]">
+                              {fmt(L.skippedOpt, { n: stats.skippedOptedOut })}
                             </span>
                           )}
                           {!!stats.skippedBlocked && (
-                            <span className="mt-0.5 block text-[11px] font-normal text-[var(--color-faint)]">
-                              {stats.skippedBlocked} skipped — blocked
+                            <span className="text-[var(--color-faint)]">
+                              {fmt(L.skippedBlocked, { n: stats.skippedBlocked })}
                             </span>
                           )}
-                          {!!stats.skippedOptedOut && (
-                            <span className="mt-0.5 block text-[11px] font-normal text-[var(--color-faint)]">
-                              {stats.skippedOptedOut} skipped — they asked not to receive marketing
-                            </span>
-                          )}
-                        </td>
-                        <td className={`${td} text-[var(--color-muted)]`}>
-                          {channelName.get(c.channelId) ?? "—"}
-                        </td>
-                        <td className={`${td} text-[var(--color-muted)]`}>
-                          {audienceLabel(c.audience)}
-                        </td>
-                        <td className={`${td} font-mono text-[var(--color-muted)]`}>
-                          {stats.total ?? "—"}
-                        </td>
-                        <td className={`${td} font-mono text-[var(--color-ink)]`}>
-                          {stats.sent ?? "—"}
-                        </td>
-                        <td className={`${td} text-[var(--color-faint)]`}>{NOT_RECORDED}</td>
-                        <td className={`${td} text-[var(--color-faint)]`}>{NOT_RECORDED}</td>
-                        <td className={`${td} text-[var(--color-faint)]`}>
-                          {c.scheduleAt ? stamp(c.scheduleAt) : "Immediately"}
-                        </td>
-                        <td className={`${td} text-[var(--color-faint)]`}>
-                          {stats.startedAt ? stamp(new Date(stats.startedAt)) : "—"}
-                        </td>
-                        <td className={`${td} text-[var(--color-faint)]`}>
-                          {stats.finishedAt ? stamp(new Date(stats.finishedAt)) : "—"}
-                        </td>
-                        <td className={td}>
-                          <span
-                            className="rounded-full px-2 py-0.5 text-[11px] font-medium"
-                            style={{
-                              background: `color-mix(in srgb, ${color} 12%, transparent)`,
-                              color,
-                            }}
-                          >
-                            {STATUS_LABEL[c.status] ?? c.status}
-                          </span>
-                          <span className="mt-0.5 block text-[10.5px] text-[var(--color-faint)]">
-                            {relTime(c.createdAt)}
-                          </span>
-                        </td>
-                        <td className={`${td} text-[var(--color-faint)]`}>
-                          {c.requiresApproval
-                            ? c.approvedByMemberId
-                              ? "Approved"
-                              : "Waiting"
-                            : "Not required"}
-                        </td>
-                        <td className={td}>
-                          <CampaignRowActions
-                            id={c.id}
-                            name={c.name}
-                            editable={editable}
-                            scheduled={c.status === "scheduled"}
-                          />
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+                        </div>
+                      </div>
+                    </div>
 
-              {campaigns.length > 0 && (
-                <p className="border-t border-[var(--color-border)] px-4 py-2.5 text-[11px] leading-relaxed text-[var(--color-faint)]">
-                  Read and Wrote back are always a dash: WhatsApp reports read receipts and replies
-                  against an individual message, and nothing links a message back to the campaign
-                  that sent it, so there is no figure here that would be true. System Logs shows the
-                  delivery status of every message. People counts everyone the audience matched;
-                  Messages sent counts the ones WhatsApp accepted.
-                </p>
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-1.5 truncate text-[12.5px] text-[var(--color-ink)]">
+                        {aud.dot && (
+                          <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: aud.dot }} />
+                        )}
+                        <span className="truncate">{aud.label}</span>
+                      </div>
+                      <div className="text-[11.5px] text-[var(--color-faint)]">
+                        {aud.people == null ? "—" : fmt(L.people, { n: aud.people.toLocaleString("en-US") })}
+                      </div>
+                    </div>
+
+                    <div className="min-w-0">
+                      {!sentState ? (
+                        <span className="text-[12px] text-[var(--color-faint)]">{L.notSent}</span>
+                      ) : c && c.sent > 0 ? (
+                        <ResultBar sent={c.sent} read={c.read} replied={c.replied} total={Math.max(c.total, 1)} L={L} />
+                      ) : (
+                        <span className="text-[12px] text-[var(--color-muted)]">
+                          {fmt(L.nSent, { n: stats.sent ?? 0 })}
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="leading-tight">
+                      <div className="text-[12.5px] text-[var(--color-ink)]">
+                        {sentState
+                          ? whenLabel(stats.startedAt) || "—"
+                          : r.scheduleAt
+                            ? whenLabel(r.scheduleAt)
+                            : "—"}
+                      </div>
+                      {(sentState ? !!stats.startedAt : !!r.scheduleAt) && (
+                        <div className="mt-0.5 text-[11px] text-[var(--color-faint)]">
+                          {sentState ? L.startedL : L.scheduled}
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="leading-tight">
+                      <StatusBadge s={r.s} L={L} />
+                      {r.requiresApproval && (
+                        <div
+                          className={`mt-1 text-[11px] ${
+                            r.approvedByMemberId ? "text-[var(--color-faint)]" : "text-[var(--color-warning)]"
+                          }`}
+                        >
+                          {r.approvedByMemberId ? L.approved : L.waiting}
+                        </div>
+                      )}
+                    </div>
+
+                    <CampaignRowMenu
+                      id={r.id}
+                      name={r.name}
+                      editable={editable}
+                      scheduled={r.s === "scheduled" || r.s === "due"}
+                      canApprove={canApprove && r.waiting}
+                    />
+                  </div>
+                );
+              })}
+
+              {shown.length > 0 && (
+                <div className="flex flex-wrap items-center gap-4 border-t border-[var(--color-border)] px-4 py-2.5 text-[11.5px] text-[var(--color-muted)]">
+                  <Legend color="#a9c1f5" label={L.sentL} />
+                  <Legend color="var(--color-pastel-blue-ink)" label={L.readL} />
+                  <Legend color="var(--color-pastel-purple-ink)" label={L.repliedL} />
+                  <span className="ml-auto text-[11px] text-[var(--color-faint)]">{L.legendNote}</span>
+                </div>
               )}
             </div>
           </div>
         </div>
+      </PageChrome>
+    </>
+  );
+}
+
+function Legend({ color, label }: { color: string; label: string }) {
+  return (
+    <span className="flex items-center gap-1.5">
+      <span className="h-2 w-2 rounded-[2px]" style={{ background: color }} />
+      {label}
+    </span>
+  );
+}
+
+function ResultBar({
+  sent,
+  read,
+  replied,
+  total,
+  L,
+}: {
+  sent: number;
+  read: number;
+  replied: number;
+  total: number;
+  L: { sentL: string; readL: string; repliedL: string };
+}) {
+  const pct = (v: number) => `${Math.min(100, (v / total) * 100)}%`;
+  return (
+    <div className="max-w-[262px]">
+      <div className="relative h-[6px] overflow-hidden rounded-full bg-[var(--color-surface-dim)]">
+        <span className="absolute inset-y-0 left-0 bg-[#a9c1f5]" style={{ width: pct(sent) }} />
+        <span className="absolute inset-y-0 left-0 bg-[var(--color-pastel-blue-ink)]" style={{ width: pct(read) }} />
+        <span className="absolute inset-y-0 left-0 bg-[var(--color-pastel-purple-ink)]" style={{ width: pct(replied) }} />
       </div>
-    </PageChrome>
+      <div className="mt-1.5 flex gap-3 text-[11.5px] text-[var(--color-muted)]">
+        <span>
+          <b className="font-semibold text-[var(--color-ink)]">{sent}</b> {L.sentL}
+        </span>
+        <span>
+          <b className="font-semibold text-[var(--color-ink)]">{read}</b> {L.readL}
+        </span>
+        <span>
+          <b className="font-semibold text-[var(--color-ink)]">{replied}</b> {L.repliedL}
+        </span>
+      </div>
+    </div>
   );
 }

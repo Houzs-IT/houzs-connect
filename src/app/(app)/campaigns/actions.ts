@@ -13,6 +13,7 @@
 // the contract in src/lib/whatsapp/templateBindings.ts: resolveSendBindings →
 // templateBindingGaps → resolveSendParams, per that file's own instructions.
 
+import { tagCampaignMessages } from "@/lib/campaign-messages";
 import { revalidatePath } from "next/cache";
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { getDb } from "@/db/client";
@@ -74,7 +75,7 @@ const SEND_CHUNK = 20;
 async function ctx() {
   const me = await getCurrentMember();
   if (!me) return null;
-  return { db: getDb(), companyId: me.companyId, memberId: me.id };
+  return { db: getDb(), companyId: me.companyId, memberId: me.id, role: me.role };
 }
 
 type Db = ReturnType<typeof getDb>;
@@ -245,6 +246,9 @@ export async function saveCampaign(input: CampaignInput): Promise<SaveResult> {
         audience: packAudience(spec),
         scheduleAt,
         status,
+        // Any edit voids an earlier approval: what was approved is not this.
+        requiresApproval: !!input.requiresApproval,
+        approvedByMemberId: null,
       })
       .where(
         and(
@@ -272,6 +276,7 @@ export async function saveCampaign(input: CampaignInput): Promise<SaveResult> {
       scheduleAt,
       status,
       stats: null,
+      requiresApproval: !!input.requiresApproval,
     })
     .returning();
   revalidatePath("/campaigns");
@@ -314,7 +319,31 @@ export async function duplicateCampaign(formData: FormData): Promise<void> {
     // Deliberately not copied: the original's figures describe the original's
     // send, and a copy has sent nothing.
     stats: null,
+    requiresApproval: row.requiresApproval,
   });
+  revalidatePath("/campaigns");
+}
+
+/** Who may approve a campaign that is held for approval. */
+const APPROVERS = new Set(["OWNER", "ADMIN", "MANAGER"]);
+
+/** Approve a draft or scheduled campaign that requires it. Managers and up. */
+export async function approveCampaign(formData: FormData): Promise<void> {
+  const c = await ctx();
+  if (!c || !APPROVERS.has(c.role)) return;
+  const id = String(formData.get("id") ?? "");
+  if (!id) return;
+  await c.db
+    .update(campaignTable)
+    .set({ approvedByMemberId: c.memberId })
+    .where(
+      and(
+        eq(campaignTable.id, id),
+        eq(campaignTable.companyId, c.companyId),
+        eq(campaignTable.requiresApproval, true),
+        inArray(campaignTable.status, EDITABLE)
+      )
+    );
   revalidatePath("/campaigns");
 }
 
@@ -600,6 +629,10 @@ export async function sendCampaignNow(input: {
   });
   if (!row) return { ok: false, error: "Campaign not found." };
 
+  if (row.requiresApproval && !row.approvedByMemberId) {
+    return { ok: false, error: "This campaign is waiting for a manager to approve it." };
+  }
+
   const spec = unpackSpec(row.audience);
   if (!spec) {
     return {
@@ -662,6 +695,9 @@ export async function sendCampaignNow(input: {
     // Mark ATTEMPTED (a refusal included) so a bad number is not retried next chunk.
     done.add(person.id);
   }
+
+  // Per-message campaign link, for read / replied stats (lib/campaign-messages.ts).
+  await tagCampaignMessages(row.id, msgIds);
 
   // `sendOutbound` marks a row FAILED when Meta gives back no message id, so
   // "sent" here means Meta accepted it — not merely that a row was written.

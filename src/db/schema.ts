@@ -298,6 +298,8 @@ export const message = connect.table(
     isBot: boolean("is_bot").notNull().default(false),
     waMessageId: text("wa_message_id"),
     interactivePayload: jsonb("interactive_payload"),
+    // NOTE: connect.message also has `campaign_id` (migration 0010), left out
+    // of this definition on purpose — see src/lib/campaign-messages.ts.
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({ conversationIdx: index("message_conversation_idx").on(t.conversationId) })

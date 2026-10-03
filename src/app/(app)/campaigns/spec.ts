@@ -210,6 +210,8 @@ export interface CampaignInput {
   spec: CampaignSpec;
   /** datetime-local string, or empty/null for "send immediately". */
   scheduleAt?: string | null;
+  /** Hold the send until a manager approves it (campaign.requires_approval). */
+  requiresApproval?: boolean;
 }
 
 /** One row of the recipient table in step 3. */

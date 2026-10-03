@@ -71,6 +71,13 @@
       "when": 1791100000000,
       "tag": "0009_member_last_seen",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1791200000000,
+      "tag": "0010_message_campaign_id",
+      "breakpoints": true
     }
   ]
 }
