@@ -494,6 +494,61 @@ export const campaign = connect.table(
   (t) => ({ companyIdx: index("campaign_company_idx").on(t.companyId) })
 );
 
+// ─────────────────────────── Internal chat ───────────────────────────
+// Staff-to-staff channels and direct messages (migration 0011, also
+// self-applied by db/ensure-internal.ts).
+
+export const internalChannel = connect.table(
+  "internal_channel",
+  {
+    id: id(),
+    companyId: text("company_id").notNull(),
+    /** "channel" (everyone in the company) or "dm" (exactly two members). */
+    kind: text("kind").notNull().default("channel"),
+    name: text("name").notNull(),
+    topic: text("topic"),
+    departmentId: text("department_id"),
+    /** For a DM: the two member ids, sorted and joined — one DM per pair. */
+    dmKey: text("dm_key"),
+    createdByMemberId: text("created_by_member_id"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({ companyIdx: index("internal_channel_company_idx").on(t.companyId) })
+);
+
+export const internalChannelMember = connect.table("internal_channel_member", {
+  channelId: text("channel_id").notNull(),
+  memberId: text("member_id").notNull(),
+  lastReadAt: timestamp("last_read_at", { withTimezone: true }),
+  joinedAt: timestamp("joined_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const internalMessage = connect.table(
+  "internal_message",
+  {
+    id: id(),
+    channelId: text("channel_id").notNull(),
+    authorMemberId: text("author_member_id"),
+    body: text("body").notNull().default(""),
+    /** Set on a thread reply: the message it answers. */
+    parentId: text("parent_id"),
+    /** A thread reply that was also posted to the channel. */
+    alsoInChannel: boolean("also_in_channel").notNull().default(false),
+    /** A customer conversation shown as a card under the message. */
+    conversationId: text("conversation_id"),
+    /** A recorded system action, e.g. { text: "ERP delivery date changed to 30/09" }. */
+    systemAction: jsonb("system_action"),
+    /** Member ids mentioned, plus "channel" for @channel. */
+    mentions: jsonb("mentions"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    editedAt: timestamp("edited_at", { withTimezone: true }),
+  },
+  (t) => ({
+    channelIdx: index("internal_message_channel_idx").on(t.channelId, t.createdAt),
+    parentIdx: index("internal_message_parent_idx").on(t.parentId),
+  })
+);
+
 // ─────────────────────── Template variable bindings ───────────────────────
 
 /**

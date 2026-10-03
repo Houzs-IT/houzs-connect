@@ -1,17 +1,26 @@
-import { Placeholder } from "@/components/Placeholder";
-import { getDict } from "@/lib/i18n/server";
+import { getCurrentMember } from "@/lib/current-member";
+import { ensureInternal, sidebar } from "./data";
+import { ChannelView } from "./ChannelView";
+import { InternalMenu } from "./InternalMenu";
 
-// Internal (staff-to-staff chat) is the last step of the redesign. Until then
-// the rail links here so the navigation is complete and says what is coming.
+export const dynamic = "force-dynamic";
+
+/**
+ * /internal — a phone opens on the list of channels and people; a desktop,
+ * which already shows that list in the menu, opens the first channel.
+ */
 export default async function InternalPage() {
-  const t = await getDict();
+  const me = await getCurrentMember();
+  if (!me) return null;
+  await ensureInternal(me.companyId, me.id);
+  const side = await sidebar(me.companyId, me.id);
+  const first = side.channels.find((c) => c.name === "general") ?? side.channels[0];
   return (
-    <Placeholder
-      section="internal"
-      page="comingSoon"
-      title={t.nav.internal}
-      phase={t.internal.phase}
-      points={[t.internal.p1, t.internal.p2, t.internal.p3]}
-    />
+    <>
+      <div className="flex min-w-0 flex-1 md:hidden">
+        <InternalMenu mobile />
+      </div>
+      <div className="hidden min-w-0 flex-1 md:flex">{first && <ChannelView channelId={first.id} />}</div>
+    </>
   );
 }

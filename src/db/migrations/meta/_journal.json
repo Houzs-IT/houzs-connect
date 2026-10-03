@@ -78,6 +78,13 @@
       "when": 1791200000000,
       "tag": "0010_message_campaign_id",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1791300000000,
+      "tag": "0011_internal_chat",
+      "breakpoints": true
     }
   ]
 }
