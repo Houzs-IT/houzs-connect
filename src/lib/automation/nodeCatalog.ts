@@ -68,7 +68,6 @@ export const NODE_CATALOG: NodeCatalogEntry[] = [
     glyph: "↪",
     keywords: ["goto", "handoff", "chain", "another automation"],
     hint: "Hand the contact to another automation",
-    stub: true,
   },
   {
     type: "delay",
