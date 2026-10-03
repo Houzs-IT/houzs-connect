@@ -64,6 +64,13 @@
       "when": 1791000000000,
       "tag": "0008_automation_run_contact_idx",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1791100000000,
+      "tag": "0009_member_last_seen",
+      "breakpoints": true
     }
   ]
 }

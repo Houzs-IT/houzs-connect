@@ -1,10 +1,14 @@
 import { fmt, type Dict } from "@/lib/i18n/dict";
-import { teamPresence } from "./queries";
+import { companyPresence } from "@/lib/presence";
 import { Avatar } from "./ui";
 
-/** "6 online · 2 offline" pill, from the proxy in teamPresence(). */
+/** "6 online · 2 offline" pill, from member.last_seen_at (lib/presence.ts). */
 export async function Presence({ companyId, s }: { companyId: string; s: Dict["dash"] }) {
-  const p = await teamPresence(companyId);
+  const people = await companyPresence(companyId);
+  const p = {
+    online: people.filter((x) => x.online).map((x) => x.name),
+    offline: people.filter((x) => !x.online).length,
+  };
   return (
     <span
       title={s.onlineTip}

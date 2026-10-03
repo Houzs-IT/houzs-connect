@@ -5,6 +5,7 @@ import { agentsReport, supportStats } from "./queries";
 import { Avatar, Badge, Card, EYEBROW, Empty } from "./ui";
 import { delta, humanDuration, type PeriodWindow } from "./util";
 import { DeptFilter } from "./DeptFilter";
+import { companyPresence } from "@/lib/presence";
 
 type S = Dict["dash"];
 
@@ -19,10 +20,13 @@ export async function SupportTab({
   s: S;
   dept?: string;
 }) {
-  const [stats, report] = await Promise.all([
+  const [stats, report, people] = await Promise.all([
     supportStats(companyId, w),
     agentsReport(companyId, w, dept),
+    companyPresence(companyId),
   ]);
+  const online = new Set(people.filter((p) => p.online).map((p) => p.id));
+  const onlineCount = report.list.filter((a) => online.has(a.id)).length;
   const kpis: { label: string; hint: string; dot: string; now: number; prev: number }[] = [
     { label: s.k1, hint: s.k1Hint, dot: "var(--color-accent)", now: stats.cur.total, prev: stats.prev.total },
     { label: s.k2, hint: s.k2Hint, dot: "#4fb0c6", now: stats.cur.open, prev: stats.prev.open },
@@ -85,6 +89,14 @@ export async function SupportTab({
             <span className="h-1.5 w-1.5 rounded-full bg-[var(--color-accent)]" />
             {s.totalAgents} <b className="font-semibold text-[var(--color-ink)]">{report.list.length}</b>
           </span>
+          <span className="flex items-center gap-1.5 text-[12px] text-[var(--color-muted)]">
+            <span className="h-1.5 w-1.5 rounded-full bg-[var(--color-success)]" />
+            {s.onlineAgents} <b className="font-semibold text-[var(--color-ink)]">{onlineCount}</b>
+          </span>
+          <span className="flex items-center gap-1.5 text-[12px] text-[var(--color-muted)]">
+            <span className="h-1.5 w-1.5 rounded-full bg-[var(--color-border-strong)]" />
+            {s.offlineAgents} <b className="font-semibold text-[var(--color-ink)]">{report.list.length - onlineCount}</b>
+          </span>
           <DeptFilter depts={report.depts} value={dept ?? ""} allLabel={s.allDepts} />
         </div>
         <div className="overflow-x-auto">
@@ -108,7 +120,14 @@ export async function SupportTab({
                   className={`grid ${cols} items-center gap-2 border-b border-[var(--color-border-subtle)] px-[22px] py-[11px] text-[12.5px] tabular-nums hover:bg-[var(--color-surface-2)]`}
                 >
                   <span className="flex min-w-0 items-center gap-2.5">
-                    <Avatar name={a.name} />
+                    <span className="relative">
+                      <Avatar name={a.name} />
+                      <span
+                        className={`absolute -bottom-px -right-px h-[9px] w-[9px] rounded-full border-2 border-white ${
+                          online.has(a.id) ? "bg-[var(--color-success)]" : "bg-[var(--color-border-strong)]"
+                        }`}
+                      />
+                    </span>
                     <span className="min-w-0">
                       <span className="block truncate font-medium text-[var(--color-ink)]">{a.name}</span>
                       {a.dept && <span className="block text-[11px] text-[var(--color-faint)]">{a.dept}</span>}

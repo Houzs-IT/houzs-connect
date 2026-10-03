@@ -3,6 +3,8 @@ import { and, gt, ne } from "drizzle-orm";
 import { Sidebar } from "@/components/Sidebar";
 import { MobileTabBar } from "@/components/shell/MobileTabBar";
 import { ShellProvider } from "@/components/shell/ShellProvider";
+import { PresencePing } from "@/components/shell/PresencePing";
+import { touchPresence } from "@/lib/presence";
 import { getLang, getMenuCollapsed } from "@/lib/i18n/server";
 import { getDb } from "@/db/client";
 import { ensureContactColumns } from "@/db/ensure";
@@ -42,6 +44,8 @@ export default async function AppLayout({
   // Same window, for the channel's phone number id (ensure-channel.ts): the
   // automations, campaigns and phone-number pages all read channel rows.
   await ensureChannelColumns(db).catch(() => {});
+  // Online status (lib/presence.ts): any page render counts as being here.
+  await touchPresence(me.id);
 
   const allMembers = await db.query.member.findMany({
     columns: { id: true, managerId: true },
@@ -66,6 +70,7 @@ export default async function AppLayout({
   // (PageChrome), so the two simply sit side by side.
   return (
     <ShellProvider lang={await getLang()} menuCollapsed={await getMenuCollapsed()}>
+      <PresencePing />
       <div data-shell className="flex h-dvh flex-col overflow-hidden">
         <div className="flex min-h-0 flex-1">
           <Sidebar unread={unread} live={live} me={{ name: me.name }} />

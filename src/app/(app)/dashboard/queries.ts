@@ -15,6 +15,7 @@ import {
 } from "@/db/schema";
 import { attrs } from "@/lib/format";
 import { SLA_MINUTES } from "@/lib/sla";
+import { companyPresence } from "@/lib/presence";
 import type { PeriodWindow } from "./util";
 
 /*
@@ -217,7 +218,7 @@ export async function teamLoad(companyId: string, w: PeriodWindow) {
     .orderBy(desc(count()))
     .limit(5);
   const names = await memberNames(companyId);
-  return rows.map((r) => ({ name: names.get(r.agentId ?? "") ?? "—", n: r.n }));
+  return rows.map((r) => ({ id: r.agentId ?? "", name: names.get(r.agentId ?? "") ?? "—", n: r.n }));
 }
 
 /** Support KPIs + daily series: conversations STARTED in the window. */
@@ -475,13 +476,9 @@ export async function connectedAccounts(companyId: string) {
 
 export async function liveNow(companyId: string) {
   const db = getDb();
-  const fifteenAgo = new Date(Date.now() - 15 * 60_000);
-  const todayStart = new Date(
-    `${new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kuala_Lumpur" })}T00:00:00+08:00`
-  );
   const mine = eq(contact.companyId, companyId);
 
-  const [openNow, waitingRows, botRuns, active, recentMsgs, recentRuns, recentPays] =
+  const [openNow, waitingRows, botRuns, people, recentMsgs, recentRuns, recentPays] =
     await Promise.all([
       db
         .select({ n: count() })
@@ -506,20 +503,7 @@ export async function liveNow(companyId: string) {
         .from(automationRun)
         .innerJoin(automation, eq(automation.id, automationRun.automationId))
         .where(and(eq(automation.companyId, companyId), eq(automationRun.status, "waiting"))),
-      db
-        .select({ memberId: message.sentByMemberId, last: sql<Date>`max(${message.createdAt})` })
-        .from(message)
-        .innerJoin(conversation, eq(conversation.id, message.conversationId))
-        .innerJoin(contact, eq(contact.id, conversation.contactId))
-        .where(
-          and(
-            mine,
-            eq(message.direction, "OUT"),
-            isNotNull(message.sentByMemberId),
-            gte(message.createdAt, todayStart)
-          )
-        )
-        .groupBy(message.sentByMemberId),
+      companyPresence(companyId),
       db
         .select({
           id: message.id,
@@ -582,14 +566,13 @@ export async function liveNow(companyId: string) {
   return {
     /** The clock this snapshot was taken at — renderers measure waits from it. */
     now: Date.now(),
-    activeAgents: active.filter((a) => new Date(a.last) >= fifteenAgo).length,
+    onlineAgents: people.filter((p) => p.online).length,
     openNow: openNow[0]?.n ?? 0,
     waitingCount: waiting.length,
     waiting: waiting.slice(0, 6),
     botHandling: botRuns[0]?.n ?? 0,
-    activeToday: active
-      .map((a) => ({ name: names.get(a.memberId ?? "") ?? "—", last: new Date(a.last) }))
-      .sort((a, b) => b.last.getTime() - a.last.getTime()),
+    // Online first, then most recently seen (companyPresence orders them).
+    people: [...people].sort((a, b) => Number(b.online) - Number(a.online)),
     feed: [
       ...recentMsgs.map((m) => ({
         id: `m-${m.id}`,
@@ -622,40 +605,6 @@ export async function liveNow(companyId: string) {
       .sort((a, b) => b.at.getTime() - a.at.getTime())
       .slice(0, 12),
   };
-}
-
-// ─────────────────────────── Presence ───────────────────────────
-
-/**
- * Who is "online". Connect does not track presence, so this is a stated proxy:
- * an active member who sent a message in the last 15 minutes. The header says
- * so on hover.
- */
-export async function teamPresence(companyId: string) {
-  const db = getDb();
-  const fifteenAgo = new Date(Date.now() - 15 * 60_000);
-  const [members, recent] = await Promise.all([
-    db.query.member.findMany({
-      where: and(eq(member.companyId, companyId), eq(member.active, true)),
-      columns: { id: true, name: true },
-    }),
-    db
-      .selectDistinct({ memberId: message.sentByMemberId })
-      .from(message)
-      .innerJoin(conversation, eq(conversation.id, message.conversationId))
-      .innerJoin(contact, eq(contact.id, conversation.contactId))
-      .where(
-        and(
-          eq(contact.companyId, companyId),
-          eq(message.direction, "OUT"),
-          isNotNull(message.sentByMemberId),
-          gte(message.createdAt, fifteenAgo)
-        )
-      ),
-  ]);
-  const on = new Set(recent.map((r) => r.memberId));
-  const online = members.filter((m) => on.has(m.id));
-  return { online: online.map((m) => m.name), offline: members.length - online.length };
 }
 
 // ─────────────────────────── helpers ───────────────────────────

@@ -133,6 +133,9 @@ export const member = connect.table(
     concurrencyLimit: integer("concurrency_limit").notNull().default(0),
     managerId: text("manager_id"),
     departmentId: text("department_id"),
+    // NOTE: connect.member also has `last_seen_at` (migration 0009). It is left
+    // out of this definition on purpose and read/written by lib/presence.ts —
+    // see the note there.
     // ERP org sync: the ERP users.id this member mirrors, and a soft-delete flag
     // (members are never hard-deleted — they may own conversation assignments —
     // so a user removed from the ERP is marked active=false instead).

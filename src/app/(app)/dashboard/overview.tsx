@@ -17,6 +17,7 @@ import { humanDuration, type PeriodWindow } from "./util";
 import { VolumeCard } from "./VolumeCard";
 import { SoonButton } from "./SoonButton";
 import { formatPhone } from "@/lib/format";
+import { companyPresence } from "@/lib/presence";
 
 type S = Dict["dash"];
 type Props = { companyId: string; w: PeriodWindow; s: S };
@@ -334,7 +335,8 @@ export async function VolumeSection({ companyId, w }: Omit<Props, "s">) {
 // ─────────────────────── Right column ───────────────────────
 
 export async function TeamCard({ companyId, w, s }: Props) {
-  const rows = await teamLoad(companyId, w);
+  const [rows, people] = await Promise.all([teamLoad(companyId, w), companyPresence(companyId)]);
+  const online = new Set(people.filter((p) => p.online).map((p) => p.id));
   const max = Math.max(1, ...rows.map((r) => r.n));
   return (
     <Card>
@@ -353,7 +355,14 @@ export async function TeamCard({ companyId, w, s }: Props) {
         <ul className="flex flex-col gap-3">
           {rows.map((r) => (
             <li key={r.name} className="flex items-center gap-2.5">
-              <Avatar name={r.name} size={26} />
+              <span className="relative">
+                <Avatar name={r.name} size={26} />
+                <span
+                  className={`absolute -bottom-px -right-px h-[9px] w-[9px] rounded-full border-2 border-white ${
+                    online.has(r.id) ? "bg-[var(--color-success)]" : "bg-[var(--color-border-strong)]"
+                  }`}
+                />
+              </span>
               <div className="min-w-0 flex-1">
                 <div className="flex items-baseline justify-between gap-2 text-[12.5px]">
                   <span className="truncate text-[var(--color-ink)]">{r.name}</span>
