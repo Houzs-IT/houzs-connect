@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { listSendableTemplates } from "@/app/actions";
 import { listInboxContacts } from "@/app/(app)/inbox/media-actions";
-import { startConversation } from "@/app/(app)/inbox/erp-actions";
+import { startConversation } from "@/app/(app)/inbox/conversation-actions";
 import { fmt } from "@/lib/i18n/dict";
 import { useShell } from "@/components/shell/ShellProvider";
 import { IconClose, IconSearch } from "@/components/icons";
@@ -23,7 +23,7 @@ function fill(body: string, params: string[]) {
  * "New conversation" at the foot of the Service list: pick a customer, pick an
  * approved template, fill its placeholders, send. The server reuses an open
  * conversation with that customer or opens one on the company's default number
- * (erp-actions.ts startConversation), then this opens it.
+ * (conversation-actions.ts), then this opens it.
  */
 export function NewConversation() {
   const { t } = useShell();
