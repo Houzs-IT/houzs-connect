@@ -25,6 +25,7 @@ import { generateAgentReply } from "@/lib/ai";
  */
 
 const MAX_STEPS = 100; // safety against cycles
+const MAX_JUMP_DEPTH = 10; // safety against jump_to_automation chains forming a cycle
 
 function nextNodeId(
   graph: FlowGraph,
@@ -72,12 +73,15 @@ async function ensureTag(companyId: string, name: string) {
 
 interface RunCtx {
   runId: string;
+  automationId: string;
   graph: FlowGraph;
   companyId: string;
   contactId: string;
   conversationId: string;
   contactName: string | null;
   contactPhone: string;
+  /** how many jump_to_automation handoffs led here; caps a jump cycle. */
+  jumpDepth: number;
 }
 
 async function logStep(runId: string, entry: Record<string, unknown>) {
@@ -302,12 +306,26 @@ async function execNode(
       return { next: nextNodeId(ctx.graph, node.id) };
     }
 
-    case "google_sheets":
-    case "eval":
     case "jump_to_automation": {
+      // Hand the contact to the target automation (a fresh run from its trigger),
+      // then END this run — the target takes over. A missing target, a self-jump,
+      // or exceeding the depth cap is a no-op that just continues, so a mis-built
+      // flow neither dead-ends nor loops forever.
+      const target = typeof d.targetAutomationId === "string" ? d.targetAutomationId : "";
+      const canJump = target !== "" && target !== ctx.automationId && ctx.jumpDepth < MAX_JUMP_DEPTH;
+      await logStep(ctx.runId, { node: node.id, type: node.type, target, jumped: canJump });
+      if (canJump) {
+        await startRun(target, ctx.contactId, undefined, ctx.jumpDepth + 1);
+        return { next: undefined };
+      }
+      return { next: nextNodeId(ctx.graph, node.id) };
+    }
+
+    case "google_sheets":
+    case "eval": {
       // STUB: config is captured + persisted in the graph and the run continues,
-      // but the side effect is not executed yet (see report). Kept as a
-      // pass-through so a flow built around it does not dead-end.
+      // but the side effect is not executed yet. Kept as a pass-through so a flow
+      // built around it does not dead-end.
       await logStep(ctx.runId, { node: node.id, type: node.type, stub: true });
       return { next: nextNodeId(ctx.graph, node.id) };
     }
@@ -353,7 +371,7 @@ async function advance(ctx: RunCtx, startNodeId: string | undefined) {
     .where(eq(automationRun.id, ctx.runId));
 }
 
-async function buildCtx(runId: string): Promise<RunCtx | null> {
+async function buildCtx(runId: string, jumpDepth = 0): Promise<RunCtx | null> {
   const db = getDb();
   const run = await db.query.automationRun.findFirst({
     where: eq(automationRun.id, runId),
@@ -370,12 +388,14 @@ async function buildCtx(runId: string): Promise<RunCtx | null> {
   const convo = await getOrCreateConversation(automation.channelId, contact.id);
   return {
     runId,
+    automationId: automation.id,
     graph: asGraph(automation.graph),
     companyId: automation.companyId,
     contactId: contact.id,
     conversationId: convo.id,
     contactName: contact.name,
     contactPhone: contact.phone,
+    jumpDepth,
   };
 }
 
@@ -407,7 +427,8 @@ function pickEntryTrigger(
 export async function startRun(
   automationId: string,
   contactId: string,
-  entry?: { callbackId?: string; tag?: string }
+  entry?: { callbackId?: string; tag?: string },
+  jumpDepth = 0
 ) {
   const db = getDb();
   const automation = await db.query.automation.findFirst({
@@ -422,7 +443,7 @@ export async function startRun(
     .insert(automationRun)
     .values({ automationId, contactId, status: "running", log: [] })
     .returning();
-  const ctx = await buildCtx(run.id);
+  const ctx = await buildCtx(run.id, jumpDepth);
   if (!ctx) return run;
   await advance(ctx, trigger.id);
   return run;
