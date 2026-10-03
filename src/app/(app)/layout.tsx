@@ -4,6 +4,7 @@ import { Sidebar } from "@/components/Sidebar";
 import { MobileTabBar } from "@/components/shell/MobileTabBar";
 import { ShellProvider } from "@/components/shell/ShellProvider";
 import { PresencePing } from "@/components/shell/PresencePing";
+import { NotifyPoller } from "@/components/shell/NotifyPoller";
 import { touchPresence } from "@/lib/presence";
 import { getLang, getMenuCollapsed } from "@/lib/i18n/server";
 import { getDb } from "@/db/client";
@@ -72,6 +73,7 @@ export default async function AppLayout({
   return (
     <ShellProvider lang={await getLang()} menuCollapsed={await getMenuCollapsed()}>
       <PresencePing />
+      <NotifyPoller />
       <div data-shell className="flex h-dvh flex-col overflow-hidden">
         <div className="flex min-h-0 flex-1">
           <Sidebar unread={unread} live={live} me={{ name: me.name }} />

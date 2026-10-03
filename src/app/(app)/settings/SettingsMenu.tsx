@@ -36,7 +36,7 @@ export async function SettingsMenu() {
           items: [
             { href: "/settings/profile", label: L.profile, sub: me.name, icon: "☺", tone: "blue" },
             { href: "/settings/security", label: L.security, sub: L.fromErp, icon: "⚿", tone: "pink" },
-            { href: "/settings/notifications", label: L.notifications, sub: L.proposal, icon: "♪", tone: "orange" },
+            { href: "/settings/notifications", label: L.notifications, sub: L.nBrowser, icon: "♪", tone: "orange" },
           ],
         },
         {
@@ -48,16 +48,16 @@ export async function SettingsMenu() {
             { href: "/settings/departments", label: L.departments, sub: fmt(L.nDepts, { n: depts }), icon: "▤", tone: "cyan" },
             { href: "/settings/auto-replies", label: L.autoReplies, sub: ar?.welcomeEnabled ? L.welcomeOn : L.welcomeOff, icon: "↺", tone: "cyan" },
             { href: "/settings/library", label: L.library, sub: `${qr} · ${tags} · ${fields}`, icon: "#", tone: "orange" },
-            { href: "/settings/developers", label: L.developers, sub: L.proposal, icon: "‹›", tone: "blue" },
+            { href: "/settings/developers", label: L.developers, sub: "API", icon: "‹›", tone: "blue" },
           ],
         },
         {
           title: L.more,
           items: [
             { href: "/settings/numbers", label: L.channels, sub: fmt(L.nNumbers, { n: numbers }), icon: "☏", tone: "green" },
-            { href: "/settings/billing", label: L.billing, sub: L.proposal, icon: "RM", tone: "green" },
-            { href: "/settings/files", label: L.files, sub: L.proposal, icon: "▣", tone: "orange" },
-            { href: "/settings/integrations", label: L.integrations, sub: L.proposal, icon: "⇄", tone: "pink" },
+            { href: "/settings/billing", label: L.billing, sub: L.spend, icon: "RM", tone: "green" },
+            { href: "/settings/files", label: L.files, sub: `${L.fPhotos} · ${L.fDocs}`, icon: "▣", tone: "orange" },
+            { href: "/settings/integrations", label: L.integrations, sub: "ERP · WhatsApp", icon: "⇄", tone: "pink" },
           ],
         },
       ]}
