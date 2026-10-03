@@ -11,16 +11,20 @@ import { PageChrome } from "@/components/PageChrome";
 import { getCurrentMember } from "@/lib/current-member";
 import { fetchNumbers } from "./actions";
 import { NumbersClient } from "./NumbersClient";
+import { getDict } from "@/lib/i18n/server";
+import { SettingsHead } from "../ui";
 
 export default async function NumbersPage() {
   const me = await getCurrentMember();
   if (!me) notFound();
 
   const view = await fetchNumbers();
+  const t = await getDict();
 
   return (
     <PageChrome section="settings" page="channels">
-      <div className="p-6">
+      <div className="max-w-[1180px] p-4 md:p-6">
+        <SettingsHead title={t.set.channels} sub={t.set.channelsSub} />
         {!view.permitted ? (
           <p className="text-[13px] text-[var(--color-muted)]">
             Only an owner or admin can see and change the company&apos;s WhatsApp numbers.

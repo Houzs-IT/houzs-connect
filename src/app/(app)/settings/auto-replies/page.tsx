@@ -12,6 +12,8 @@ import { isOpen, type WeekHours } from "@/lib/auto-reply/decide";
 import { defaultAutoReplies } from "@/lib/auto-reply/defaults";
 import { AutoRepliesForm } from "./AutoRepliesForm";
 import { bypassReadCache } from "@/db/fresh";
+import { getDict } from "@/lib/i18n/server";
+import { SettingsHead } from "../ui";
 
 export const dynamic = "force-dynamic";
 
@@ -34,16 +36,12 @@ export default async function AutoRepliesPage() {
   const settings = saved ?? defaultAutoReplies(companyName);
   const openNow = settings.hours ? isOpen(new Date(), settings.hours, settings.timezone) : true;
   const canEdit = me.role === "OWNER" || me.role === "ADMIN";
+  const t = await getDict();
 
   return (
     <PageChrome section="settings" page="autoReplies">
-      <div className="max-w-3xl p-6">
-        {!saved && (
-          <div className="mb-4 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-3 text-[12.5px] text-[var(--color-muted)]">
-            Nothing is set up for {companyName} yet. Below are drafts to start from — both replies are
-            switched off until you check the wording and hours and save.
-          </div>
-        )}
+      <div className="max-w-[1180px] p-4 md:p-6">
+        <SettingsHead title={t.set.autoReplies} sub={t.set.arSub} />
         <AutoRepliesForm
           initial={{
             welcomeEnabled: settings.welcomeEnabled,
@@ -59,6 +57,7 @@ export default async function AutoRepliesPage() {
           openNow={openNow}
           canEdit={canEdit}
           lastSaved={row ? { at: row.updatedAt.toISOString(), by: row.updatedBy } : null}
+          draft={!saved}
         />
       </div>
     </PageChrome>

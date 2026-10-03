@@ -17,6 +17,10 @@ export type MenuItem = {
   match?: string[];
   /** Light only on an exact path match (e.g. `/settings` vs `/settings/team`). */
   exact?: boolean;
+  /** Settings-style item: a glyph in a pastel tile, and a second line. */
+  icon?: string;
+  tone?: string;
+  sub?: string;
 };
 
 export type MenuGroup = { title?: string; items: MenuItem[] };
@@ -42,10 +46,13 @@ export function SecondaryMenu({
   title,
   groups,
   footer,
+  wide = false,
 }: {
   title: string;
   groups: MenuGroup[];
   footer?: React.ReactNode;
+  /** 232px instead of 208px — for menus whose items carry a second line. */
+  wide?: boolean;
 }) {
   const { t, menuCollapsed, setMenuCollapsed } = useShell();
   const path = usePathname();
@@ -56,7 +63,7 @@ export function SecondaryMenu({
   return (
     <div
       data-secondary-menu
-      className="hidden w-[208px] shrink-0 flex-col border-r border-[var(--color-border)] bg-[var(--color-surface-2)] md:flex"
+      className={`hidden ${wide ? "w-[232px]" : "w-[208px]"} shrink-0 flex-col border-r border-[var(--color-border)] bg-[var(--color-surface-2)] md:flex`}
     >
       <div className="flex h-14 shrink-0 items-center justify-between border-b border-[var(--color-border)] pl-4 pr-3">
         <div className="truncate text-[15px] font-semibold tracking-[-0.01em] text-[var(--color-ink)]">
@@ -88,7 +95,7 @@ export function SecondaryMenu({
                   key={item.href}
                   href={item.href.startsWith("?") ? path + (item.href === "?" ? "" : item.href) : item.href}
                   aria-current={on ? "page" : undefined}
-                  className={`flex items-center gap-2 rounded-[6px] px-2 py-1.5 text-[12.5px] transition-colors ${
+                  className={`flex items-center gap-2 rounded-[6px] px-2 ${item.sub ? "gap-2.5 rounded-[8px] py-2" : "py-1.5"} text-[12.5px] transition-colors ${
                     on
                       ? "bg-[var(--color-accent-soft)] font-semibold text-[var(--color-accent-ink)]"
                       : "font-medium text-[var(--color-ink)] hover:bg-[var(--color-surface-dim)]"
@@ -100,7 +107,25 @@ export function SecondaryMenu({
                       style={{ background: item.dot }}
                     />
                   )}
-                  <span className="min-w-0 flex-1 truncate">{item.label}</span>
+                  {item.icon && (
+                    <span
+                      className="grid h-7 w-7 shrink-0 place-items-center rounded-full text-[11px] font-bold"
+                      style={{
+                        background: `var(--color-pastel-${item.tone ?? "blue"})`,
+                        color: `var(--color-pastel-${item.tone ?? "blue"}-ink)`,
+                      }}
+                    >
+                      {item.icon}
+                    </span>
+                  )}
+                  {item.sub ? (
+                    <span className="min-w-0 flex-1 leading-tight">
+                      <span className="block truncate text-[13px]">{item.label}</span>
+                      <span className="block truncate text-[11px] font-normal text-[var(--color-faint)]">{item.sub}</span>
+                    </span>
+                  ) : (
+                    <span className="min-w-0 flex-1 truncate">{item.label}</span>
+                  )}
                   {item.count != null && (
                     <span className="text-[11px] tabular-nums text-[var(--color-faint)]">
                       {item.count}
