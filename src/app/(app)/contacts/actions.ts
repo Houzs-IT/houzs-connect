@@ -577,3 +577,37 @@ export async function importContactsChunk(
   outcomes.sort((a, b) => a.line - b.line);
   return { ok: true, outcomes };
 }
+
+/** Bulk "Add tag" from the Contacts selection bar. Only this company's rows/tag. */
+export async function bulkTagContacts(ids: string[], tagId: string): Promise<{ ok: boolean }> {
+  const c = await ctx();
+  if (!c || !tagId || !Array.isArray(ids) || ids.length === 0 || ids.length > 500) return { ok: false };
+  const t = await c.db.query.tag.findFirst({ where: and(eq(tag.id, tagId), eq(tag.companyId, c.companyId)) });
+  if (!t) return { ok: false };
+  const mine = await c.db
+    .select({ id: contact.id })
+    .from(contact)
+    .where(and(eq(contact.companyId, c.companyId), inArray(contact.id, ids)));
+  if (mine.length) {
+    await c.db
+      .insert(contactTag)
+      .values(mine.map((r) => ({ contactId: r.id, tagId })))
+      .onConflictDoNothing();
+  }
+  revalidatePath("/contacts");
+  return { ok: true };
+}
+
+/** Bulk Block / Unblock from the Contacts selection bar. */
+export async function bulkBlockContacts(ids: string[], blocked: boolean): Promise<{ ok: boolean }> {
+  const c = await ctx();
+  if (!c || !Array.isArray(ids) || ids.length === 0 || ids.length > 500) return { ok: false };
+  await ensureContactColumns();
+  await c.db
+    .update(contact)
+    .set({ blocked })
+    .where(and(eq(contact.companyId, c.companyId), inArray(contact.id, ids)));
+  revalidatePath("/contacts");
+  revalidatePath("/inbox");
+  return { ok: true };
+}

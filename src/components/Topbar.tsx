@@ -18,10 +18,13 @@ export type Crumb = string | { label: string; href: string };
 export function Topbar({
   crumbs,
   mobileTitle,
+  actions,
   current,
   companies,
 }: {
   crumbs: Crumb[];
+  /** Page-level buttons, right of the language switch (e.g. Import, Add). */
+  actions?: React.ReactNode;
   /** Phone title; defaults to the last crumb. */
   mobileTitle?: string;
   current: { name: string; role: string; department?: { name: string } | null };
@@ -63,6 +66,7 @@ export function Topbar({
 
       <div className="ml-auto flex items-center gap-2">
         <LangToggle className="hidden md:flex" />
+        {actions}
         <UserMenu
           current={{ name: current.name, role: current.role, department: current.department?.name }}
           companies={companies}
