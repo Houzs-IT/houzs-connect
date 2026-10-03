@@ -9,6 +9,7 @@ import { IconClose, IconSearch } from "@/components/icons";
 import { useShell } from "@/components/shell/ShellProvider";
 import { SlaTimer, isOverdue } from "./SlaTimer";
 import { fetchConversations } from "@/app/(app)/inbox/actions";
+import { NewConversation } from "./NewConversation";
 
 export type ConversationListItem = {
   id: string;
@@ -30,6 +31,8 @@ export type ConversationListItem = {
   deliveryDate: string | null;
   starred: boolean;
   lastType: string | null;
+  /** A flow is waiting on this customer (automation_run `waiting`). */
+  botActive: boolean;
 };
 
 type Tab = "all" | "dept" | "sla";
@@ -37,6 +40,7 @@ type Sort = "latest" | "oldest" | "wait";
 type Filters = {
   starred: boolean;
   unread: boolean;
+  bot: boolean;
   sort: Sort;
   tagIds: string[];
   agentId: string;
@@ -46,6 +50,7 @@ type Filters = {
 const NO_FILTERS: Filters = {
   starred: false,
   unread: false,
+  bot: false,
   sort: "latest",
   tagIds: [],
   agentId: "",
@@ -56,6 +61,7 @@ function activeFilterCount(f: Filters) {
   return (
     Number(f.starred) +
     Number(f.unread) +
+    Number(f.bot) +
     Number(f.sort !== "latest") +
     f.tagIds.length +
     Number(!!f.agentId) +
@@ -185,6 +191,7 @@ export function ConversationList({
       return false;
     if (filters.starred && !c.starred) return false;
     if (filters.unread && c.unread === 0) return false;
+    if (filters.bot && !c.botActive) return false;
     if (filters.tagIds.length && !c.tags.some((tg) => filters.tagIds.includes(tg.id)))
       return false;
     if (filters.agentId && c.agentId !== filters.agentId) return false;
@@ -379,6 +386,7 @@ export function ConversationList({
           </div>
         )}
       </div>
+      <NewConversation />
     </div>
   );
 }
@@ -610,6 +618,9 @@ function FilterPopover({
               </button>
               <button type="button" className={chip(value.unread)} onClick={() => set({ unread: !value.unread })}>
                 {s.unreadOnly}
+              </button>
+              <button type="button" className={chip(value.bot)} onClick={() => set({ bot: !value.bot })}>
+                {s.botActive}
               </button>
             </div>
           </div>

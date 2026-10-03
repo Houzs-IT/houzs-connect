@@ -16,6 +16,8 @@ import {
 } from "@/app/(app)/inbox/actions";
 import { assignConversation, toggleConversationTag } from "@/app/actions";
 import type { AutomationProgress } from "@/lib/automation/progress";
+import { ERP_WEB_BASE, type ErpLookup, type PickOption } from "@/lib/erp/orders";
+import { RecordPayment } from "./RecordPayment";
 import type { Dict } from "@/lib/i18n/dict";
 
 type Field = { key: string; name: string };
@@ -90,6 +92,7 @@ export async function ContactPanel({
   firstReply,
   payments,
   automation,
+  erp,
 }: {
   conversationId: string;
   contactName: string;
@@ -111,6 +114,8 @@ export async function ContactPanel({
   firstReply: FirstReply;
   payments: Payment[];
   automation: AutomationProgress | null;
+  /** Live ERP orders for the customer's reference; null when there is no ref. */
+  erp: ErpPanelData | null;
 }) {
   const t = await getDict();
   const s = t.service;
@@ -277,8 +282,9 @@ export async function ContactPanel({
     </>
   );
 
-  // ── Order: what the ERP order event wrote onto the contact, plus the
-  // payment slips received in chat. Nothing here is fetched from the ERP. ──
+  // ── Order: the live ERP orders for the customer's reference (when the ERP
+  // answers), then what the ERP order event wrote onto the contact, then the
+  // payment slips received in chat. ──
   const orderRef = values.ref_1;
   const total = Number(values.order_total ?? values.amount ?? NaN);
   const facts: [string, string | undefined][] = [
@@ -289,6 +295,7 @@ export async function ContactPanel({
   ];
   const order = (
     <>
+      {erp && <ErpOrders erp={erp} conversationId={conversationId} s={s} />}
       {orderRef ? (
         <section className="overflow-hidden rounded-[10px] border border-[var(--color-border)]">
           <div className="flex items-center justify-between border-b border-[var(--color-border-subtle)] px-3 py-2.5">
@@ -495,6 +502,117 @@ function AutomationCard({
             {s.openFlow}
           </Link>
         </div>
+      </div>
+    </section>
+  );
+}
+
+
+export type ErpPanelData = {
+  ref: string;
+  lookup: ErpLookup;
+  onlineTypes: PickOption[];
+  merchants: PickOption[];
+  /** Slip-date window, YYYY-MM-DD in Malaysian time. */
+  today: string;
+  oldest: string;
+  preview: boolean;
+};
+
+/** Every ERP order carrying the customer's reference, with status and balance. */
+function ErpOrders({
+  erp,
+  conversationId,
+  s,
+}: {
+  erp: ErpPanelData;
+  conversationId: string;
+  s: Dict["service"];
+}) {
+  const head = (
+    <div className="mb-2 flex items-center justify-between">
+      <span className={EYEBROW}>{s.erpOrders}</span>
+      <span className="text-[11px] text-[var(--color-faint)]">{fmt(s.fromCustomerRef, { ref: erp.ref })}</span>
+    </div>
+  );
+  if (!erp.lookup.ok) {
+    return (
+      <section>
+        {head}
+        <p className="text-[12px] text-[var(--color-faint)]">
+          {erp.lookup.reason === "not_configured" ? s.erpNotConfigured : s.erpUnavailable}
+        </p>
+      </section>
+    );
+  }
+  if (erp.lookup.orders.length === 0) {
+    return (
+      <section>
+        {head}
+        <p className="text-[12px] text-[var(--color-faint)]">{s.noErpOrder}</p>
+      </section>
+    );
+  }
+  return (
+    <section>
+      {head}
+      <div className="flex flex-col gap-2.5">
+        {erp.lookup.orders.map((o) => {
+          const over = o.balanceSen < 0;
+          return (
+            <div key={o.docNo} className="overflow-hidden rounded-[10px] border border-[var(--color-border)]">
+              <div className="flex items-center justify-between gap-2 border-b border-[var(--color-border-subtle)] px-3 py-2.5">
+                <div className="min-w-0">
+                  <div className="truncate text-[15px] font-semibold tracking-[0.02em] text-[var(--color-brand)]">{o.docNo}</div>
+                  {o.soDate && <div className="text-[11px] text-[var(--color-faint)]">{o.soDate}</div>}
+                </div>
+                <div className="flex shrink-0 items-center gap-1">
+                  {o.onHold && <Badge tone="warning">{s.onHold}</Badge>}
+                  {o.status && <Badge tone="primary">{o.status.replace(/_/g, " ")}</Badge>}
+                </div>
+              </div>
+              <div className="grid grid-cols-3 gap-2 px-3 py-2.5 text-[12px]">
+                <div>
+                  <div className="text-[10.5px] text-[var(--color-faint)]">{s.orderTotal}</div>
+                  <div className="font-semibold tabular-nums text-[var(--color-ink)]">{money(o.totalSen / 100)}</div>
+                </div>
+                <div>
+                  <div className="text-[10.5px] text-[var(--color-faint)]">{s.paid}</div>
+                  <div className="font-semibold tabular-nums text-[var(--color-success)]">{money(o.paidSen / 100)}</div>
+                </div>
+                <div>
+                  <div className="text-[10.5px] text-[var(--color-faint)]">{over ? s.overpaid : s.balance}</div>
+                  <div
+                    className={`font-semibold tabular-nums ${
+                      over ? "text-[var(--color-danger)]" : o.balanceSen > 0 ? "text-[var(--color-warning)]" : "text-[var(--color-ink)]"
+                    }`}
+                  >
+                    {money(Math.abs(o.balanceSen) / 100)}
+                  </div>
+                </div>
+              </div>
+              <div className="flex items-start justify-between gap-2 border-t border-[var(--color-border-subtle)] bg-[var(--color-surface-2)] px-3 py-2">
+                <RecordPayment
+                  conversationId={conversationId}
+                  docNo={o.docNo}
+                  today={erp.today}
+                  oldest={erp.oldest}
+                  onlineTypes={erp.onlineTypes}
+                  merchants={erp.merchants}
+                  preview={erp.preview}
+                />
+                <a
+                  href={`${ERP_WEB_BASE}/scm/sales-orders/${encodeURIComponent(o.docNo)}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="shrink-0 text-[11.5px] font-semibold text-[var(--color-accent)] hover:underline"
+                >
+                  {s.openErp} ↗
+                </a>
+              </div>
+            </div>
+          );
+        })}
       </div>
     </section>
   );

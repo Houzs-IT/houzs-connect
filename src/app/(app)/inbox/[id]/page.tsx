@@ -2,7 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { and, asc, desc, eq } from "drizzle-orm";
 import { getDb } from "@/db/client";
-import { contactField, conversation, department, member, note, payment, tag } from "@/db/schema";
+import { company, contactField, conversation, department, member, note, payment, tag } from "@/db/schema";
 import { MarkRead } from "@/components/inbox/MarkRead";
 import { Thread, type ThreadItem } from "@/components/inbox/Thread";
 import { Composer } from "@/components/inbox/Composer";
@@ -19,6 +19,8 @@ import { bypassReadCache } from "@/db/fresh";
 import { getDict } from "@/lib/i18n/server";
 import { SLA_MINUTES } from "@/lib/sla";
 import { getAutomationEvents, getAutomationProgress } from "@/lib/automation/progress";
+import { ordersByRef, paymentPicklists, slipWindow } from "@/lib/erp/orders";
+import type { ErpPanelData } from "@/components/inbox/ContactPanel";
 
 /**
  * How much of the thread is rendered. WhatsApp threads with a customer run for
@@ -126,9 +128,30 @@ export default async function ConversationPage({
   // Flow milestones since the oldest message on screen, and the customer's
   // current flow for the panel — both read from automation_run.
   const since = messages[0]?.createdAt ?? convo.createdAt;
-  const [automationEvents, automation] = await Promise.all([
+  // Live ERP orders for the customer's reference (lib/erp/orders.ts, cached a
+  // minute) — fetched beside the automation reads, never in front of them.
+  const ref = contactAttrs.ref_1;
+  const erpLoad = async (): Promise<ErpPanelData | null> => {
+    if (!ref) return null;
+    const co = await db.query.company.findFirst({
+      where: eq(company.id, me.companyId),
+      columns: { erpCompanyId: true },
+    });
+    const erpCo = co?.erpCompanyId ?? null;
+    const [lookup, picks] = await Promise.all([ordersByRef(ref, erpCo), paymentPicklists(erpCo)]);
+    return {
+      ref,
+      lookup,
+      onlineTypes: picks?.onlineTypes ?? [],
+      merchants: picks?.merchants ?? [],
+      ...slipWindow(),
+      preview: process.env.CONNECT_PREVIEW === "1",
+    };
+  };
+  const [automationEvents, automation, erp] = await Promise.all([
     getAutomationEvents(convo.contact.id, since),
     getAutomationProgress(convo.contact.id),
+    erpLoad(),
   ]);
 
   const items: ThreadItem[] = [
@@ -311,6 +334,7 @@ export default async function ConversationPage({
           createdAt: stamp(p.createdAt),
         }))}
         automation={automation}
+        erp={erp}
       />
     </div>
   );
