@@ -1,9 +1,9 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { eq } from "drizzle-orm";
+import { and, desc, eq, ilike, or } from "drizzle-orm";
 import { getDb } from "@/db/client";
-import { payment } from "@/db/schema";
+import { contact, conversation, payment } from "@/db/schema";
 import { getCurrentMember } from "@/lib/current-member";
 
 /** The member, and the payment must belong to a contact in their company. */
@@ -54,4 +54,64 @@ export async function reviewPayment(
   await auth.db.update(payment).set({ status }).where(eq(payment.id, paymentId));
   revalidatePath("/payments");
   return { ok: true };
+}
+
+/** Contacts for the Record payment picker: by name or phone digits, this company only. */
+export async function findPaymentContacts(q: string): Promise<{ id: string; name: string | null; phone: string }[]> {
+  const me = await getCurrentMember();
+  if (!me) return [];
+  const text = q.trim();
+  if (text.length < 2) return [];
+  const digits = text.replace(/\D/g, "");
+  return getDb()
+    .select({ id: contact.id, name: contact.name, phone: contact.phone })
+    .from(contact)
+    .where(
+      and(
+        eq(contact.companyId, me.companyId),
+        or(ilike(contact.name, `%${text}%`), ...(digits.length >= 3 ? [ilike(contact.phone, `%${digits}%`)] : []))
+      )
+    )
+    .limit(8);
+}
+
+/**
+ * Record a payment by hand — a bank transfer seen in the statement, cash at the
+ * showroom. Saved in Connect only; nothing is written to the ERP.
+ */
+export async function recordPayment(input: {
+  contactId: string;
+  amount: string;
+  method: string;
+  referenceNo: string;
+  orderRef: string;
+  confirmed: boolean;
+}): Promise<{ ok: boolean; id?: string; error?: string }> {
+  const me = await getCurrentMember();
+  if (!me) return { ok: false, error: "Not signed in." };
+  const db = getDb();
+  const who = await db.query.contact.findFirst({
+    where: and(eq(contact.id, input.contactId), eq(contact.companyId, me.companyId)),
+  });
+  if (!who) return { ok: false, error: "Choose the customer first." };
+  const amount = Number(input.amount.replace(/[^\d.]/g, ""));
+  if (!Number.isFinite(amount) || amount <= 0) return { ok: false, error: "Enter the amount." };
+  const convo = await db.query.conversation.findFirst({
+    where: eq(conversation.contactId, who.id),
+    orderBy: desc(conversation.lastMessageAt),
+  });
+  const [row] = await db
+    .insert(payment)
+    .values({
+      contactId: who.id,
+      conversationId: convo?.id ?? null,
+      amount,
+      method: input.method.trim() || null,
+      referenceNo: input.referenceNo.trim() || null,
+      orderRef: input.orderRef.trim() || null,
+      status: input.confirmed ? "VERIFIED" : "PENDING",
+    })
+    .returning({ id: payment.id });
+  revalidatePath("/payments");
+  return { ok: true, id: row.id };
 }

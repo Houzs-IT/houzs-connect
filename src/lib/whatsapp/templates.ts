@@ -60,6 +60,21 @@ export interface TemplateDraft {
    * does not.
    */
   header?: string;
+  /**
+   * Standard (header / body / footer / buttons), a carousel of image cards, or a
+   * call permission request (body plus Meta's fixed "allow calls" component).
+   */
+  kind?: "standard" | "carousel" | "call_permission";
+  /** Carousel cards, 2–10, each with an uploaded image handle. */
+  cards?: CarouselCard[];
+}
+
+export interface CarouselCard {
+  /** From the Resumable Upload API (profile.ts uploadForHandle). */
+  imageHandle: string;
+  body: string;
+  /** Quick replies; every card must carry the same number. */
+  buttons: string[];
 }
 
 /** Meta's own limits, as shown by Seampify's character counters. */
@@ -261,6 +276,32 @@ function buildComponents(
   }
 
   const components: Record<string, unknown>[] = [];
+  if (draft.kind === "carousel") {
+    const cards = draft.cards ?? [];
+    if (cards.length < 2 || cards.length > 10) return { ok: false, error: "A carousel needs between 2 and 10 cards." };
+    const n = cards[0].buttons.length;
+    if (cards.some((c) => c.buttons.length !== n)) return { ok: false, error: "Every carousel card must have the same number of buttons." };
+    if (cards.some((c) => !c.imageHandle)) return { ok: false, error: "Every carousel card needs an image." };
+    if (cards.some((c) => !c.body.trim())) return { ok: false, error: "Every carousel card needs its text." };
+    components.push({
+      type: "BODY",
+      text: draft.body,
+      ...(placeholders > 0 ? { example: { body_text: [examples.slice(0, placeholders)] } } : {}),
+    });
+    components.push({
+      type: "CAROUSEL",
+      cards: cards.map((c) => ({
+        components: [
+          { type: "HEADER", format: "IMAGE", example: { header_handle: [c.imageHandle] } },
+          { type: "BODY", text: c.body.trim() },
+          ...(n
+            ? [{ type: "BUTTONS", buttons: c.buttons.slice(0, 2).map((b) => ({ type: "QUICK_REPLY", text: b.slice(0, 25) })) }]
+            : []),
+        ],
+      })),
+    });
+    return { ok: true, components };
+  }
   if (header) {
     components.push({ type: "HEADER", format: "TEXT", text: header });
   }
@@ -271,10 +312,14 @@ function buildComponents(
       ? { example: { body_text: [examples.slice(0, placeholders)] } }
       : {}),
   });
+  if (draft.kind === "call_permission") {
+    // Meta's fixed component: the customer sees an "allow calls" choice.
+    components.push({ type: "call_permission_request" });
+  }
   if (draft.footer?.trim()) {
     components.push({ type: "FOOTER", text: draft.footer.trim() });
   }
-  if (draft.buttons?.length) {
+  if (draft.buttons?.length && draft.kind !== "call_permission") {
     components.push({
       type: "BUTTONS",
       // Meta caps quick replies at 3 per template.

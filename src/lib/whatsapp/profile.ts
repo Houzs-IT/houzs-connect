@@ -164,3 +164,9 @@ export async function requestDisplayName(
     body: JSON.stringify({ new_display_name: name }),
   });
 }
+
+/**
+ * The same Resumable Upload, for any file a template needs a sample handle for
+ * (carousel card images). The handle is what `example.header_handle` takes.
+ */
+export const uploadForHandle = uploadProfilePicture;

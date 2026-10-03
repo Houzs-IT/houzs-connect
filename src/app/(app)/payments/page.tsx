@@ -10,7 +10,9 @@ import { initials, tint } from "@/lib/format";
 import { getDict } from "@/lib/i18n/server";
 import { shortWhen } from "@/app/(app)/contacts/queries";
 import { PaymentReview } from "./PaymentReview";
+import { RecordPayment } from "./RecordPayment";
 import { money, monthStart } from "./util";
+import { mediaIdOf } from "@/lib/whatsapp/download";
 
 /*
   Receipts customers sent in chat: a queue on the left, the selected receipt on
@@ -82,6 +84,7 @@ export default async function PaymentsPage({ searchParams }: { searchParams: Pro
         orderRef: payment.orderRef,
         status: payment.status,
         ocrRawText: payment.ocrRawText,
+        receiptMediaUrl: payment.receiptMediaUrl,
         conversationId: payment.conversationId,
         createdAt: payment.createdAt,
         name: contact.name,
@@ -168,6 +171,7 @@ export default async function PaymentsPage({ searchParams }: { searchParams: Pro
         section="payments"
         page="receipts"
         actions={
+          <>
           <a
             href="/payments/export"
             className="flex h-[34px] items-center gap-1.5 rounded-[8px] border border-[var(--color-border)] bg-[var(--color-surface)] px-3 text-[13px] font-semibold text-[var(--color-ink)] hover:bg-[var(--color-surface-2)]"
@@ -177,6 +181,8 @@ export default async function PaymentsPage({ searchParams }: { searchParams: Pro
             </svg>
             {L.export}
           </a>
+          <RecordPayment />
+          </>
         }
       >
         <div className="flex h-full min-h-0 flex-col gap-4 p-4">
@@ -303,6 +309,7 @@ export default async function PaymentsPage({ searchParams }: { searchParams: Pro
                     orderRef: selected.orderRef,
                     status: selected.status,
                     ocrRawText: selected.ocrRawText,
+                    hasImage: !!mediaIdOf(selected.receiptMediaUrl),
                     conversationId: selected.conversationId,
                     when: shortWhen(selected.createdAt, L.yesterday),
                     date: selected.createdAt.toLocaleString("en-GB", {

@@ -11,7 +11,7 @@ import { useShell } from "@/components/shell/ShellProvider";
 import { isBound, positionalSlots, resolveBinding, type VarBinding } from "@/lib/automation/vars";
 import { fmt } from "@/lib/i18n/dict";
 import { LIMITS, type TemplateCategory, type TemplateStatus } from "@/lib/whatsapp/templates";
-import { editTemplateAction, submitTemplateWithBinding, templateCurl } from "./actions";
+import { editTemplateAction, submitCarouselTemplate, submitTemplateWithBinding, templateCurl } from "./actions";
 import { SlotSelect } from "./SlotSelect";
 import { TemplateBubble } from "./TemplateBubble";
 import { sampleLookup } from "./TemplateFields";
@@ -32,6 +32,17 @@ const LANGS: [string, string][] = [
   ["ms", "Malay (ms)"],
   ["zh_CN", "Chinese (zh_CN)"],
 ];
+type Kind = "standard" | "carousel" | "call_permission";
+interface Card {
+  uid: number;
+  file: File | null;
+  preview: string | null;
+  body: string;
+  buttons: string[];
+}
+let cardSeq = 0;
+const newCard = (): Card => ({ uid: ++cardSeq, file: null, preview: null, body: "", buttons: [] });
+
 const EMOJI = ["🙂", "😊", "👍", "🙏", "🎉", "✅", "📦", "🚚", "🛋️", "📅", "⏰", "💬"];
 
 function Counter({ v, max }: { v: string; max: number }) {
@@ -68,6 +79,8 @@ export function TemplateEditor({
   const [bindings, setBindings] = useState<VarBinding[]>(existing?.bindings ?? []);
   const [examples, setExamples] = useState<Record<number, string>>({});
   const [sampleIdx, setSampleIdx] = useState(0);
+  const [kind, setKind] = useState<Kind>("standard");
+  const [cards, setCards] = useState<Card[]>(() => [newCard(), newCard()]);
   const [emoji, setEmoji] = useState(false);
   const [note, setNote] = useState<{ ok: boolean; text: string } | null>(null);
   const [copied, setCopied] = useState(false);
@@ -88,7 +101,13 @@ export function TemplateEditor({
   const unmapped = slots.filter((n) => !isBound(byIndex.get(n)));
   const noExample = slots.filter((n) => !exampleFor(n).trim());
   const list = (ns: number[]) => ns.map((n) => `{{${n}}}`).join(", ");
-  const blocker = !body.trim()
+  const cardsOk =
+    cards.length >= 2 &&
+    cards.length <= 10 &&
+    cards.every((c) => c.file && c.body.trim() && c.buttons.filter((b) => b.trim()).length === cards[0].buttons.filter((b) => b.trim()).length);
+  const blocker = kind === "carousel" && !cardsOk
+    ? L.needCards
+    : !body.trim()
     ? L.writeBody
     : !nameClean
       ? L.giveName
@@ -101,14 +120,18 @@ export function TemplateEditor({
   const payload = () => ({
     name,
     language,
-    category,
-    header: headerOn ? header.trim() || undefined : undefined,
+    category: kind === "call_permission" ? ("MARKETING" as TemplateCategory) : category,
+    header: kind === "standard" && headerOn ? header.trim() || undefined : undefined,
     body,
-    footer: footer.trim() || undefined,
+    footer: kind !== "carousel" ? footer.trim() || undefined : undefined,
     examples: slots.map((n) => exampleFor(n)),
-    buttons: buttons.map((b) => b.trim()).filter(Boolean),
+    buttons: kind === "standard" ? buttons.map((b) => b.trim()).filter(Boolean) : [],
     bindings,
+    kind,
+    cards: kind === "carousel" ? cards.map((c) => ({ body: c.body, buttons: c.buttons.map((b) => b.trim()).filter(Boolean) })) : undefined,
   });
+
+  const patchCard = (uid: number, p: Partial<Card>) => setCards((cs) => cs.map((c) => (c.uid === uid ? { ...c, ...p } : c)));
 
   function setSlot(n: number, next: VarBinding | null) {
     const rest = bindings.filter((b) => b.index !== n);
@@ -151,6 +174,13 @@ export function TemplateEditor({
         });
         if (!res.ok) return setNote({ ok: false, text: res.error ?? "Meta refused the edit." });
         setNote({ ok: true, text: L.resubmitted });
+      } else if (kind === "carousel") {
+        const fd = new FormData();
+        fd.set("payload", JSON.stringify(payload()));
+        cards.forEach((c, i) => c.file && fd.set(`image${i}`, c.file));
+        const res = await submitCarouselTemplate(fd);
+        if (!res.ok) return setNote({ ok: false, text: res.error ?? "Meta refused the template." });
+        setNote({ ok: true, text: fmt(L.submitted, { name: nameClean, status: res.status ?? "PENDING" }) });
       } else {
         const res = await submitTemplateWithBinding(payload());
         if (!res.ok) return setNote({ ok: false, text: res.error ?? "Meta refused the template." });
@@ -175,11 +205,11 @@ export function TemplateEditor({
     });
   }
 
-  const types: [string, string, string, string, boolean][] = [
-    ["Aa", L.standard, L.standardHint, "blue", true],
-    ["▥", L.carousel, L.carouselHint, "purple", false],
-    ["☏", L.callPerm, L.callPermHint, "green", false],
-    ["@", L.contactReq, L.contactReqHint, "pink", false],
+  const types: [string, string, string, string, Kind | null][] = [
+    ["Aa", L.standard, L.standardHint, "blue", "standard"],
+    ["▥", L.carousel, L.carouselHint, "purple", "carousel"],
+    ["☏", L.callPerm, L.callPermHint, "green", "call_permission"],
+    ["@", L.contactReq, L.contactReqHint, "pink", null],
   ];
   const allMapped = slots.length > 0 && unmapped.length === 0;
   const blocked = existing?.editBlocked || (existing?.mediaHeader ? L.mediaHeader : null);
@@ -262,14 +292,19 @@ export function TemplateEditor({
             <div>
               <span className={label}>{L.type}</span>
               <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
-                {types.map(([icon, title, hint, tone, ok], i) => (
-                  <div
+                {types.map(([icon, title, hint, tone, k]) => (
+                  <button
+                    type="button"
                     key={title}
-                    aria-disabled={!ok}
-                    className={`relative rounded-[10px] border p-2.5 ${
-                      i === 0
+                    disabled={!k || (editing && k !== "standard")}
+                    title={!k ? L.contactReqNote : undefined}
+                    onClick={() => k && setKind(k)}
+                    className={`relative rounded-[10px] border p-2.5 text-left disabled:cursor-not-allowed ${
+                      kind === k
                         ? "border-[var(--color-accent)] bg-[var(--color-accent-soft)]/40 shadow-[0_0_0_1px_var(--color-accent)]"
-                        : "border-[var(--color-border)] opacity-70"
+                        : k && !editing
+                          ? "border-[var(--color-border)] hover:border-[var(--color-border-strong)]"
+                          : "border-[var(--color-border)] opacity-60"
                     }`}
                   >
                     <div className="flex items-start gap-2">
@@ -282,16 +317,14 @@ export function TemplateEditor({
                       <span className="text-[12.5px] font-semibold leading-tight text-[var(--color-ink)]">{title}</span>
                     </div>
                     <p className="mt-1.5 text-[11px] leading-snug text-[var(--color-faint)]">{hint}</p>
-                    {!ok && (
-                      <span className="mt-1.5 inline-block rounded-full bg-[var(--color-surface-2)] px-1.5 text-[9.5px] font-semibold uppercase tracking-[0.06em] text-[var(--color-muted)]">
-                        {L.proposal}
-                      </span>
-                    )}
-                  </div>
+                  </button>
                 ))}
               </div>
+              {kind === "carousel" && <p className="mt-2 text-[12px] text-[var(--color-faint)]">{L.carouselRules}</p>}
+              {kind === "call_permission" && <p className="mt-2 text-[12px] text-[var(--color-faint)]">{L.callPermNote}</p>}
             </div>
 
+            {kind === "standard" && (
             <div>
               <span className={label}>{L.header}</span>
               <div className="mb-2 flex gap-2">
@@ -322,6 +355,7 @@ export function TemplateEditor({
                 </div>
               )}
             </div>
+            )}
 
             <div>
               <div className="mb-1.5 flex items-center justify-between">
@@ -378,6 +412,7 @@ export function TemplateEditor({
               </div>
             </div>
 
+            {kind !== "carousel" && (
             <div>
               <div className="mb-1.5 flex items-center justify-between">
                 <span className={`${label} mb-0`}>{L.footer}</span>
@@ -385,7 +420,80 @@ export function TemplateEditor({
               </div>
               <input value={footer} maxLength={LIMITS.footer} onChange={(e) => setFooter(e.target.value)} className={input} />
             </div>
+            )}
 
+            {kind === "carousel" && (
+              <div>
+                <span className={label}>{L.cards}</span>
+                <div className="flex flex-col gap-2.5">
+                  {cards.map((c, i) => (
+                    <div key={c.uid} className="rounded-[10px] border border-[var(--color-border)] p-3">
+                      <div className="mb-2 flex items-center justify-between">
+                        <span className="text-[12.5px] font-semibold text-[var(--color-ink)]">{fmt(L.cardN, { n: i + 1 })}</span>
+                        {cards.length > 2 && (
+                          <button type="button" onClick={() => setCards((cs) => cs.filter((x) => x.uid !== c.uid))} className="text-[12px] font-semibold text-[var(--color-danger)]">
+                            {L.removeCard}
+                          </button>
+                        )}
+                      </div>
+                      <div className="flex gap-3">
+                        <label className="grid h-[72px] w-[96px] shrink-0 cursor-pointer place-items-center overflow-hidden rounded-[8px] border border-dashed border-[var(--color-border-strong)] bg-[var(--color-surface-2)] text-center text-[10.5px] text-[var(--color-faint)]">
+                          {c.preview ? (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img src={c.preview} alt="" className="h-full w-full object-cover" />
+                          ) : (
+                            <span className="px-1">{L.chooseImage}</span>
+                          )}
+                          <input
+                            type="file"
+                            accept="image/jpeg,image/png"
+                            className="hidden"
+                            onChange={(e) => {
+                              const file = e.target.files?.[0] ?? null;
+                              if (c.preview) URL.revokeObjectURL(c.preview);
+                              patchCard(c.uid, { file, preview: file ? URL.createObjectURL(file) : null });
+                            }}
+                          />
+                        </label>
+                        <div className="flex min-w-0 flex-1 flex-col gap-2">
+                          <textarea
+                            rows={2}
+                            value={c.body}
+                            placeholder={L.cardText}
+                            maxLength={160}
+                            onChange={(e) => patchCard(c.uid, { body: e.target.value })}
+                            className="w-full resize-none rounded-[8px] border border-[var(--color-border)] px-2.5 py-1.5 text-[12.5px] outline-none focus:border-[var(--color-accent)]"
+                          />
+                          <div className="flex flex-wrap gap-2">
+                            {c.buttons.map((b, j) => (
+                              <input
+                                key={j}
+                                value={b}
+                                maxLength={LIMITS.button}
+                                onChange={(e) => patchCard(c.uid, { buttons: c.buttons.map((x, k) => (k === j ? e.target.value : x)) })}
+                                className="h-[30px] w-[140px] rounded-[8px] border border-[var(--color-border)] px-2 text-[12px] outline-none focus:border-[var(--color-accent)]"
+                              />
+                            ))}
+                            {c.buttons.length < 2 && (
+                              <button type="button" onClick={() => patchCard(c.uid, { buttons: [...c.buttons, ""] })} className="text-[12px] font-semibold text-[var(--color-accent)]">
+                                + {L.addButton}
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                {cards.length < 10 && (
+                  <button type="button" onClick={() => setCards((cs) => [...cs, newCard()])} className="mt-2 text-[12.5px] font-semibold text-[var(--color-accent)]">
+                    + {L.addCard}
+                  </button>
+                )}
+              </div>
+            )}
+
+            {kind === "standard" && (
             <div>
               <span className={label}>{L.buttons}</span>
               <div className="flex flex-col gap-2">
@@ -417,6 +525,7 @@ export function TemplateEditor({
                 </button>
               )}
             </div>
+            )}
           </section>
 
           {/* ── Where each variable comes from ── */}
@@ -490,15 +599,41 @@ export function TemplateEditor({
                 {body.trim() ? (
                   <div className="max-w-[92%]">
                     <TemplateBubble
-                      header={headerOn ? header : ""}
+                      header={kind === "standard" && headerOn ? header : ""}
                       body={body}
-                      footer={footer}
-                      buttons={buttons.map((b) => b.trim()).filter(Boolean)}
+                      footer={kind === "carousel" ? "" : footer}
+                      buttons={kind === "standard" ? buttons.map((b) => b.trim()).filter(Boolean) : []}
                       time="10:04"
                       fill={(n) => valueFor(n) || null}
                     />
+                    {kind === "call_permission" && (
+                      <div className="mt-1 overflow-hidden rounded-[10px] bg-white text-center text-[12.5px] font-medium text-[var(--color-accent)] shadow-[0_1px_2px_rgba(17,23,34,0.1)]">
+                        <div className="border-b border-[var(--color-border-subtle)] py-2">☏ {L.allowCalls}</div>
+                        <div className="py-2">{L.notNow}</div>
+                      </div>
+                    )}
                   </div>
                 ) : null}
+                {kind === "carousel" && (
+                  <div className="scroll-thin mt-2 flex gap-2 overflow-x-auto pb-1">
+                    {cards.map((c) => (
+                      <div key={c.uid} className="w-[170px] shrink-0 overflow-hidden rounded-[10px] bg-white shadow-[0_1px_2px_rgba(17,23,34,0.1)]">
+                        <div className="h-[96px] bg-[var(--color-surface-dim)]">
+                          {c.preview && (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img src={c.preview} alt="" className="h-full w-full object-cover" />
+                          )}
+                        </div>
+                        <p className="px-2.5 py-2 text-[11.5px] leading-snug text-[var(--color-ink)]">{c.body || "…"}</p>
+                        {c.buttons.filter((b) => b.trim()).map((b, j) => (
+                          <div key={j} className="border-t border-[var(--color-border-subtle)] py-1.5 text-center text-[12px] font-medium text-[var(--color-accent)]">
+                            {b}
+                          </div>
+                        ))}
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
             <p className="mt-2 text-[11.5px] text-[var(--color-faint)]">{L.utilNote}</p>

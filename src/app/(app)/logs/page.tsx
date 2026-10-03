@@ -10,6 +10,7 @@ import { isLive, phoneNumberInfo, type PhoneNumberInfo } from "@/lib/whatsapp/cl
 import { shortWhen } from "@/app/(app)/contacts/queries";
 import { failureReasons, logRows, statusTimeline, todayStats } from "./data";
 import { LiveChip, LogsTabs } from "./LogsTabs";
+import { ResendButton } from "./ResendButton";
 
 // The delivery ledger: what went out, what came in, and what Meta did with it.
 export const dynamic = "force-dynamic";
@@ -264,15 +265,8 @@ export default async function MessageHistoryPage({ searchParams }: { searchParam
                   >
                     {L.openConvo}
                   </Link>
-                  {selected.status === "FAILED" && (
-                    <button
-                      type="button"
-                      disabled
-                      title={L.proposal}
-                      className="flex h-[36px] flex-1 items-center justify-center rounded-[8px] bg-[var(--color-accent)] text-[13px] font-semibold text-white opacity-50"
-                    >
-                      ↻ {L.sendAgain}
-                    </button>
+                  {selected.status === "FAILED" && selected.direction === "OUT" && (
+                    <ResendButton id={selected.id} label={L.sendAgain} busyLabel={t.camp.sendingNow} />
                   )}
                 </div>
               </>
