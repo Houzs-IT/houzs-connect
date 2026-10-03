@@ -46,14 +46,13 @@ export function CardHead({
   );
 }
 
-/** "↗ 1.0 pts" / "↘ 38s" chip. `good` decides the colour, not the arrow. */
-export function DeltaChip({ text, up, good }: { text: string; up: boolean; good: boolean }) {
+/**
+ * "↗ 1.0 pts" / "↘ 38s" chip on the headline cards — white, petrol text, as in
+ * the design. The arrow carries the direction.
+ */
+export function DeltaChip({ text, up }: { text: string; up: boolean }) {
   return (
-    <span
-      className={`inline-flex items-center gap-0.5 rounded-full px-2 py-px text-[11.5px] font-semibold ${
-        good ? "bg-[var(--color-success-soft)] text-[var(--color-success)]" : "bg-[var(--color-danger-soft)] text-[var(--color-danger)]"
-      }`}
-    >
+    <span className="inline-flex items-center gap-1 rounded-full border border-white/80 bg-white/85 px-2 py-px text-[11.5px] font-semibold text-[var(--color-accent-ink)] shadow-[0_1px_2px_rgba(17,24,16,0.06)]">
       {up ? "↗" : "↘"} {text}
     </span>
   );

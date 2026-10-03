@@ -85,13 +85,15 @@ export function periodWindow(days: PeriodDays, locale = "en-GB"): PeriodWindow {
       label: d.toLocaleDateString("en-GB", { day: "2-digit", month: "2-digit", timeZone: TZ }),
     });
   }
-  const fmt = (d: Date, withYear: boolean) =>
-    d.toLocaleDateString(locale, {
-      day: "numeric",
-      month: "short",
-      ...(withYear ? { year: "numeric" } : {}),
-      timeZone: TZ,
-    });
+  // Hand-built so English reads "4 Sep" (en-GB's "Sept" does not match the
+  // design) and Chinese reads "9月4日".
+  const MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  const fmt = (d: Date, withYear: boolean) => {
+    const [y, m, day] = klDayKey(d).split("-").map(Number);
+    return locale.startsWith("zh")
+      ? `${withYear ? `${y}年` : ""}${m}月${day}日`
+      : `${day} ${MON[m - 1]}${withYear ? ` ${y}` : ""}`;
+  };
   return { days, since, prevSince, buckets, rangeLabel: `${fmt(since, false)} – ${fmt(todayStart, true)}` };
 }
 

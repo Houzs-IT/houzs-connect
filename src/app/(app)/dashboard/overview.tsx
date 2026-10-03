@@ -15,6 +15,8 @@ import {
 import { Avatar, Badge, Card, CardHead, DeltaChip, EYEBROW, Empty } from "./ui";
 import { humanDuration, type PeriodWindow } from "./util";
 import { VolumeCard } from "./VolumeCard";
+import { SoonButton } from "./SoonButton";
+import { formatPhone } from "@/lib/format";
 
 type S = Dict["dash"];
 type Props = { companyId: string; w: PeriodWindow; s: S };
@@ -75,7 +77,7 @@ export async function ReplyRateCards({ companyId, w, s }: Props) {
           <>
             {s.vsPrev}
             {pts != null && (
-              <DeltaChip text={`${Math.abs(pts).toFixed(1)} ${s.pts}`} up={pts >= 0} good={pts >= 0} />
+              <DeltaChip text={`${Math.abs(pts).toFixed(1)} ${s.pts}`} up={pts >= 0} />
             )}
           </>
         }
@@ -95,7 +97,7 @@ export async function ReplyRateCards({ companyId, w, s }: Props) {
             {fmt(s.measured, { n: cur.answered })}
             {firstDelta != null && Math.round(firstDelta) !== 0 && (
               // Faster is better: a negative change is the good one.
-              <DeltaChip text={humanDuration(Math.abs(firstDelta))} up={firstDelta > 0} good={firstDelta < 0} />
+              <DeltaChip text={humanDuration(Math.abs(firstDelta))} up={firstDelta > 0} />
             )}
           </>
         }
@@ -372,23 +374,13 @@ export async function TeamCard({ companyId, w, s }: Props) {
   );
 }
 
-/** Proposal card: a per-agent scored workbook. Not built yet — shown disabled. */
+/** Proposal card: a per-agent scored workbook. Not built yet — the button says so. */
 export function ReportCard({ s }: { s: S }) {
   return (
     <Card>
-      <div className="flex items-center justify-between gap-2">
-        <span className={EYEBROW}>▤ {s.report}</span>
-        <Badge tone="neutral">{s.soon}</Badge>
-      </div>
+      <div className={EYEBROW}>▤ {s.report}</div>
       <p className="mt-2 text-[12px] leading-snug text-[var(--color-faint)]">{s.reportSub}</p>
-      <button
-        type="button"
-        disabled
-        title={s.soon}
-        className="mt-3 h-9 w-full cursor-not-allowed rounded-[8px] bg-[var(--color-accent)] text-[13px] font-semibold text-white opacity-60"
-      >
-        ↻ {s.generate}
-      </button>
+      <SoonButton label={`↻ ${s.generate}`} note={s.soonNote} />
     </Card>
   );
 }
@@ -402,7 +394,8 @@ export async function AccountsCard({ companyId, s }: { companyId: string; s: S }
     name: string,
     status: string,
     on: boolean,
-    href: string
+    href: string,
+    primary = false
   ) => (
     <div className="flex items-center gap-3 rounded-[12px] border border-[var(--color-border-subtle)] bg-[var(--color-surface-2)] px-3 py-2.5">
       <span className="grid h-8 w-8 shrink-0 place-items-center rounded-[8px] border border-[var(--color-border)] bg-white text-[9.5px] font-bold text-[var(--color-brand)]">
@@ -417,9 +410,13 @@ export async function AccountsCard({ companyId, s }: { companyId: string; s: S }
       </div>
       <Link
         href={href}
-        className="flex h-[30px] items-center rounded-[8px] border border-[var(--color-border)] bg-white px-3 text-[12px] font-semibold text-[var(--color-ink)] hover:border-[var(--color-border-strong)]"
+        className={
+          primary
+            ? "flex h-[30px] items-center rounded-[8px] bg-[var(--color-accent)] px-3 text-[12px] font-semibold text-white shadow-[var(--shadow-primary)] hover:bg-[var(--color-accent-hi)]"
+            : "flex h-[30px] items-center rounded-[8px] border border-[var(--color-border)] bg-white px-3 text-[12px] font-semibold text-[var(--color-ink)] hover:border-[var(--color-border-strong)]"
+        }
       >
-        {s.settings}
+        {primary ? s.connect : s.settings}
       </Link>
     </div>
   );
@@ -446,7 +443,7 @@ export async function AccountsCard({ companyId, s }: { companyId: string; s: S }
                 </svg>
               </span>
               <div className="min-w-0 flex-1">
-                <div className="truncate text-[14px] font-medium tabular-nums text-[var(--color-ink)]">{n.phone}</div>
+                <div className="truncate text-[14px] font-medium tabular-nums text-[var(--color-ink)]">{formatPhone(n.phone)}</div>
                 <div className="truncate text-[11.5px] text-[var(--color-faint)]">{n.displayName || a.companyName}</div>
               </div>
               <Badge tone={a.live && n.phoneNumberId ? "success" : "neutral"}>{a.live && n.phoneNumberId ? "Live" : "Demo"}</Badge>
@@ -458,7 +455,7 @@ export async function AccountsCard({ companyId, s }: { companyId: string; s: S }
       <div className="mt-2 flex flex-col gap-2">
         {integration("HC", s.erp, a.erpSynced ? s.erpOn : s.erpOff, a.erpSynced, "/settings/team")}
         {integration("TMS", s.driver, fmt(s.driverEvents, { n: a.driverToday }), a.driverToday > 0, "/logs/webhooks")}
-        {integration("OCR", s.ocr, s.ocrOff, false, "/payments")}
+        {integration("OCR", s.ocr, s.ocrOff, false, "/payments", true)}
       </div>
     </Card>
   );

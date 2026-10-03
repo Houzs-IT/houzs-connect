@@ -28,20 +28,29 @@ export function MenuExpandButton() {
   );
 }
 
-/** EN / 中文 segmented switch. */
-export function LangToggle({ className = "" }: { className?: string }) {
+/**
+ * EN / 中文 segmented switch. `pill` is the Dashboard header's version: round,
+ * white track, ink-filled active segment.
+ */
+export function LangToggle({ className = "", pill = false }: { className?: string; pill?: boolean }) {
   const { lang, setLang } = useShell();
   const seg = (on: boolean) =>
-    `cursor-pointer rounded-[6px] px-2.5 py-[3px] text-[12px] font-semibold transition-colors ${
-      on
-        ? "bg-[var(--color-surface)] text-[var(--color-ink)] shadow-[0_1px_2px_rgba(17,24,16,0.1)]"
-        : "text-[var(--color-faint)] hover:text-[var(--color-ink)]"
-    }`;
+    pill
+      ? `cursor-pointer rounded-full px-[11px] py-[5px] text-[12px] font-semibold transition-colors ${
+          on ? "bg-[var(--color-rail)] text-white" : "text-[var(--color-ink)] hover:bg-[var(--color-surface-2)]"
+        }`
+      : `cursor-pointer rounded-[6px] px-2.5 py-[3px] text-[12px] font-semibold transition-colors ${
+          on
+            ? "bg-[var(--color-surface)] text-[var(--color-ink)] shadow-[0_1px_2px_rgba(17,24,16,0.1)]"
+            : "text-[var(--color-faint)] hover:text-[var(--color-ink)]"
+        }`;
   return (
     <div
       role="group"
       aria-label="Language"
-      className={`flex rounded-[8px] border border-[var(--color-border)] bg-[var(--color-surface-2)] p-0.5 ${className}`}
+      className={`flex border border-[var(--color-border)] p-0.5 ${
+        pill ? "rounded-full bg-[var(--color-surface)]" : "rounded-[8px] bg-[var(--color-surface-2)]"
+      } ${className}`}
     >
       <button type="button" aria-pressed={lang === "en"} onClick={() => setLang("en")} className={seg(lang === "en")}>
         EN

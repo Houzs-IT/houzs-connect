@@ -1,4 +1,4 @@
-import { PageSkeleton, Skel } from "@/components/skeleton";
+import { Skel } from "@/components/skeleton";
 
 /**
  * Dashboard loading state — the Overview shape: greeting, tab strip, two
@@ -13,7 +13,7 @@ export default function DashboardLoading() {
     </div>
   );
   return (
-    <PageSkeleton section="dashboard" page="overview">
+    <div className="scroll-thin min-h-0 min-w-0 flex-1 overflow-y-auto">
       <div className="flex flex-col gap-5 px-4 py-6 md:px-10 md:py-9">
         <div>
           <Skel className="h-[30px] w-72" />
@@ -33,6 +33,6 @@ export default function DashboardLoading() {
           </div>
         </div>
       </div>
-    </PageSkeleton>
+    </div>
   );
 }

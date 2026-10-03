@@ -1,6 +1,6 @@
 import { Suspense } from "react";
 import Link from "next/link";
-import { PageChrome } from "@/components/PageChrome";
+import { LangToggle } from "@/components/shell/TopbarControls";
 import { getCurrentMember } from "@/lib/current-member";
 import { fmt } from "@/lib/i18n/dict";
 import { getDict, getLang } from "@/lib/i18n/server";
@@ -20,6 +20,7 @@ import { SupportSkeleton, SupportTab } from "./support";
 import { LiveSkeleton, LiveTab } from "./live";
 import { PeriodPicker } from "./PeriodPicker";
 import { parsePeriod, periodWindow } from "./util";
+import { Presence } from "./Presence";
 
 const TZ = "Asia/Kuala_Lumpur";
 type Tab = "overview" | "support" | "live";
@@ -105,15 +106,35 @@ export default async function DashboardPage({
   };
 
   return (
-    <PageChrome section="dashboard" page={tab === "overview" ? "overview" : undefined} crumbs={tab === "overview" ? [] : [tab === "support" ? s.tSupport : s.tLive]}>
+    // No page Topbar here: the design gives the Dashboard its own header with
+    // presence, language and Export on the right.
+    <div className="flex min-w-0 flex-1 flex-col">
+    <main className="scroll-thin min-h-0 flex-1 overflow-y-auto">
       <div className="flex flex-col gap-5 px-4 py-6 md:px-10 md:py-9">
-        {/* Greeting */}
-        <div>
+        {/* Greeting · presence · language · export */}
+        <div className="flex flex-wrap items-start gap-4">
+        <div className="min-w-0 flex-1">
           <h1 className="text-[24px] font-medium tracking-[-0.02em] text-[var(--color-ink)] md:text-[28px]">
             {fmt(s.welcome, { name: firstName })}
           </h1>
           <div className="mt-1 text-[12.5px] text-[var(--color-faint)]">
             {dateLine} · {s.signedInAs} <b className="font-semibold text-[var(--color-muted)]">{me.name}</b>
+          </div>
+        </div>
+          <div className="flex items-center gap-2">
+            <Suspense fallback={null}>
+              <Presence companyId={companyId} s={s} />
+            </Suspense>
+            <LangToggle pill className="hidden md:flex" />
+            <a
+              href={`/dashboard/export?period=${w.days}`}
+              className="flex h-[38px] items-center gap-1.5 whitespace-nowrap rounded-[8px] border border-[var(--color-border)] bg-[var(--color-surface)] px-3.5 text-[12.5px] font-semibold text-[var(--color-ink)] hover:border-[var(--color-border-strong)] hover:bg-[var(--color-surface-2)]"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M12 3v12M7 10l5 5 5-5M5 21h14" />
+              </svg>
+              {s.export}
+            </a>
           </div>
         </div>
 
@@ -193,6 +214,7 @@ export default async function DashboardPage({
           </Suspense>
         )}
       </div>
-    </PageChrome>
+    </main>
+    </div>
   );
 }

@@ -348,7 +348,14 @@ export async function deliveryFollowUp(companyId: string, w: PeriodWindow) {
     .groupBy(automation.id, automation.name)
     .orderBy(desc(count()))
     .limit(1);
-  const flow = top[0];
+  // No runs this period: still name the flow (the company's ERP-triggered
+  // automation), so the card keeps its shape and reads zeros.
+  const flow =
+    top[0] ??
+    (await db.query.automation.findFirst({
+      where: and(eq(automation.companyId, companyId), eq(automation.triggerType, "WEBHOOK")),
+      columns: { id: true, name: true },
+    }));
   if (!flow) return null;
 
   const runs = await db
@@ -615,6 +622,40 @@ export async function liveNow(companyId: string) {
       .sort((a, b) => b.at.getTime() - a.at.getTime())
       .slice(0, 12),
   };
+}
+
+// ─────────────────────────── Presence ───────────────────────────
+
+/**
+ * Who is "online". Connect does not track presence, so this is a stated proxy:
+ * an active member who sent a message in the last 15 minutes. The header says
+ * so on hover.
+ */
+export async function teamPresence(companyId: string) {
+  const db = getDb();
+  const fifteenAgo = new Date(Date.now() - 15 * 60_000);
+  const [members, recent] = await Promise.all([
+    db.query.member.findMany({
+      where: and(eq(member.companyId, companyId), eq(member.active, true)),
+      columns: { id: true, name: true },
+    }),
+    db
+      .selectDistinct({ memberId: message.sentByMemberId })
+      .from(message)
+      .innerJoin(conversation, eq(conversation.id, message.conversationId))
+      .innerJoin(contact, eq(contact.id, conversation.contactId))
+      .where(
+        and(
+          eq(contact.companyId, companyId),
+          eq(message.direction, "OUT"),
+          isNotNull(message.sentByMemberId),
+          gte(message.createdAt, fifteenAgo)
+        )
+      ),
+  ]);
+  const on = new Set(recent.map((r) => r.memberId));
+  const online = members.filter((m) => on.has(m.id));
+  return { online: online.map((m) => m.name), offline: members.length - online.length };
 }
 
 // ─────────────────────────── helpers ───────────────────────────
