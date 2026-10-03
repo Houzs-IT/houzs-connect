@@ -108,6 +108,15 @@ export const NODE_CATALOG: NodeCatalogEntry[] = [
     hint: "Ask, then save the reply to an attribute",
   },
   {
+    type: "send_form",
+    label: "Send Form (WhatsApp Flow)",
+    category: "Messaging",
+    color: "#2a6f97",
+    glyph: "▦",
+    keywords: ["form", "flow", "collect", "fields", "property details", "whatsapp flow"],
+    hint: "Send a WhatsApp Flow form; wait for the submission",
+  },
+  {
     type: "ai_agent_reply",
     label: "AI Agent Reply",
     category: "Messaging",

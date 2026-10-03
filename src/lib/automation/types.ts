@@ -5,6 +5,7 @@ export type NodeType =
   | "send_text"
   | "ask_buttons" // interactive buttons; run pauses awaiting a tap
   | "collect_input" // pauses awaiting a free-text reply, saves to an attribute
+  | "send_form" // send a Meta WhatsApp Flow form; pauses awaiting the submission
   | "ai_agent_reply" // generate + send an AI reply to the last customer message
   | "criteria_router" // branch on a contact attribute
   | "jump_to_automation" // hand the contact off to another automation
@@ -108,6 +109,11 @@ export interface FlowNode {
     columns?: string;
     // eval
     expression?: string;
+    // send_form — formId is a houzs-connect form.id (carries the published Meta
+    // flow id); flowCta is the button label that opens the form.
+    formId?: string;
+    flowCta?: string;
+    flowScreen?: string;
     [k: string]: unknown;
   };
   // canvas position (builder)
