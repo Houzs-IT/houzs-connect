@@ -7,24 +7,6 @@ import { SecondaryMenu } from "../SecondaryMenu";
   render their own from the module layout.
 */
 
-export async function LogsMenu() {
-  const t = await getDict();
-  return (
-    <SecondaryMenu
-      title={t.nav.logs}
-      groups={[
-        {
-          title: t.menu.views,
-          items: [
-            { href: "/logs", label: t.page.messages, exact: true },
-            { href: "/logs/webhooks", label: t.page.webhooks },
-          ],
-        },
-      ]}
-    />
-  );
-}
-
 /**
  * Settings, grouped as in the redesign. Only the pages that exist today are
  * listed; Personal, Roles, Departments, Billing and the rest arrive with the

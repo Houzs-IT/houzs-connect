@@ -19,10 +19,13 @@ export function Topbar({
   crumbs,
   mobileTitle,
   actions,
+  center,
   current,
   companies,
 }: {
   crumbs: Crumb[];
+  /** Centred in the bar on desktop — page tabs (e.g. System Logs). */
+  center?: React.ReactNode;
   /** Page-level buttons, right of the language switch (e.g. Import, Add). */
   actions?: React.ReactNode;
   /** Phone title; defaults to the last crumb. */
@@ -64,7 +67,9 @@ export function Topbar({
         })}
       </nav>
 
-      <div className="ml-auto flex items-center gap-2">
+      {center && <div className="mx-auto hidden md:flex">{center}</div>}
+
+      <div className={`${center ? "md:ml-0" : ""} ml-auto flex items-center gap-2`}>
         <LangToggle className="hidden md:flex" />
         {actions}
         <UserMenu
