@@ -293,7 +293,7 @@ export async function handleReceipt(
  */
 export async function handleCustomerReply(
   contactId: string,
-  input: { buttonId?: string; text?: string }
+  input: { buttonId?: string; text?: string; flow?: { fields: Record<string, string> } }
 ) {
   const db = getDb();
   const waiting = await db.query.automationRun.findMany({
@@ -328,7 +328,7 @@ export async function handleCustomerReply(
  */
 export async function handleInboundMessage(
   contactId: string,
-  input: { buttonId?: string; text?: string }
+  input: { buttonId?: string; text?: string; flow?: { fields: Record<string, string> } }
 ) {
   const db = getDb();
   const resumed = await handleCustomerReply(contactId, input);

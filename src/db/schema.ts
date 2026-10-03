@@ -569,6 +569,8 @@ export const form = connect.table(
     name: text("name").notNull(),
     status: text("status").notNull().default("draft"),
     fields: jsonb("fields"),
+    // The published Meta WhatsApp Flow id this form maps to; null until published.
+    metaFlowId: text("meta_flow_id"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({ companyIdx: index("form_company_idx").on(t.companyId) })

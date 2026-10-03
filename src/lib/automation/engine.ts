@@ -7,6 +7,7 @@ import {
   contactTag,
   conversation as conversationTable,
   conversationTag,
+  form as formTable,
   message,
   tag as tagTable,
 } from "@/db/schema";
@@ -101,7 +102,7 @@ async function logStep(runId: string, entry: Record<string, unknown>) {
 async function execNode(
   node: FlowNode,
   ctx: RunCtx
-): Promise<{ next?: string } | { pause: "button" | "text" | "delay"; branch?: never }> {
+): Promise<{ next?: string } | { pause: "button" | "text" | "form" | "delay"; branch?: never }> {
   const db = getDb();
   const d = node.data ?? {};
   const varCtx = {
@@ -139,6 +140,32 @@ async function execNode(
       });
       await logStep(ctx.runId, { node: node.id, type: node.type, awaiting: "text" });
       return { pause: "text" };
+    }
+
+    case "send_form": {
+      // Send a Meta WhatsApp Flow form. d.formId points at a houzs-connect form
+      // whose PUBLISHED meta flow id is what's actually sent; flow_token = the run
+      // id so the submission resumes THIS run. A missing / unpublished form sends
+      // nothing and continues, so a not-yet-published form never hangs the flow.
+      const formRow = d.formId
+        ? await db.query.form.findFirst({ where: eq(formTable.id, d.formId) })
+        : null;
+      const flowId = formRow?.metaFlowId ?? "";
+      if (!flowId) {
+        await logStep(ctx.runId, { node: node.id, type: node.type, skipped: "form not published" });
+        return { next: nextNodeId(ctx.graph, node.id) };
+      }
+      await sendOutbound(ctx.conversationId, interpolate(d.message ?? "", varCtx), {
+        isBot: true,
+        flow: {
+          flowId,
+          flowToken: ctx.runId,
+          cta: d.flowCta || "Open form",
+          screen: d.flowScreen || "FORM",
+        },
+      });
+      await logStep(ctx.runId, { node: node.id, type: node.type, awaiting: "form", formId: d.formId });
+      return { pause: "form" };
     }
 
     case "ai_agent_reply": {
@@ -462,7 +489,7 @@ export async function startRun(
  */
 export async function resumeRun(
   runId: string,
-  input: { buttonId?: string; text?: string }
+  input: { buttonId?: string; text?: string; flow?: { fields: Record<string, string> } }
 ): Promise<boolean> {
   const db = getDb();
   const run = await db.query.automationRun.findFirst({
@@ -481,6 +508,15 @@ export async function resumeRun(
   }
   if (context.waitingFor === "text" && input.text != null) {
     if (context.saveTo) await setContactAttr(ctx.contactId, context.saveTo, input.text);
+    await advance(ctx, nextNodeId(ctx.graph, cursor));
+    return true;
+  }
+  if (context.waitingFor === "form" && input.flow != null) {
+    // A Flow submission writes MANY attributes: one per form field, keyed by the
+    // field key (which equals the contact attribute key the flow was built for).
+    for (const [key, value] of Object.entries(input.flow.fields)) {
+      await setContactAttr(ctx.contactId, key, String(value));
+    }
     await advance(ctx, nextNodeId(ctx.graph, cursor));
     return true;
   }
