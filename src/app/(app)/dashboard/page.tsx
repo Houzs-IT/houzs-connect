@@ -1,6 +1,8 @@
 import { Suspense } from "react";
 import Link from "next/link";
-import { LangToggle } from "@/components/shell/TopbarControls";
+import { CompanySwitcher, LangToggle } from "@/components/shell/TopbarControls";
+import { getDb } from "@/db/client";
+import { companyChoices } from "@/lib/companies";
 import { getCurrentMember } from "@/lib/current-member";
 import { fmt } from "@/lib/i18n/dict";
 import { getDict, getLang } from "@/lib/i18n/server";
@@ -132,6 +134,7 @@ export default async function DashboardPage({
                 <Presence companyId={companyId} s={s} />
               </Suspense>
             </span>
+            <CompanySwitcher companies={await companyChoices(getDb(), me)} className="hidden md:block" />
             <LangToggle pill />
             <a
               href={`/dashboard/export?period=${w.days}`}
