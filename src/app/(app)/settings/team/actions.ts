@@ -135,7 +135,10 @@ export async function fetchTeam(): Promise<TeamView> {
     };
   }
 
-  const people = [...byKey.values()].sort((a, b) => a.name.localeCompare(b.name));
+  // Most access first (Super Admin, Owner, Admin, …), then by name.
+  const RANK = ["SUPER_ADMIN", "OWNER", "ADMIN", "MANAGER", "AGENT", "SALES", "DRIVER"];
+  const rank = (r: string) => (RANK.indexOf(r) < 0 ? RANK.length : RANK.indexOf(r));
+  const people = [...byKey.values()].sort((a, b) => rank(a.role) - rank(b.role) || a.name.localeCompare(b.name));
   return { permitted: true, companies, people };
 }
 

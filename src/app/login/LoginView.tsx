@@ -45,12 +45,12 @@ function Eye({ off }: { off: boolean }) {
 const CHIP_TONES = ["green", "blue", "pink"];
 const CHIP_ICONS = ["☏", "⇄", "↗"];
 
-export function LoginView() {
+export function LoginView({ openRequest = false }: { openRequest?: boolean }) {
   const { t, lang, setLang } = useShell();
   const L = t.login;
   const [state, formAction, pending] = useActionState(login, {});
   const [show, setShow] = useState(false);
-  const [panel, setPanel] = useState<"none" | "forgot" | "request" | "sent">("none");
+  const [panel, setPanel] = useState<"none" | "forgot" | "request" | "sent">(openRequest ? "request" : "none");
   const [req, setReq] = useState({ name: "", email: "", phone: "", department: "", note: "" });
   const [reqErr, setReqErr] = useState<string | null>(null);
   const [reqBusy, setReqBusy] = useState(false);
