@@ -485,7 +485,7 @@ export async function applyOrgSync(db: DB, plan: OrgSyncPlan): Promise<AppliedCo
         phone: m.phone,
         title: m.title,
         // SUPER_ADMIN is granted in Connect, not the ERP — a sync must not take it away.
-        role: sql`case when ${member.role} = 'SUPER_ADMIN' then ${member.role} else ${m.role}::"connect"."Role" end`,
+        role: sql`case when ${member.role}::text = 'SUPER_ADMIN' then ${member.role} else ${m.role}::"connect"."Role" end`,
         status: m.status,
         erpUserId: m.erpUserId,
         active: true,

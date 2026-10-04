@@ -76,7 +76,7 @@ export async function login(
       // SUPER_ADMIN is granted in Connect, not the ERP — signing in keeps it.
       set: {
         name: erp.name ?? email,
-        role: sql`case when ${member.role} = 'SUPER_ADMIN' then ${member.role} else ${role}::"connect"."Role" end`,
+        role: sql`case when ${member.role}::text = 'SUPER_ADMIN' then ${member.role} else ${role}::"connect"."Role" end`,
         title: erp.role_name ?? null,
       },
     })
