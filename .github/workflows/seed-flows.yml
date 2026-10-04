@@ -15,6 +15,10 @@ concurrency:
 jobs:
   seed:
     runs-on: ubuntu-latest
+    # Supabase's pooler host also advertises IPv6 (AAAA), and GitHub runners have
+    # no IPv6 egress (ENETUNREACH on :6543) — force Node to use the IPv4 record.
+    env:
+      NODE_OPTIONS: --dns-result-order=ipv4first
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
