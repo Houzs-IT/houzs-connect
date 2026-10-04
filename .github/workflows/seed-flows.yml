@@ -30,6 +30,10 @@ jobs:
           cache: pnpm
       - name: Install deps
         run: pnpm install --frozen-lockfile
+      - name: Show DB target (host/port only, no password)
+        run: node -e "const u=new URL(process.env.DATABASE_URL);console.log('DB host =',u.hostname,'| port =',u.port)"
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
       - name: Apply pending migrations (idempotent)
         run: pnpm db:migrate
         env:
