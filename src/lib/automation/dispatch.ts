@@ -331,16 +331,18 @@ export async function handleInboundMessage(
   input: { buttonId?: string; text?: string; flow?: { fields: Record<string, string> } }
 ) {
   const db = getDb();
-  // Persist the tapped button so a NEW_INCOMING_MESSAGE guard (the Delivery Lock)
-  // can branch on what the customer pressed — resumeRun doesn't store it, and a
-  // late Amend tap after confirmation starts no waiting run to carry it.
-  if (input.buttonId) {
+  // Persist what the customer just sent so a NEW_INCOMING_MESSAGE guard can
+  // branch on it — resumeRun stores neither. last_button carries a tap (the
+  // Delivery Lock reads it); last_message carries the text LOWERCASED for
+  // keyword routing like opt-out (the raw text is on the message row). A late
+  // tap/keyword after a flow completes starts no waiting run to carry it.
+  if (input.buttonId || input.text) {
     const c = await db.query.contact.findFirst({ where: eq(contactTable.id, contactId) });
     if (c) {
-      await db
-        .update(contactTable)
-        .set({ attributes: { ...attrs(c.attributes), last_button: input.buttonId } })
-        .where(eq(contactTable.id, contactId));
+      const merged = { ...attrs(c.attributes) };
+      if (input.buttonId) merged.last_button = input.buttonId;
+      if (input.text) merged.last_message = input.text.toLowerCase().trim();
+      await db.update(contactTable).set({ attributes: merged }).where(eq(contactTable.id, contactId));
     }
   }
   const resumed = await handleCustomerReply(contactId, input);
