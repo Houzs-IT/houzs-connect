@@ -98,6 +98,44 @@ export const SHARED_FORMS: SeedForm[] = [
 ];
 
 /**
+ * A one-shot "send one approved template, then stop" graph: trigger ->
+ * send_template -> end. The template carries the real wording (sent by name via
+ * the send_template node); `message` is the DEMO/inbox preview. `params` are the
+ * contact-field placeholders filling the template's {{1}}, {{2}}, … IN ORDER —
+ * each must match an attribute key the ERP injects on the trigger. Button-less
+ * templates only (reminders, driver info, delivery-completed); a template with
+ * Confirm/Amend buttons needs the delivery graph instead.
+ */
+export function buildTemplateSendGraph(opts: {
+  templateName: string;
+  params: string[];
+  message: string;
+}): FlowGraph {
+  return {
+    nodes: [
+      { id: "trigger", type: "trigger", data: {}, x: 40, y: 120 },
+      {
+        id: "send",
+        type: "send_template",
+        x: 240,
+        y: 120,
+        data: {
+          templateName: opts.templateName,
+          templateLang: "en",
+          templateParams: opts.params,
+          message: opts.message,
+        },
+      },
+      { id: "done", type: "end", x: 460, y: 120, data: {} },
+    ],
+    edges: [
+      { from: "trigger", to: "send" },
+      { from: "send", to: "done" },
+    ],
+  };
+}
+
+/**
  * The shared delivery-date graph: a Confirm / Amend fork, the confirm tail
  * (thanks -> balance? -> Property Details form -> disposal fee / ack) and the
  * amend sub-flow (confirm-lock guard -> reason -> new-date form -> re-confirm ->
