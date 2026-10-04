@@ -1,10 +1,12 @@
 name: Seed WS-A flows (DRAFT)
 
-# Manual-only. Applies pending migrations, then upserts the rebuilt WS-A
-# conversation flows into connect.automation as DRAFT/disabled for the Houzs
-# company. Idempotent and non-destructive (no wipe, no sends, DRAFT only), so it
-# is safe to re-run. Needs the DATABASE_URL repo secret = the Connect Postgres
-# pooler DSN (private repo, so the secret and logs stay private).
+# Manual-only. Upserts the rebuilt WS-A conversation flows into
+# connect.automation as DRAFT/disabled for the Houzs company. Idempotent and
+# non-destructive (no wipe, no sends, DRAFT only), so it is safe to re-run. Does
+# NOT run db:migrate: the migrate runner can't create its tracking table in the
+# connect schema (owned by houzs_connect), so the seed adds the one column it
+# needs itself. Needs the DATABASE_URL repo secret = the Connect Postgres pooler
+# DSN, and the postgres role must inherit houzs_connect (one-time GRANT).
 on:
   workflow_dispatch:
 
@@ -32,10 +34,6 @@ jobs:
         run: pnpm install --frozen-lockfile
       - name: Show DB target (user + password LENGTH only, never the password)
         run: node -e "try{const u=new URL(process.env.DATABASE_URL);console.log('host=',u.hostname,'| port=',u.port,'| user=',u.username,'| passlen=',decodeURIComponent(u.password||'').length)}catch(e){console.log('DATABASE_URL did not parse as a URL:',e.message)}"
-        env:
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
-      - name: Apply pending migrations (idempotent)
-        run: pnpm db:migrate
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
       - name: Seed WS-A flows (DRAFT, idempotent)
