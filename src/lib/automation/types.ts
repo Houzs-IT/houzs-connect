@@ -138,6 +138,8 @@ export interface FlowEdge {
 export interface FlowGraph {
   nodes: FlowNode[];
   edges: FlowEdge[];
+  /** "tb" once the builder has laid the flow out top-to-bottom. */
+  layout?: "tb";
 }
 
 /** A saved snapshot of an automation's graph (version history). */

@@ -71,7 +71,11 @@ export default async function CampaignsPage({
       })
       .from(campaign)
       .where(and(...filters))
-      .orderBy(desc(campaign.createdAt))
+      // Newest "when" first (send time, else schedule); drafts with neither last.
+      .orderBy(
+        sql`coalesce(nullif(${campaign.stats} ->> 'startedAt', '')::timestamptz, ${campaign.scheduleAt}) desc nulls last`,
+        desc(campaign.createdAt)
+      )
       .limit(CAMPAIGN_HISTORY_LIMIT),
     // Reachable people per tag, with the same exclusions the send applies.
     db
@@ -290,6 +294,9 @@ export default async function CampaignsPage({
                         <span className="text-[12px] text-[var(--color-faint)]">{L.notSent}</span>
                       ) : c && c.sent > 0 ? (
                         <ResultBar sent={c.sent} read={c.read} replied={c.replied} total={Math.max(c.total, 1)} L={L} />
+                      ) : (stats.sent ?? 0) > 0 ? (
+                        // Sent before messages carried their campaign: the count only.
+                        <ResultBar sent={stats.sent ?? 0} read={0} replied={0} total={Math.max(stats.total ?? 0, stats.sent ?? 0, 1)} L={L} />
                       ) : (
                         <span className="text-[12px] text-[var(--color-muted)]">
                           {fmt(L.nSent, { n: stats.sent ?? 0 })}
@@ -314,7 +321,7 @@ export default async function CampaignsPage({
 
                     <div className="leading-tight">
                       <StatusBadge s={r.s} L={L} />
-                      {r.requiresApproval && (
+                      {r.requiresApproval && (r.approvedByMemberId || !sentState) && (
                         <div
                           className={`mt-1 text-[11px] ${
                             r.approvedByMemberId ? "text-[var(--color-faint)]" : "text-[var(--color-warning)]"

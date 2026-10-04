@@ -25,27 +25,50 @@ export function slug(s: string): string {
 export async function ensureInternal(companyId: string, memberId: string): Promise<void> {
   const db = getDb();
   await ensureInternalTables(db);
-  const have = await rows<{ n: number }>(sql`
-    select count(*)::int as n from connect.internal_channel where company_id = ${companyId} and kind = 'channel'
-  `);
-  if ((have[0]?.n ?? 0) > 0) return;
-  const depts = await rows<{ id: string; name: string }>(sql`
-    select id, name from connect.department where company_id = ${companyId} order by name
-  `);
-  const seeds = [...depts.map((d) => ({ name: slug(d.name), dept: d.id as string | null })), { name: "general", dept: null }];
-  const seen = new Set<string>();
-  for (const s of seeds) {
-    if (seen.has(s.name)) continue;
-    seen.add(s.name);
-    await db.execute(sql`
-      insert into connect.internal_channel (id, company_id, kind, name, department_id, created_by_member_id)
-      values (${createId()}, ${companyId}, 'channel', ${s.name}, ${s.dept}, ${memberId})
+  if (seeded.has(companyId)) return;
+  // The layout and the page both call this on a first visit, at the same time.
+  // One transaction per company at a time, re-checking inside it, so the
+  // default channels are made once.
+  await db.transaction(async (tx) => {
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${"internal-seed:" + companyId}))`);
+    // Earlier builds could race and make each default channel twice; drop the
+    // empty copies (the oldest of each name stays).
+    await tx.execute(sql`
+      delete from connect.internal_channel c
+      where c.company_id = ${companyId} and c.kind = 'channel'
+        and exists (
+          select 1 from connect.internal_channel o
+          where o.company_id = c.company_id and o.kind = 'channel' and o.name = c.name
+            and (o.created_at, o.id) < (c.created_at, c.id)
+        )
+        and not exists (select 1 from connect.internal_message m where m.channel_id = c.id)
     `);
-  }
+    const have = (await tx.execute(sql`
+      select count(*)::int as n from connect.internal_channel where company_id = ${companyId} and kind = 'channel'
+    `)) as unknown as { n: number }[];
+    if ((have[0]?.n ?? 0) > 0) return;
+    const depts = (await tx.execute(sql`
+      select id, name from connect.department where company_id = ${companyId} order by name
+    `)) as unknown as { id: string; name: string }[];
+    const seeds = [...depts.map((d) => ({ name: slug(d.name), dept: d.id as string | null })), { name: "general", dept: null }];
+    const seen = new Set<string>();
+    for (const s of seeds) {
+      if (seen.has(s.name)) continue;
+      seen.add(s.name);
+      await tx.execute(sql`
+        insert into connect.internal_channel (id, company_id, kind, name, department_id, created_by_member_id)
+        values (${createId()}, ${companyId}, 'channel', ${s.name}, ${s.dept}, ${memberId})
+      `);
+    }
+  });
+  seeded.add(companyId);
 }
 
-export type SideChannel = { id: string; name: string; topic: string | null; unread: number };
-export type SideDm = { id: string; otherId: string; otherName: string; unread: number };
+/** Companies already checked by this worker. */
+const seeded = new Set<string>();
+
+export type SideChannel = { id: string; name: string; topic: string | null; unread: number; lastBy: string | null; lastBody: string | null };
+export type SideDm = { id: string; otherId: string; otherName: string; unread: number; lastBy: string | null; lastBody: string | null };
 export type SideDiscussion = { conversationId: string; name: string; orderRef: string | null; channelId: string; messageId: string };
 
 /** Unread = top-level (or also-in-channel) messages from others since I last read it. */
@@ -56,17 +79,26 @@ const unread = (meId: string) => sql`(
     and m.created_at > coalesce(cm.last_read_at, now() - interval '7 days')
 )`;
 
+/** The newest top-level message in channel c: who and what (the phone list previews it). */
+const last = sql`(
+  select json_build_object('by', a.name, 'body', m.body) from connect.internal_message m
+  left join connect.member a on a.id = m.author_member_id
+  where m.channel_id = c.id and (m.parent_id is null or m.also_in_channel)
+  order by m.created_at desc limit 1
+)`;
+type Last = { by: string | null; body: string | null } | null;
+
 export async function sidebar(companyId: string, meId: string) {
   const [channels, dms, discussions] = await Promise.all([
-    rows<{ id: string; name: string; topic: string | null; unread: number }>(sql`
-      select c.id, c.name, c.topic, ${unread(meId)} as unread
+    rows<{ id: string; name: string; topic: string | null; unread: number; last: Last }>(sql`
+      select c.id, c.name, c.topic, ${unread(meId)} as unread, ${last} as last
       from connect.internal_channel c
       left join connect.internal_channel_member cm on cm.channel_id = c.id and cm.member_id = ${meId}
       where c.company_id = ${companyId} and c.kind = 'channel'
-      order by c.name
+      order by (c.name = 'general'), c.created_at, c.name
     `),
-    rows<{ id: string; other_id: string; other_name: string; unread: number }>(sql`
-      select c.id, o.member_id as other_id, mo.name as other_name, ${unread(meId)} as unread
+    rows<{ id: string; other_id: string; other_name: string; unread: number; last: Last }>(sql`
+      select c.id, o.member_id as other_id, mo.name as other_name, ${unread(meId)} as unread, ${last} as last
       from connect.internal_channel c
       join connect.internal_channel_member cm on cm.channel_id = c.id and cm.member_id = ${meId}
       join connect.internal_channel_member o on o.channel_id = c.id and o.member_id <> ${meId}
@@ -87,8 +119,22 @@ export async function sidebar(companyId: string, meId: string) {
     `),
   ]);
   return {
-    channels: channels as SideChannel[],
-    dms: dms.map((d) => ({ id: d.id, otherId: d.other_id, otherName: d.other_name, unread: d.unread })) as SideDm[],
+    channels: channels.map((c) => ({
+      id: c.id,
+      name: c.name,
+      topic: c.topic,
+      unread: c.unread,
+      lastBy: c.last?.by ?? null,
+      lastBody: c.last?.body ?? null,
+    })) as SideChannel[],
+    dms: dms.map((d) => ({
+      id: d.id,
+      otherId: d.other_id,
+      otherName: d.other_name,
+      unread: d.unread,
+      lastBy: d.last?.by ?? null,
+      lastBody: d.last?.body ?? null,
+    })) as SideDm[],
     discussions: discussions.map((d) => ({
       conversationId: d.conversation_id,
       name: d.name || d.phone,
@@ -205,7 +251,7 @@ export async function channelMessages(channelId: string, limit = 200): Promise<C
       select ${MESSAGE_SELECT},
         (select count(*)::int from connect.internal_message x where x.parent_id = m.id) as replies,
         (select max(x.created_at) from connect.internal_message x where x.parent_id = m.id) as last_reply_at,
-        (select array_agg(distinct xa.name) from connect.internal_message x join connect.member xa on xa.id = x.author_member_id where x.parent_id = m.id) as reply_authors
+        (select json_agg(distinct xa.name) from connect.internal_message x join connect.member xa on xa.id = x.author_member_id where x.parent_id = m.id) as reply_authors
       from connect.internal_message m
       ${MESSAGE_JOINS}
       where m.channel_id = ${channelId} and (m.parent_id is null or m.also_in_channel)

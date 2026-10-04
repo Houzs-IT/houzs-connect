@@ -11,7 +11,7 @@ import { Keys } from "./Keys";
 export const dynamic = "force-dynamic";
 
 const fmtDate = (d: Date) =>
-  d.toLocaleString("en-GB", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Kuala_Lumpur" });
+  d.toLocaleString("en-GB", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Kuala_Lumpur" }).replace("Sept", "Sep");
 
 /** API keys for other systems, and what the API offers. */
 export default async function DevelopersPage() {

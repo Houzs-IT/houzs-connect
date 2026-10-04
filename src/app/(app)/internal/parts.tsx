@@ -68,7 +68,22 @@ export function ConvoCard({ card, L, compact = false }: { card: Card; L: Dict["i
     );
   }
   return (
-    <div className="mt-2 max-w-[440px] overflow-hidden rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)]">
+    <>
+    {/* Phone: one tappable line, as the design draws it. */}
+    <Link
+      href={`/inbox/${card.id}`}
+      className="mt-2 flex items-center gap-3 rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2.5 md:hidden"
+    >
+      <Avatar name={card.name} size={30} />
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-[13.5px] font-semibold text-[var(--color-ink)]">
+          {card.name} {card.orderRef && <span className="ml-1 text-[var(--color-brand)]">{card.orderRef}</span>}
+        </span>
+        <span className="block text-[12px] text-[var(--color-faint)]">{L.serviceConvo}</span>
+      </span>
+      <span className="text-[16px] text-[var(--color-accent)]">→</span>
+    </Link>
+    <div className="mt-2 hidden max-w-[440px] overflow-hidden rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)] md:block">
       <div className="flex items-start gap-3 px-3.5 py-3">
         <Avatar name={card.name} size={30} />
         <div className="min-w-0 flex-1">
@@ -91,6 +106,7 @@ export function ConvoCard({ card, L, compact = false }: { card: Card; L: Dict["i
         </Link>
       </div>
     </div>
+    </>
   );
 }
 

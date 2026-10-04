@@ -9,6 +9,7 @@ import { openRequests } from "@/lib/access-requests";
 import { can, isAdminRole } from "@/lib/permissions";
 import { SettingsHead } from "../ui";
 import { fetchTeam } from "./actions";
+import { InvitePerson } from "./InvitePerson";
 import { AccessRequests } from "./AccessRequests";
 import { TeamClient } from "./TeamClient";
 
@@ -36,7 +37,7 @@ export default async function TeamPage() {
     ) : null;
 
   return (
-    <PageChrome section="settings" page="team">
+    <PageChrome section="settings" page="team" actions={view.permitted ? <InvitePerson /> : undefined}>
       <div className="max-w-[1180px] p-4 md:p-6">
         <SettingsHead title={L.teamTitle} sub={L.teamSub} />
         {!view.permitted ? (

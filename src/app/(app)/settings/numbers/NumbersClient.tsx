@@ -9,7 +9,9 @@
 // except where it counts. Showing all four at once invites doing them out of
 // order and then wondering why nothing sends.
 
+import Link from "next/link";
 import { useState, useTransition } from "react";
+import { formatPhone } from "@/lib/format";
 import { ActionConfirm } from "@/components/ActionConfirm";
 import {
   addPhoneNumber,
@@ -625,6 +627,27 @@ function NumberCard({
   companies: { id: string; name: string }[];
 }) {
   const advice = nextStep(n);
+  const connected = n.connection === "CONNECTED";
+  // Settings (company + verification + release) opens itself while there is
+  // something to do; the business profile is open on a working number.
+  const [settingsOpen, setSettingsOpen] = useState(!assignment);
+  const [profileOpen, setProfileOpen] = useState(connected);
+  const chip = (on: boolean, danger = false) =>
+    `flex h-[34px] items-center gap-1.5 rounded-[8px] border px-3 text-[12.5px] font-semibold transition-colors ${
+      danger
+        ? "border-[var(--color-danger)] text-[var(--color-danger)] hover:bg-[var(--color-danger-soft)]"
+        : on
+          ? "border-[var(--color-accent)] bg-[var(--color-accent-soft)] text-[var(--color-accent-ink)]"
+          : "border-[var(--color-border)] text-[var(--color-ink)] hover:bg-[var(--color-surface-2)]"
+    }`;
+  const dot = (tone: string, glyph: string) => (
+    <span
+      className="grid h-5 w-5 place-items-center rounded-full text-[10px]"
+      style={{ background: `var(--color-pastel-${tone})`, color: `var(--color-pastel-${tone}-ink)` }}
+    >
+      {glyph}
+    </span>
+  );
   const good = (ok: boolean, warn = false) => (ok ? "green" : warn ? "orange" : "pink");
   const tiles: [string, string, string, string][] = [
     ["Connection", n.connection ?? "unknown", good(n.connection === "CONNECTED", n.connection === "PENDING"), "⇄"],
@@ -644,7 +667,7 @@ function NumberCard({
           <img src="/logo-hc-mark.png" alt="" className="h-5 w-5 object-contain" />
         </span>
         <div className="min-w-0 flex-1 leading-tight">
-          <div className="text-[16px] font-semibold tabular-nums text-[var(--color-ink)]">{n.displayPhoneNumber}</div>
+          <div className="text-[16px] font-semibold tabular-nums text-[var(--color-ink)]">{formatPhone(n.displayPhoneNumber)}</div>
           <div className="mt-0.5 truncate text-[12px] text-[var(--color-faint)]">
             {n.verifiedName ?? "—"} · assigned to{" "}
             <b className="font-semibold text-[var(--color-ink)]">{assignment ? assignment.companyName : "Not assigned"}</b>
@@ -664,6 +687,49 @@ function NumberCard({
         >
           {n.connection ?? "unknown"}
         </span>
+        <button
+          type="button"
+          aria-label="More"
+          onClick={() => setSettingsOpen((v) => !v)}
+          className="grid h-8 w-8 place-items-center rounded-[8px] border border-[var(--color-border)] text-[15px] leading-none text-[var(--color-muted)] hover:bg-[var(--color-surface-2)]"
+        >
+          ⋯
+        </button>
+      </div>
+
+      <div className="flex flex-wrap gap-2 px-4 pt-3.5">
+        {!assignment && (
+          <button type="button" className={chip(false, true)} onClick={() => setSettingsOpen(true)}>
+            {dot("pink", "⇄")}
+            Assign company
+          </button>
+        )}
+        <button type="button" className={chip(settingsOpen)} onClick={() => setSettingsOpen((v) => !v)}>
+          {dot("blue", "⚙")}
+          Settings
+        </button>
+        {assignment && (
+          <>
+            <Link href="/templates" className={chip(false)}>
+              {dot("purple", "✎")}
+              Manage templates
+            </Link>
+            <Link href="/settings/library" className={chip(false)}>
+              {dot("orange", "▣")}
+              Interactive messages
+            </Link>
+            <button
+              type="button"
+              className={`${chip(profileOpen)} disabled:cursor-not-allowed disabled:opacity-50`}
+              disabled={!connected}
+              title={connected ? undefined : "Meta keeps a business profile only for a registered, connected number."}
+              onClick={() => setProfileOpen((v) => !v)}
+            >
+              {dot("pink", "☺")}
+              Manage profile
+            </button>
+          </>
+        )}
       </div>
 
       <div className="px-4 py-3.5">
@@ -707,12 +773,15 @@ function NumberCard({
           </p>
         )}
 
-      <CompanyAssignment n={n} assignment={assignment} companies={companies} />
-
       {/* Meta only keeps a business profile for a registered number. */}
-      {n.connection === "CONNECTED" && <ProfileEditor n={n} />}
+      {connected && profileOpen && <ProfileEditor n={n} />}
 
-      <NumberActions n={n} managerUrl={managerUrl} />
+      {settingsOpen && (
+        <>
+          <CompanyAssignment n={n} assignment={assignment} companies={companies} />
+          <NumberActions n={n} managerUrl={managerUrl} />
+        </>
+      )}
       </div>
     </div>
   );
@@ -769,7 +838,9 @@ export function NumbersClient({
         ))
       )}
 
-      <AddWizard key={wizardKey} onDone={() => setWizardKey((k) => k + 1)} />
+      <div id="add-number" className="scroll-mt-4">
+        <AddWizard key={wizardKey} onDone={() => setWizardKey((k) => k + 1)} />
+      </div>
 
       <p className="text-[11px] leading-relaxed text-[var(--color-faint)]">
         Deleting a number permanently is not possible through Meta&apos;s API — it only happens in

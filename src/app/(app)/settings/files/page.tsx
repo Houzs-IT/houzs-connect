@@ -116,7 +116,7 @@ export default async function FilesPage({ searchParams }: { searchParams: Promis
                     <div className="truncate text-[12.5px] font-semibold text-[var(--color-ink)]">{f.body?.split("\n")[0] || label[f.kind === "RECEIPT" ? "receipts" : f.kind] || "—"}</div>
                     <div className="truncate text-[11.5px] text-[var(--color-faint)]">
                       {fmt(f.direction === "IN" ? L.fFrom : L.fTo, { who })} ·{" "}
-                      {new Date(f.created_at).toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: "Asia/Kuala_Lumpur" })}
+                      {new Date(f.created_at).toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: "Asia/Kuala_Lumpur" }).replace("Sept", "Sep")}
                     </div>
                     <div className="mt-1.5 flex gap-3 text-[12px] font-semibold">
                       <a href={f.kind === "RECEIPT" ? src(f) : `${src(f)}?download=1`} className="text-[var(--color-accent)]" download>

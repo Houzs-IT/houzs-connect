@@ -27,7 +27,7 @@ export function relTime(d?: Date | string | null): string {
   if (hr < 24) return `${hr}h`;
   const day = Math.floor(hr / 24);
   if (day < 7) return `${day}d`;
-  return date.toLocaleDateString("en-GB", { day: "2-digit", month: "short", timeZone: TZ });
+  return date.toLocaleDateString("en-GB", { day: "2-digit", month: "short", timeZone: TZ }).replace("Sept", "Sep");
 }
 
 export function clockTime(d?: Date | string | null): string {
@@ -40,6 +40,38 @@ export function clockTime(d?: Date | string | null): string {
   });
 }
 
+/** Inbox list stamp: clock time today, "Yesterday", then dd/mm. */
+export function listTime(d?: Date | string | null, yesterday = "Yesterday"): string {
+  if (!d) return "";
+  const date = typeof d === "string" ? new Date(d) : d;
+  const day = (x: Date) => x.toLocaleDateString("en-CA", { timeZone: TZ });
+  const now = new Date();
+  if (day(date) === day(now)) return clockTime(date);
+  if (day(date) === day(new Date(now.getTime() - 86_400_000))) return yesterday;
+  return date.toLocaleDateString("en-GB", { day: "2-digit", month: "2-digit", timeZone: TZ });
+}
+
+/** "2026/07/31" or "2026-07-31" -> "31/07". Anything else is returned as is. */
+export function shortDay(v?: string | null): string {
+  if (!v) return "";
+  const m = /^(\d{4})[-/](\d{1,2})[-/](\d{1,2})/.exec(v);
+  return m ? `${m[3].padStart(2, "0")}/${m[2].padStart(2, "0")}` : v;
+}
+
+/** How long ago, in the unit people say it: minutes, hours, days, weeks, months. */
+export function agoParts(d: Date | string): { unit: "now" | "m" | "h" | "d" | "w" | "mo"; n: number } {
+  const date = typeof d === "string" ? new Date(d) : d;
+  const min = Math.floor((Date.now() - date.getTime()) / 60000);
+  if (min < 1) return { unit: "now", n: 0 };
+  if (min < 60) return { unit: "m", n: min };
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return { unit: "h", n: hr };
+  const day = Math.floor(hr / 24);
+  if (day < 7) return { unit: "d", n: day };
+  if (day < 30) return { unit: "w", n: Math.floor(day / 7) };
+  return { unit: "mo", n: Math.floor(day / 30) };
+}
+
 /** Date + time, for a message older than today. */
 export function stamp(d?: Date | string | null): string {
   if (!d) return "";
@@ -50,7 +82,7 @@ export function stamp(d?: Date | string | null): string {
     hour: "2-digit",
     minute: "2-digit",
     timeZone: TZ,
-  });
+  }).replace("Sept", "Sep");
 }
 
 /** Contact.attributes is stored as JSON (nullable for SQLite). */
@@ -88,7 +120,7 @@ export function waIdentifier(raw?: string | null): {
   const v = (raw ?? "").trim();
   const isPhone = v.length > 0 && /^\d+$/.test(v);
   return {
-    text: isPhone ? `+${v}` : v,
+    text: isPhone ? formatPhone(v) : v,
     isPhone,
     label: isPhone ? "Phone number" : "WhatsApp username — this contact has no phone number",
   };

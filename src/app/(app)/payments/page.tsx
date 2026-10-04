@@ -49,7 +49,7 @@ export default async function PaymentsPage({ searchParams }: { searchParams: Pro
   const [kpi, methods, dupRefs, rows] = await Promise.all([
     db
       .select({
-        month: sql<number>`coalesce(sum(${payment.amount}) filter (where ${payment.status} = 'VERIFIED' and ${payment.createdAt} >= ${monthStart()}), 0)`.mapWith(Number),
+        month: sql<number>`coalesce(sum(${payment.amount}) filter (where ${payment.status} = 'VERIFIED' and ${payment.createdAt} >= ${monthStart().toISOString()}::timestamptz), 0)`.mapWith(Number),
         pending: sql<number>`count(*) filter (where ${payment.status} = 'PENDING')`.mapWith(Number),
         verified: sql<number>`count(*) filter (where ${payment.status} = 'VERIFIED')`.mapWith(Number),
         rejected: sql<number>`count(*) filter (where ${payment.status} = 'REJECTED')`.mapWith(Number),
@@ -169,12 +169,12 @@ export default async function PaymentsPage({ searchParams }: { searchParams: Pro
       />
       <PageChrome
         section="payments"
-        page="receipts"
+        crumbs={[{ check: L.toCheck, confirmed: L.confirmed, rejected: L.rejected, all: L.all }[st] ?? L.toCheck]}
         actions={
           <>
           <a
             href="/payments/export"
-            className="flex h-[34px] items-center gap-1.5 rounded-[8px] border border-[var(--color-border)] bg-[var(--color-surface)] px-3 text-[13px] font-semibold text-[var(--color-ink)] hover:bg-[var(--color-surface-2)]"
+            className="hidden h-[34px] items-center md:flex gap-1.5 rounded-[8px] border border-[var(--color-border)] bg-[var(--color-surface)] px-3 text-[13px] font-semibold text-[var(--color-ink)] hover:bg-[var(--color-surface-2)]"
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden>
               <path d="M12 4v11M7 10l5 5 5-5M5 20h14" />
@@ -206,6 +206,50 @@ export default async function PaymentsPage({ searchParams }: { searchParams: Pro
               </div>
             ))}
           </div>
+
+          {/* Phone: the two numbers that matter and the status pills. */}
+          {!picked && (
+            <div className="flex flex-col gap-3 md:hidden">
+              <div className="grid grid-cols-2 gap-3">
+                {[kpis[1], kpis[0]].map(([label, v, tone]) => (
+                  <div
+                    key={label}
+                    className="rounded-[12px] border border-[var(--color-border)] px-3.5 py-3"
+                    style={{ background: `linear-gradient(135deg,#ffffff 42%, var(--color-pastel-${tone}))` }}
+                  >
+                    <div className="truncate text-[12px] text-[var(--color-muted)]">{label}</div>
+                    <div
+                      className="mt-1 text-[20px] font-medium tabular-nums"
+                      style={{ color: tone === "orange" ? "var(--color-pastel-orange-ink)" : "var(--color-ink)" }}
+                    >
+                      {v}
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <div className="flex gap-2 overflow-x-auto">
+                {(
+                  [
+                    ["check", "/payments", L.toCheck, k.pending],
+                    ["confirmed", "/payments?status=confirmed", L.confirmed, k.verified],
+                    ["rejected", "/payments?status=rejected", L.rejected, k.rejected],
+                  ] as const
+                ).map(([key, to, label, n]) => (
+                  <Link
+                    key={key}
+                    href={to}
+                    className={`flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-1.5 text-[13px] font-medium ${
+                      st === key
+                        ? "border-[var(--color-accent)] bg-[var(--color-accent-soft)] text-[var(--color-accent-ink)]"
+                        : "border-[var(--color-border)] text-[var(--color-ink)]"
+                    }`}
+                  >
+                    {label} <span className="text-[11.5px] text-[var(--color-faint)]">{n}</span>
+                  </Link>
+                ))}
+              </div>
+            </div>
+          )}
 
           <div className="flex min-h-0 flex-1 gap-4">
             {/* Queue — on a phone it is the whole screen until a receipt is opened. */}

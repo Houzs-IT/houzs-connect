@@ -161,7 +161,7 @@ export function AutomationCard({ a }: { a: AutomationCardData }) {
       <div className="min-w-0">
         <div className="truncate text-[12.5px] text-[var(--color-ink)]">{L.triggers[a.triggerLabel] ?? a.triggerLabel}</div>
         <div className="truncate text-[11.5px] text-[var(--color-faint)]" title={a.triggerSentence}>
-          {a.triggerDetail ?? a.channelName}
+          {a.triggerDetail ?? L.triggerSub[a.triggerLabel] ?? a.channelName}
         </div>
       </div>
 

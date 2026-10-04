@@ -39,19 +39,19 @@ function MetricCard({
 }) {
   return (
     <section
-      className="relative overflow-hidden rounded-[18px] border border-[var(--color-border-subtle)] px-6 py-6 shadow-card"
+      className="relative min-w-0 overflow-hidden rounded-[18px] border border-[var(--color-border-subtle)] px-4 py-4 shadow-card md:px-6 md:py-6"
       style={{ background: `linear-gradient(135deg, #ffffff 42%, ${tint})` }}
     >
       <div className="flex items-start justify-between">
         <div className={`${EYEBROW} text-[var(--color-accent-ink)]`}>{label}</div>
-        <span className="grid h-9 w-9 place-items-center rounded-full bg-white/80 text-[13px] font-semibold text-[var(--color-accent-ink)] shadow-[0_1px_2px_rgba(17,24,16,0.08)]">
+        <span className="hidden h-9 w-9 place-items-center rounded-full bg-white/80 md:grid text-[13px] font-semibold text-[var(--color-accent-ink)] shadow-[0_1px_2px_rgba(17,24,16,0.08)]">
           {glyph}
         </span>
       </div>
-      <div className="mt-3 text-[44px] font-medium leading-none tracking-[-0.02em] tabular-nums text-[var(--color-ink)]">
+      <div className="mt-3 text-[30px] font-medium md:text-[44px] leading-none tracking-[-0.02em] tabular-nums text-[var(--color-ink)]">
         {value}
       </div>
-      <div className="mt-4 flex items-center gap-2 text-[12px] text-[var(--color-muted)]">{foot}</div>
+      <div className="mt-3 flex flex-wrap items-center gap-2 text-[12px] text-[var(--color-muted)] md:mt-4">{foot}</div>
     </section>
   );
 }

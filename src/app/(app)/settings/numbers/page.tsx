@@ -22,7 +22,20 @@ export default async function NumbersPage() {
   const t = await getDict();
 
   return (
-    <PageChrome section="settings" page="channels">
+    <PageChrome
+      section="settings"
+      page="channels"
+      actions={
+        view.permitted && view.configured ? (
+          <a
+            href="#add-number"
+            className="flex h-[34px] items-center rounded-[8px] bg-[var(--color-accent)] px-3.5 text-[13px] font-semibold text-white shadow-[var(--shadow-primary)] hover:bg-[var(--color-accent-hi)]"
+          >
+            + {t.set.createChannel}
+          </a>
+        ) : undefined
+      }
+    >
       <div className="max-w-[1180px] p-4 md:p-6">
         <SettingsHead title={t.set.channels} sub={t.set.channelsSub} />
         {!view.permitted ? (

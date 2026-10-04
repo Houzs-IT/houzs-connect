@@ -84,16 +84,19 @@ export function NewConversation() {
 
   return (
     <>
-      <div className="shrink-0 border-t border-[var(--color-border)] px-3 py-2.5">
+      {/* A round + over the tab bar on a phone (the design's list has no bar
+          here); the full-width button on a desktop. */}
+      <div className="fixed bottom-[76px] right-4 z-30 md:static md:shrink-0 md:border-t md:border-[var(--color-border)] md:px-3 md:py-2.5">
         <button
           type="button"
+          aria-label={s.newConvo}
           onClick={() => void start()}
-          className="flex h-9 w-full items-center justify-center gap-1.5 whitespace-nowrap rounded-[8px] bg-[var(--color-accent)] text-[12.5px] font-semibold text-white shadow-[var(--shadow-primary)] transition-colors hover:bg-[var(--color-accent-hi)]"
+          className="flex h-12 w-12 items-center justify-center gap-1.5 whitespace-nowrap rounded-full bg-[var(--color-accent)] md:h-9 md:w-full md:rounded-[8px] text-[12.5px] font-semibold text-white shadow-[var(--shadow-primary)] transition-colors hover:bg-[var(--color-accent-hi)]"
         >
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
             <path d="M12 5v14M5 12h14" />
           </svg>
-          {s.newConvo}
+          <span className="hidden md:inline">{s.newConvo}</span>
         </button>
       </div>
 

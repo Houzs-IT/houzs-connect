@@ -12,7 +12,7 @@ function rangeLabel(from: string, to: string, any: string): string {
       month: "short",
       ...(year ? { year: "numeric" } : {}),
       timeZone: "Asia/Kuala_Lumpur",
-    });
+    }).replace("Sept", "Sep");
   if (from && to) return `${d(from, false)} – ${d(to, true)}`;
   if (from) return `${d(from, true)} –`;
   if (to) return `– ${d(to, true)}`;

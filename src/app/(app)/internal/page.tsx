@@ -14,7 +14,7 @@ export default async function InternalPage() {
   if (!me) return null;
   await ensureInternal(me.companyId, me.id);
   const side = await sidebar(me.companyId, me.id);
-  const first = side.channels.find((c) => c.name === "general") ?? side.channels[0];
+  const first = side.channels[0];
   return (
     <>
       <div className="flex min-w-0 flex-1 md:hidden">

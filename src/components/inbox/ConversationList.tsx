@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { useParams, useSearchParams } from "next/navigation";
-import { initials, relTime, tint } from "@/lib/format";
+import { initials, listTime, shortDay, tint } from "@/lib/format";
 import { fmt } from "@/lib/i18n/dict";
 import { IconClose, IconSearch } from "@/components/icons";
 import { useShell } from "@/components/shell/ShellProvider";
@@ -363,6 +363,7 @@ export function ConversationList({
             overdue={isOverdue(c.waitingSince, now)}
             compact={compact}
             deliveryLabel={s.delivery}
+            yesterdayLabel={s.yesterday}
           />
         ))}
 
@@ -398,6 +399,7 @@ function Row({
   overdue,
   compact,
   deliveryLabel,
+  yesterdayLabel,
 }: {
   c: ConversationListItem;
   href: string;
@@ -405,6 +407,7 @@ function Row({
   overdue: boolean;
   compact: boolean;
   deliveryLabel: string;
+  yesterdayLabel: string;
 }) {
   const unread = c.unread > 0;
   const bg = active
@@ -412,7 +415,7 @@ function Row({
     : overdue
       ? "bg-[rgba(246,239,217,0.55)] hover:bg-[var(--color-surface-2)]"
       : "bg-[var(--color-surface)] hover:bg-[var(--color-surface-2)]";
-  const time = relTime(c.lastAt);
+  const time = listTime(c.lastAt, yesterdayLabel);
   const timeCls = unread
     ? "font-semibold text-[var(--color-accent)]"
     : "text-[var(--color-faint)]";
@@ -476,12 +479,12 @@ function Row({
           {unread && <UnreadBadge n={c.unread} />}
         </div>
         {c.orderRef && (
-          <div className="mt-[3px] flex">
+          <div className="mt-[3px] hidden md:flex">
             <span className="flex items-center gap-[5px] whitespace-nowrap rounded-[6px] border border-[var(--color-border)] bg-[var(--color-surface)] px-[7px] py-px text-[10.5px]">
               <span className="font-semibold text-[var(--color-brand)]">{c.orderRef}</span>
               {c.deliveryDate && (
                 <span className="text-[var(--color-faint)]">
-                  {deliveryLabel} {c.deliveryDate}
+                  {deliveryLabel} {shortDay(c.deliveryDate)}
                 </span>
               )}
             </span>
@@ -501,7 +504,7 @@ function Row({
           {(c.agent || c.department) && (
             <span
               title={c.agent ?? undefined}
-              className="ml-auto flex min-w-0 items-center gap-1 overflow-hidden whitespace-nowrap text-[10.5px] text-[var(--color-faint)]"
+              className="ml-auto hidden min-w-0 items-center gap-1 overflow-hidden whitespace-nowrap text-[10.5px] text-[var(--color-faint)] md:flex"
             >
               {c.agent && <Avatar name={c.agent} size={16} />}
               <span className="truncate">{c.department ?? c.agent}</span>

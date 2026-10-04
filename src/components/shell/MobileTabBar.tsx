@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
 import { logout } from "@/app/login/actions";
 import {
   IconAutomation,
@@ -63,6 +63,7 @@ function TabCell({
  */
 export function MobileTabBar({ unread }: { unread?: number }) {
   const path = usePathname();
+  const params = useSearchParams();
   const { t } = useShell();
   const [open, setOpen] = useState(false);
 
@@ -73,7 +74,10 @@ export function MobileTabBar({ unread }: { unread?: number }) {
     return () => document.removeEventListener("keydown", onKey);
   }, [open]);
 
-  if (/^\/inbox\/[^/]+/.test(path)) return null;
+  // A chat (customer or internal), and a receipt being checked, take the
+  // whole phone screen.
+  if (/^\/(inbox|internal)\/[^/]+/.test(path) && !path.startsWith("/internal/search")) return null;
+  if (path === "/payments" && params.get("p")) return null;
 
   const tabs: Tab[] = [
     { href: "/inbox", label: t.tab.inbox, Icon: IconInbox, match: ["/inbox"], badge: unread },

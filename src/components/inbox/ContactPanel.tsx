@@ -170,9 +170,9 @@ export async function ContactPanel({
 
           {/* Watchers: who else was pulled in. Ownership stays with the agent. */}
           <span className="self-start pt-[5px] text-[var(--color-muted)]">{s.watchers}</span>
-          <div className="flex min-w-0 flex-col gap-1.5">
+          <div className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1 pt-[3px]">
             {chatMembers.length === 0 ? (
-              <span className="pt-[5px] text-[var(--color-faint)]">{s.nobody}</span>
+              <span className="text-[var(--color-faint)]">{s.nobody}</span>
             ) : (
               <div className="flex flex-wrap gap-1">
                 {chatMembers.map((m) => (
@@ -196,14 +196,20 @@ export async function ContactPanel({
               </div>
             )}
             {candidates.length > 0 && (
-              <form action={addChatMember}>
-                <input type="hidden" name="conversationId" value={conversationId} />
-                <SubmitSelect name="memberId" defaultValue="" className={SELECT} aria-label={s.addColleague}>
-                  <option value="">{s.addColleague}</option>
+              <form action={addChatMember} className="flex items-center gap-1.5">
+                {chatMembers.length === 0 && <span className="text-[var(--color-faint)]">·</span>}
+                <SubmitSelect
+                  name="memberId"
+                  defaultValue=""
+                  className="max-w-[140px] cursor-pointer appearance-none field-sizing-content bg-transparent text-[12.5px] font-semibold text-[var(--color-accent)] outline-none hover:underline"
+                  aria-label={s.addColleague}
+                >
+                  <option value="">{s.addShort}</option>
                   {candidates.map((m) => (
                     <option key={m.id} value={m.id}>{m.name}</option>
                   ))}
                 </SubmitSelect>
+                <input type="hidden" name="conversationId" value={conversationId} />
               </form>
             )}
           </div>
@@ -240,7 +246,7 @@ export async function ContactPanel({
                 name="tagId"
                 defaultValue=""
                 aria-label={s.addTag}
-                className="h-[25px] cursor-pointer rounded-[6px] border border-dashed border-[var(--color-border-strong)] bg-transparent px-1.5 text-[11.5px] font-medium text-[var(--color-muted)] outline-none hover:bg-[var(--color-surface-2)]"
+                className="h-[25px] cursor-pointer appearance-none field-sizing-content rounded-[6px] border border-dashed border-[var(--color-border-strong)] bg-transparent px-1.5 text-[11.5px] font-medium text-[var(--color-muted)] outline-none hover:bg-[var(--color-surface-2)]"
               >
                 <option value="">+ {s.addTag}</option>
                 {addableTags.map((tg) => (
@@ -369,7 +375,7 @@ export async function ContactPanel({
 
   return (
     <aside className="hidden w-[320px] shrink-0 flex-col border-l border-[var(--color-border)] bg-[var(--color-surface)] xl:flex">
-      <div className="relative flex items-center gap-3 px-4 pb-3 pt-4">
+      <div className="group/head relative flex items-center gap-3 px-4 pb-3 pt-4">
         <span
           className="grid h-11 w-11 shrink-0 place-items-center rounded-full text-[15px] font-semibold text-white"
           style={{ background: tint(contactName) }}

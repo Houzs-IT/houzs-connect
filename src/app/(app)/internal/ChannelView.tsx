@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { IconPanelOpen } from "@/components/icons";
 import { LangToggle } from "@/components/shell/TopbarControls";
 import { getCurrentMember } from "@/lib/current-member";
 import { fmt } from "@/lib/i18n/dict";
@@ -30,6 +31,9 @@ export async function ChannelView({ channelId, threadId }: { channelId: string; 
   const today = dayKey(new Date());
   const memberCount = ch.kind === "channel" ? people.length : 2;
   const root = thread[0] ?? null;
+  // The panel button opens the latest thread, or closes the open one.
+  const latestThread = [...msgs].reverse().find((m) => m.replies > 0);
+  const panelHref = root ? `/internal/${ch.id}` : latestThread ? `/internal/${ch.id}?t=${latestThread.id}` : null;
 
   return (
     <div className="flex min-w-0 flex-1">
@@ -55,6 +59,21 @@ export async function ChannelView({ channelId, threadId }: { channelId: string; 
             <span className="text-[12.5px] text-[var(--color-muted)]">{fmt(L.members, { n: memberCount })}</span>
           </span>
           <LangToggle className="hidden md:flex" />
+          {panelHref && (
+            <Link
+              href={panelHref}
+              scroll={false}
+              aria-label={L.thread}
+              title={L.thread}
+              className={`hidden h-[34px] w-[34px] place-items-center rounded-[8px] border transition-colors lg:grid ${
+                root
+                  ? "border-[var(--color-accent)] bg-[var(--color-accent-soft)] text-[var(--color-accent-ink)]"
+                  : "border-[var(--color-border)] text-[var(--color-muted)] hover:text-[var(--color-ink)]"
+              }`}
+            >
+              <IconPanelOpen width={16} height={16} />
+            </Link>
+          )}
         </header>
 
         <div className="scroll-thin flex min-h-0 flex-1 flex-col-reverse overflow-y-auto bg-[var(--color-surface)]">
@@ -71,7 +90,7 @@ export async function ChannelView({ channelId, threadId }: { channelId: string; 
                       <span className="rounded-full border border-[var(--color-border)] px-2.5 py-0.5 text-[11.5px] text-[var(--color-muted)]">
                         {k === today
                           ? L.today
-                          : m.createdAt.toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: "Asia/Kuala_Lumpur" })}
+                          : m.createdAt.toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: "Asia/Kuala_Lumpur" }).replace("Sept", "Sep")}
                       </span>
                       <span className="h-px flex-1 bg-[var(--color-border-subtle)]" />
                     </div>

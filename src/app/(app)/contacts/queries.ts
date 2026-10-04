@@ -112,13 +112,17 @@ export async function filterOptions(companyId: string) {
       .selectDistinct({ v: attr("sales_person") })
       .from(contact)
       .where(and(eq(contact.companyId, companyId), sql`${attr("sales_person")} is not null`))
-      .orderBy(attr("sales_person"))
+      // Positional: the key is a bind parameter, so a repeated attr() is a
+      // different expression to Postgres and DISTINCT would refuse it.
+      .orderBy(sql`1`)
       .limit(100),
     db
       .selectDistinct({ v: attr("address_state") })
       .from(contact)
       .where(and(eq(contact.companyId, companyId), sql`${attr("address_state")} is not null`))
-      .orderBy(attr("address_state"))
+      // Positional: the key is a bind parameter, so a repeated attr() is a
+      // different expression to Postgres and DISTINCT would refuse it.
+      .orderBy(sql`1`)
       .limit(50),
   ]);
   return { sales: sales.map((r) => r.v).filter(Boolean), states: states.map((r) => r.v).filter(Boolean) };

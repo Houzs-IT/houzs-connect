@@ -1,10 +1,11 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, desc, eq } from "drizzle-orm";
 import { bypassReadCache } from "@/db/fresh";
 import { getDb } from "@/db/client";
-import { company } from "@/db/schema";
+import { channel, company } from "@/db/schema";
+import { isLive } from "@/lib/whatsapp/cloud-api";
 import { getCurrentMember } from "@/lib/current-member";
 import { channelForNumber, loadRoutingTable } from "@/lib/whatsapp/channels";
 import { assignNumber, type AssignTarget } from "@/lib/whatsapp/number-assignment";
@@ -81,7 +82,8 @@ export async function fetchNumbers(): Promise<NumbersView> {
   }
   const cfg = wabaConfig();
   if (!cfg) {
-    return { configured: false, permitted: true, numbers: [], activeId, managerUrl, ...empty };
+    if (isLive()) return { configured: false, permitted: true, numbers: [], activeId, managerUrl, ...empty };
+    return demoNumbers();
   }
   const res = await listNumbers(cfg);
   if (!res.ok) {
@@ -315,4 +317,40 @@ export async function assignNumberToCompany(
     revalidatePath("/inbox");
   }
   return result;
+}
+
+/**
+ * DEMO mode (no Meta account): the company's channel rows as cards, so the
+ * page can be looked at. Nothing here is Meta's word — every tile says DEMO.
+ */
+async function demoNumbers(): Promise<NumbersView> {
+  const db = getDb();
+  const [channels, companies] = await Promise.all([
+    db.query.channel.findMany({ orderBy: [desc(channel.isDefault), asc(channel.displayName)] }),
+    db.query.company.findMany({
+      columns: { id: true, name: true },
+      where: eq(company.active, true),
+      orderBy: asc(company.createdAt),
+    }),
+  ]);
+  const nameOf = new Map(companies.map((c) => [c.id, c.name]));
+  const numbers = channels.map((ch, i) => ({
+    id: ch.phoneNumberId ?? ch.id,
+    displayPhoneNumber: ch.phone,
+    verifiedName: ch.displayName,
+    connection: "DEMO",
+    codeVerification: null,
+    nameStatus: null,
+    newDisplayName: null,
+    newNameStatus: null,
+    qualityRating: null,
+    limitTier: null,
+    platformType: null,
+    isActive: i === 0,
+  }));
+  const assignments: Record<string, NumberAssignment | null> = {};
+  channels.forEach((ch, i) => {
+    assignments[numbers[i].id] = { companyId: ch.companyId, companyName: nameOf.get(ch.companyId) ?? "", legacy: false };
+  });
+  return { configured: true, permitted: true, numbers, activeId: numbers[0]?.id ?? null, managerUrl: null, assignments, companies };
 }

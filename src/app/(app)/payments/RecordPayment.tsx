@@ -67,10 +67,11 @@ export function RecordPayment() {
       <button
         type="button"
         onClick={() => setOpen(true)}
+        aria-label={L.record}
         className="flex h-[34px] items-center gap-1.5 rounded-[8px] bg-[var(--color-accent)] px-3.5 text-[13px] font-semibold text-white shadow-[var(--shadow-primary)] hover:bg-[var(--color-accent-hi)]"
       >
         <span className="text-[16px] leading-none">+</span>
-        {L.record}
+        <span className="hidden md:inline">{L.record}</span>
       </button>
       <ActionDialog open={open} title={L.record} subtitle={L.recordSub} onClose={() => setOpen(false)}>
         <div className="flex flex-col gap-3">

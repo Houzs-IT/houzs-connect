@@ -4,18 +4,15 @@ import { and, eq, ne } from "drizzle-orm";
 import { getDb } from "@/db/client";
 import {
   automation as automationTable,
-  automationRun as automationRunTable,
   campaign as campaignTable,
 } from "@/db/schema";
 import { asGraph, type TriggerEvent } from "@/lib/automation/types";
 import { FlowCanvas } from "@/components/automation/FlowCanvas";
 import { getCurrentMember } from "@/lib/current-member";
 import { FlowChecks } from "../FlowChecks";
-import { PublishControl } from "../PublishControl";
 import {
   findFlowGaps,
   parseImportNote,
-  summariseSends,
   triggerSentence,
   type NodeProbe,
 } from "../copy";
@@ -43,11 +40,6 @@ export default async function AutomationDetail({
     with: { channel: true },
   });
   if (!automation) notFound();
-
-  const runCount = await db.$count(
-    automationRunTable,
-    eq(automationRunTable.automationId, id)
-  );
 
   // Option lists for node pickers (jump-to-automation, drip campaigns).
   const [otherAutomations, campaigns] = await Promise.all([
@@ -80,7 +72,6 @@ export default async function AutomationDetail({
     d: typeof n.data?.departmentId === "string" ? n.data.departmentId : null,
   }));
   const gaps = findFlowGaps(probes);
-  const sends = summariseSends(probes);
   const importNote = parseImportNote(automation.description);
   const sentence = triggerSentence(
     automation.triggerType,
@@ -116,7 +107,7 @@ export default async function AutomationDetail({
               {automation.enabled ? "Live" : "Draft"}
             </span>
             <span className="shrink-0 text-[11.5px] text-[var(--color-faint)]">
-              v{automation.version} · {relTime(automation.updatedAt)} · {runCount} runs
+              v{automation.version} · Saved {/^\d+[mhd]$/.test(relTime(automation.updatedAt)) ? `${relTime(automation.updatedAt)} ago` : relTime(automation.updatedAt)}
             </span>
           </div>
           <p className="truncate text-[11.5px] text-[var(--color-muted)]">
@@ -133,6 +124,9 @@ export default async function AutomationDetail({
               size="md"
             />
           )}
+          {/* "Run data", then Test run, then Versions / Publish — the canvas
+              fills the two slots with its own buttons. */}
+          <div id="flow-run-slot" className="contents" />
           {/* Fire the flow against a demo test contact, then jump to its conversation. */}
           <form action={runTest}>
             <button
@@ -144,21 +138,7 @@ export default async function AutomationDetail({
               Test run
             </button>
           </form>
-          <PublishControl
-            size="md"
-            facts={{
-              id: automation.id,
-              name: automation.name,
-              enabled: automation.enabled,
-              triggerSentence: sentence,
-              messageSteps: sends.messageSteps,
-              apiSteps: sends.apiSteps,
-              gapCount: gaps.reduce((n, g) => n + g.count, 0),
-              stopCount: gaps
-                .filter((g) => g.severity === "stops")
-                .reduce((n, g) => n + g.count, 0),
-            }}
-          />
+          <div id="flow-save-slot" className="contents" />
         </div>
       </header>
 
@@ -173,6 +153,7 @@ export default async function AutomationDetail({
         automations={otherAutomations}
         campaigns={campaigns}
         runStats={stats}
+        version={automation.version}
       />
     </div>
   );

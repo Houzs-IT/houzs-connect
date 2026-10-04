@@ -150,7 +150,7 @@ export default async function MessageHistoryPage({ searchParams }: { searchParam
               />
             </div>
             <div className="overflow-x-auto">
-              <div className="min-w-[860px]">
+              <div className="min-w-[740px]">
                 <div className={`grid ${cols} gap-3 border-b border-[var(--color-border)] bg-[var(--color-surface-2)] px-4 py-2.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--color-faint)]`}>
                   <span>{L.colCustomer}</span>
                   <span>{L.colMessage}</span>

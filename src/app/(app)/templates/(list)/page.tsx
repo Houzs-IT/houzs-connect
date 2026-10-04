@@ -250,7 +250,7 @@ export default async function TemplatesPage({ searchParams }: { searchParams: Pr
                           <span className="min-w-0">
                             <span className="block truncate text-[13.5px] font-semibold text-[var(--color-ink)]">{r.name}</span>
                             <span className="block truncate text-[11.5px] text-[var(--color-faint)]">
-                              {r.language} · {r.body}
+                              {r.language} · {r.header || r.body}
                             </span>
                           </span>
                         </span>

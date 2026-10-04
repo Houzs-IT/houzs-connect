@@ -1,4 +1,4 @@
-import { asc, desc, eq } from "drizzle-orm";
+import { asc, desc, eq, sql } from "drizzle-orm";
 import { getDb } from "@/db/client";
 import { contact, contactField, tag } from "@/db/schema";
 import { PageChrome } from "@/components/PageChrome";
@@ -7,6 +7,7 @@ import { attrs, formatPhone, waIdentifier } from "@/lib/format";
 import { getDict } from "@/lib/i18n/server";
 import { ensureContactColumns, normalisePhone } from "./actions";
 import { ContactDetail } from "./ContactDetail";
+import { PhoneList } from "./PhoneList";
 import { ContactsView, type ContactRow } from "./ContactsView";
 import { HeaderActions } from "./HeaderActions";
 import {
@@ -38,7 +39,10 @@ export default async function ContactsPage({ searchParams }: { searchParams: Pro
 
   const q = one(sp.q);
   const segment = SEGMENTS.find((x) => x === one(sp.segment));
-  const sortCol = one(sp.sort) === "created" ? contact.createdAt : contact.updatedAt;
+  // "Updated" shows the newest message (or the record's own change), so it
+  // sorts on the same thing.
+  const lastActivity = sql`greatest(${contact.updatedAt}, (select max(cv.last_message_at) from connect.conversation cv where cv.contact_id = ${contact.id}))`;
+  const sortCol = one(sp.sort) === "created" ? contact.createdAt : lastActivity;
   const dir = one(sp.dir) === "asc" ? "asc" : "desc";
   const page = Math.max(1, Math.floor(Number(one(sp.page)) || 1));
   const activeId = one(sp.id) || null;
@@ -90,7 +94,7 @@ export default async function ContactsPage({ searchParams }: { searchParams: Pro
       sales: a.sales_person ?? null,
       tags: c.tagLinks.map((l) => ({ id: l.tag.id, name: l.tag.name, color: l.tag.color })),
       last: lm ? { body: lm.body ?? "—", inbound: lm.direction === "IN" } : null,
-      updated: shortWhen(lm?.at ?? c.updatedAt, t.service.yesterday),
+      updated: shortWhen(lm && lm.at > c.updatedAt ? lm.at : c.updatedAt, t.service.yesterday),
       email: c.email,
       source: c.source,
       sourceId: c.sourceId,
@@ -120,6 +124,8 @@ export default async function ContactsPage({ searchParams }: { searchParams: Pro
       }
     >
       <div className="flex h-full min-h-0">
+        {!activeId && <PhoneList companyId={me.companyId} rows={rows} q={q} segment={segment} s={s} />}
+        <div className={`${activeId ? "flex" : "hidden md:flex"} min-w-0 flex-1`}>
         <ContactsView
           rows={rows}
           total={total}
@@ -134,6 +140,7 @@ export default async function ContactsPage({ searchParams }: { searchParams: Pro
           duplicates={dups}
           activeId={activeId}
         />
+        </div>
         {activeId && (
           <ContactDetail
             companyId={me.companyId}
@@ -141,6 +148,7 @@ export default async function ContactsPage({ searchParams }: { searchParams: Pro
             closeHref={`/contacts${closeParams.size ? `?${closeParams}` : ""}`}
             s={s}
             statusLabel={t.service.statusLabel}
+            yesterday={t.service.yesterday}
           />
         )}
       </div>
