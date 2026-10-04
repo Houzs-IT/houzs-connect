@@ -20,6 +20,8 @@ import {
   type NodeProbe,
 } from "../copy";
 import { testRunAutomation } from "../actions";
+import { runStats } from "@/lib/automation/run-stats";
+import { relTime } from "@/lib/format";
 
 export default async function AutomationDetail({
   params,
@@ -63,6 +65,7 @@ export default async function AutomationDetail({
   ]);
 
   const graph = asGraph(automation.graph);
+  const stats = await runStats(automation.id, automation.graph);
   const triggerConfig =
     (automation.triggerConfig as {
       event?: TriggerEvent;
@@ -90,31 +93,34 @@ export default async function AutomationDetail({
 
   return (
     <div className="flex min-w-0 flex-1 flex-col">
-      <header className="flex h-14 shrink-0 items-center gap-4 border-b border-[var(--color-border)] bg-[var(--color-surface)] px-5">
+      <header className="flex h-14 shrink-0 items-center gap-3 border-b border-[var(--color-border)] bg-[var(--color-surface)] px-4">
         <Link
           href="/automations"
-          className="shrink-0 text-[13px] text-[var(--color-muted)] hover:text-[var(--color-ink)]"
+          aria-label="Back to automations"
+          className="grid h-8 w-8 shrink-0 place-items-center rounded-[8px] border border-[var(--color-border)] text-[var(--color-muted)] hover:bg-[var(--color-surface-2)] hover:text-[var(--color-ink)]"
         >
-          ← Automations
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M15 18l-6-6 6-6" />
+          </svg>
         </Link>
         <div className="min-w-0">
           <div className="flex items-center gap-2">
-            <h1 className="truncate text-[15px] font-semibold text-[var(--color-ink)]">
-              {automation.name}
-            </h1>
+            <h1 className="truncate text-[15px] font-semibold text-[var(--color-ink)]">{automation.name}</h1>
             <span
-              className={`shrink-0 rounded-full px-2 py-0.5 text-[10.5px] font-medium ${
+              className={`shrink-0 rounded-full px-[7px] py-px text-[10px] font-semibold uppercase tracking-[0.06em] ${
                 automation.enabled
-                  ? "bg-[color-mix(in_srgb,var(--color-success)_12%,transparent)] text-[var(--color-success)]"
-                  : "bg-[var(--color-surface-2)] text-[var(--color-faint)]"
+                  ? "bg-[var(--color-success-soft)] text-[var(--color-success)]"
+                  : "bg-[var(--color-surface-2)] text-[var(--color-muted)]"
               }`}
             >
               {automation.enabled ? "Live" : "Draft"}
             </span>
+            <span className="shrink-0 text-[11.5px] text-[var(--color-faint)]">
+              v{automation.version} · {relTime(automation.updatedAt)} · {runCount} runs
+            </span>
           </div>
           <p className="truncate text-[11.5px] text-[var(--color-muted)]">
-            {automation.channel.displayName} · runs {sentence} · v
-            {automation.version} · {runCount} runs
+            Runs {sentence} · {automation.channel.displayName}
           </p>
         </div>
 
@@ -132,8 +138,9 @@ export default async function AutomationDetail({
             <button
               type="submit"
               title="Runs this flow once against the built-in test contact, not a real customer."
-              className="rounded-lg border border-[var(--color-border)] px-3 py-1.5 text-[12.5px] font-medium text-[var(--color-ink)] hover:bg-[var(--color-surface-2)]"
+              className="flex h-[34px] items-center gap-1.5 rounded-[8px] border border-[var(--color-border)] px-3 text-[12.5px] font-semibold text-[var(--color-ink)] hover:bg-[var(--color-surface-2)]"
             >
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><path d="M6 4l14 8-14 8z" /></svg>
               Test run
             </button>
           </form>
@@ -165,6 +172,7 @@ export default async function AutomationDetail({
         initialKeywords={triggerConfig?.keywords ?? []}
         automations={otherAutomations}
         campaigns={campaigns}
+        runStats={stats}
       />
     </div>
   );

@@ -16,11 +16,15 @@ export async function PageChrome({
   section,
   page,
   crumbs = [],
+  actions,
+  center,
   children,
 }: {
   section: NavKey;
   page?: keyof Dict["page"];
   crumbs?: Crumb[];
+  actions?: React.ReactNode;
+  center?: React.ReactNode;
   children: React.ReactNode;
 }) {
   const me = await getCurrentMember();
@@ -30,6 +34,8 @@ export async function PageChrome({
     <div className="flex min-w-0 flex-1 flex-col">
       <Topbar
         crumbs={[t.nav[section], ...(page ? [t.page[page]] : []), ...crumbs]}
+        actions={actions}
+        center={center}
         current={me}
         companies={await companyChoices(getDb(), me)}
       />

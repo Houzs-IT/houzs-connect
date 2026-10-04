@@ -73,7 +73,12 @@ export async function login(
     .values({ companyId: co.id, email, name: erp.name ?? email, role, title: erp.role_name ?? null })
     .onConflictDoUpdate({
       target: [member.companyId, member.email],
-      set: { name: erp.name ?? email, role, title: erp.role_name ?? null },
+      // SUPER_ADMIN is granted in Connect, not the ERP — signing in keeps it.
+      set: {
+        name: erp.name ?? email,
+        role: sql`case when ${member.role} = 'SUPER_ADMIN' then ${member.role} else ${role}::"connect"."Role" end`,
+        title: erp.role_name ?? null,
+      },
     })
     .returning();
 

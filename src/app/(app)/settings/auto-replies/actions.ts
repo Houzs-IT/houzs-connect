@@ -7,6 +7,7 @@ import { autoReply } from "@/db/schema";
 import { getCurrentMember } from "@/lib/current-member";
 import { DAYS, parseClock, type AutoReplySettings, type WeekHours } from "@/lib/auto-reply/decide";
 import { MAX_REPLY_CHARS } from "@/lib/auto-reply/defaults";
+import { isAdminRole } from "@/lib/permissions";
 
 export interface SaveResult {
   ok: boolean;
@@ -44,7 +45,7 @@ function problem(s: AutoReplySettings): string | null {
 /** Save the session company's auto replies (owner/admin only). */
 export async function saveAutoReplies(input: AutoReplySettings): Promise<SaveResult> {
   const me = await getCurrentMember();
-  if (!me || (me.role !== "OWNER" && me.role !== "ADMIN")) {
+  if (!me || !isAdminRole(me.role)) {
     return { ok: false, error: "Only an owner or admin can change the automatic replies." };
   }
   const clean: AutoReplySettings = {

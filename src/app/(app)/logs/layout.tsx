@@ -1,9 +1,15 @@
-import { LogsMenu } from "@/components/shell/menus/ModuleMenus";
+import { Suspense } from "react";
+import { SecondaryMenuSkeleton } from "@/components/shell/SecondaryMenu";
+import { getDict } from "@/lib/i18n/server";
+import { LogsMenu } from "./LogsMenu";
 
-export default function Layout({ children }: { children: React.ReactNode }) {
+export default async function Layout({ children }: { children: React.ReactNode }) {
+  const t = await getDict();
   return (
     <>
-      <LogsMenu />
+      <Suspense fallback={<SecondaryMenuSkeleton title={t.nav.logs} />}>
+        <LogsMenu />
+      </Suspense>
       {children}
     </>
   );

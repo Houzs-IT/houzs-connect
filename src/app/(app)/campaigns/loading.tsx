@@ -1,87 +1,34 @@
-import { PageSkeleton, Skel, TableSkeleton } from "@/components/skeleton";
+import { PageSkeleton, Skel } from "@/components/skeleton";
 
-/**
- * Campaigns loading state — the six-step wizard beside the history table.
- *
- * This page is `force-dynamic` and its first paint waits on a Graph call for the
- * approved template list, so the skeleton is what an operator actually looks at
- * for a moment. It mirrors the real layout: the step strip, one field block, the
- * guidance panels, then the wide history table whose headers are static and so
- * render for real.
- */
+/** Campaigns list loading state: search + date row over the table's shape. */
 export default function CampaignsLoading() {
   return (
     <PageSkeleton section="campaigns" page="allCampaigns">
-      <div className="p-6">
-        <div className="grid gap-6 lg:grid-cols-[420px_1fr]">
-          {/* Wizard */}
-          <div className="h-fit rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
-            <div className="mb-4 flex flex-wrap gap-1">
-              {[0, 1, 2, 3, 4, 5].map((i) => (
-                <Skel key={i} className="h-[24px] w-[68px] rounded-md" />
-              ))}
-            </div>
-            <Skel className="mb-1 h-[13px] w-28" />
-            <Skel className="mb-3 h-[33px] w-full rounded-lg" />
-            <div className="mb-3 grid gap-2 sm:grid-cols-2">
-              <Skel className="h-[86px] w-full rounded-lg" />
-              <Skel className="h-[86px] w-full rounded-lg" />
-            </div>
-            <Skel className="mb-3 h-[13px] w-40" />
-            <div className="mt-4 border-t border-[var(--color-border)] pt-3">
-              <Skel className="mb-2 h-[26px] w-full" />
-              <div className="flex gap-2">
-                <Skel className="h-[37px] w-[72px] rounded-lg" />
-                <Skel className="h-[37px] w-[72px] rounded-lg" />
-                <Skel className="h-[37px] w-[104px] rounded-lg" />
+      <div className="flex flex-col gap-3.5 p-4 md:p-6">
+        <div className="flex gap-2">
+          <Skel className="h-[36px] w-[300px] rounded-[8px]" />
+          <Skel className="h-[36px] w-[150px] rounded-[8px]" />
+        </div>
+        <div className="overflow-hidden rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)]">
+          <div className="h-10 border-b border-[var(--color-border)] bg-[var(--color-surface-2)]" />
+          <div className="skeleton-stagger">
+            {Array.from({ length: 6 }, (_, i) => (
+              <div
+                key={i}
+                className="flex items-center gap-3 border-b border-[var(--color-border-subtle)] px-4 py-3.5"
+                style={{ "--i": i } as React.CSSProperties}
+              >
+                <Skel className="h-9 w-9 rounded-full" />
+                <div className="flex-1">
+                  <Skel className="h-[14px] w-48" />
+                  <Skel className="mt-1.5 h-[16px] w-24" />
+                </div>
+                <Skel className="h-[14px] w-28" />
+                <Skel className="h-[18px] w-52" />
+                <Skel className="h-[14px] w-20" />
+                <Skel className="h-[18px] w-20 rounded-full" />
               </div>
-            </div>
-          </div>
-
-          {/* History */}
-          <div className="min-w-0">
-            <div className="mb-3 flex flex-wrap items-end gap-2">
-              <Skel className="h-[33px] w-[200px] rounded-lg" />
-              <Skel className="h-[33px] w-[140px] rounded-lg" />
-              <Skel className="h-[33px] w-[140px] rounded-lg" />
-              <Skel className="h-[33px] w-[72px] rounded-lg" />
-            </div>
-            <div className="overflow-x-auto rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)]">
-              <TableSkeleton
-                minWidth="min-w-[1080px]"
-                headers={[
-                  "Campaign",
-                  "Channel",
-                  "Sent to",
-                  "People",
-                  "Messages sent",
-                  "Read",
-                  "Wrote back",
-                  "Schedule",
-                  "Started",
-                  "Ended",
-                  "Status",
-                  "Approval",
-                  "Action",
-                ]}
-                widths={[
-                  "w-36",
-                  "w-20",
-                  "w-24",
-                  "w-10",
-                  "w-10",
-                  "w-6",
-                  "w-6",
-                  "w-24",
-                  "w-24",
-                  "w-24",
-                  "w-16",
-                  "w-20",
-                  "w-24",
-                ]}
-                rows={7}
-              />
-            </div>
+            ))}
           </div>
         </div>
       </div>

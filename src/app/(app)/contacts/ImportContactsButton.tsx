@@ -85,9 +85,11 @@ async function fileToCsvText(file: File): Promise<string> {
 export function ImportContactsButton({
   fields,
   tags,
+  label = "Import CSV",
 }: {
   fields: ImportField[];
   tags: TagOption[];
+  label?: string;
 }) {
   const [open, setOpen] = useState(false);
   const [nonce, setNonce] = useState(0);
@@ -251,9 +253,12 @@ export function ImportContactsButton({
     <button
       type="button"
       onClick={() => setOpen(true)}
-      className="ml-auto rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-1.5 text-[12.5px] font-medium text-[var(--color-ink)] transition-colors hover:bg-[var(--color-surface-2)]"
+      className="flex h-[34px] items-center gap-1.5 whitespace-nowrap rounded-[8px] border border-[var(--color-border)] bg-[var(--color-surface)] px-3 text-[12.5px] font-semibold text-[var(--color-ink)] transition-colors hover:border-[var(--color-border-strong)] hover:bg-[var(--color-surface-2)]"
     >
-      Import CSV
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M12 21V9M7 14l5-5 5 5M5 3h14" />
+      </svg>
+      <span className="hidden sm:inline">{label}</span>
     </button>
   );
 

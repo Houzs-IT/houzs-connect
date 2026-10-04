@@ -34,45 +34,6 @@ const btnCls =
 const ghostBtnCls =
   "rounded-lg border border-[var(--color-border)] px-3 py-2 text-[13px] font-medium text-[var(--color-ink)] transition-colors hover:bg-[var(--color-surface-2)] disabled:opacity-40";
 
-type Tone = "good" | "warn" | "bad" | "mute";
-
-function Badge({ text, tone }: { text: string; tone: Tone }) {
-  const cls =
-    tone === "good"
-      ? "bg-[color-mix(in_srgb,var(--color-accent)_14%,transparent)] text-[var(--color-accent)]"
-      : tone === "bad"
-        ? "bg-[var(--color-danger-soft)] text-[var(--color-danger)]"
-        : tone === "warn"
-          ? "bg-[color-mix(in_srgb,#b45309_16%,transparent)] text-[#b45309]"
-          : "bg-[var(--color-surface-2)] text-[var(--color-muted)]";
-  return (
-    <span className={`inline-block rounded-md px-2 py-0.5 text-[11px] font-semibold ${cls}`}>
-      {text}
-    </span>
-  );
-}
-
-function connectionTone(s: string | null): Tone {
-  if (s === "CONNECTED") return "good";
-  if (s === "PENDING" || s === "FLAGGED" || s === "RESTRICTED") return "warn";
-  if (s === "BANNED" || s === "DELETED") return "bad";
-  return "mute";
-}
-
-/**
- * `connection` is passed in because the same verification value means different
- * things either side of registration. On a CONNECTED number an EXPIRED code is
- * a spent artifact of some earlier request; painting it red made a healthy
- * production number look broken.
- */
-function verificationTone(s: string | null, connection: string | null): Tone {
-  if (s === "VERIFIED") return "good";
-  if (connection === "CONNECTED") return "mute";
-  if (s === "EXPIRED") return "bad";
-  if (s === "NOT_VERIFIED") return "warn";
-  return "mute";
-}
-
 function Result({ r }: { r: { ok: boolean; text: string } | null }) {
   if (!r) return null;
   return (
@@ -664,44 +625,87 @@ function NumberCard({
   companies: { id: string; name: string }[];
 }) {
   const advice = nextStep(n);
+  const good = (ok: boolean, warn = false) => (ok ? "green" : warn ? "orange" : "pink");
+  const tiles: [string, string, string, string][] = [
+    ["Connection", n.connection ?? "unknown", good(n.connection === "CONNECTED", n.connection === "PENDING"), "⇄"],
+    ["Verification", n.codeVerification ?? "unknown", n.codeVerification === "VERIFIED" ? "blue" : n.connection === "CONNECTED" ? "blue" : "orange", "✓"],
+    ["Quality", n.qualityRating ?? "Not rated", n.qualityRating === "GREEN" ? "green" : n.qualityRating ? "orange" : "surface", "★"],
+    ["Daily limit", (n.limitTier ?? "Unset").replace("TIER_", ""), n.limitTier ? "purple" : "orange", "↑"],
+  ];
   return (
     <div
-      className={`rounded-xl border px-4 py-3 ${
-        n.isActive
-          ? "border-[var(--color-accent)] bg-[color-mix(in_srgb,var(--color-accent)_4%,transparent)]"
-          : "border-[var(--color-border)] bg-[var(--color-surface)]"
+      className={`overflow-hidden rounded-[12px] border bg-[var(--color-surface)] ${
+        assignment ? "border-[var(--color-border)]" : "border-[#f0c9c9]"
       }`}
     >
-      <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-        <span className="font-mono text-[15px] font-semibold text-[var(--color-ink)]">
-          {n.displayPhoneNumber}
+      <div className="flex flex-wrap items-center gap-3 border-b border-[var(--color-border-subtle)] px-4 py-3.5">
+        <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full border border-[var(--color-border)] bg-white">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/logo-hc-mark.png" alt="" className="h-5 w-5 object-contain" />
         </span>
-        {n.verifiedName && (
-          <span className="text-[12.5px] text-[var(--color-muted)]">{n.verifiedName}</span>
+        <div className="min-w-0 flex-1 leading-tight">
+          <div className="text-[16px] font-semibold tabular-nums text-[var(--color-ink)]">{n.displayPhoneNumber}</div>
+          <div className="mt-0.5 truncate text-[12px] text-[var(--color-faint)]">
+            {n.verifiedName ?? "—"} · assigned to{" "}
+            <b className="font-semibold text-[var(--color-ink)]">{assignment ? assignment.companyName : "Not assigned"}</b>
+          </div>
+        </div>
+        {n.isActive && (
+          <span className="rounded-full bg-[var(--color-accent-soft)] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.06em] text-[var(--color-accent-ink)]">
+            ✓ Default
+          </span>
         )}
-        {assignment && <Badge text={assignment.companyName.toUpperCase()} tone="good" />}
-        {!assignment && <Badge text="NO COMPANY" tone="bad" />}
-        {n.isActive && <Badge text="DEFAULT SENDER" tone="mute" />}
+        <span
+          className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.06em] ${
+            n.connection === "CONNECTED"
+              ? "bg-[var(--color-success-soft)] text-[var(--color-success)]"
+              : "bg-[var(--color-danger-soft)] text-[var(--color-danger)]"
+          }`}
+        >
+          {n.connection ?? "unknown"}
+        </span>
       </div>
 
-      <div className="mt-2 flex flex-wrap items-center gap-2">
-        <Badge text={n.connection ?? "unknown"} tone={connectionTone(n.connection)} />
-        <Badge
-          text={`verification: ${n.codeVerification ?? "unknown"}`}
-          tone={verificationTone(n.codeVerification, n.connection)}
-        />
-        {n.nameStatus && <Badge text={`name: ${n.nameStatus}`} tone="mute" />}
-        <Badge text={`quality: ${n.qualityRating ?? "not rated"}`} tone="mute" />
-        <Badge text={`limit: ${n.limitTier ?? "unset"}`} tone={n.limitTier ? "mute" : "warn"} />
-      </div>
+      <div className="px-4 py-3.5">
+        <div className="grid grid-cols-2 gap-2.5 lg:grid-cols-4">
+          {tiles.map(([k, v, tone, icon]) => (
+            <div
+              key={k}
+              className="flex items-center gap-2.5 rounded-[10px] px-3 py-2.5"
+              style={{ background: tone === "surface" ? "var(--color-surface-2)" : `var(--color-pastel-${tone})` }}
+            >
+              <span
+                className="grid h-7 w-7 place-items-center rounded-full bg-white text-[12px] font-bold"
+                style={{ color: tone === "surface" ? "var(--color-muted)" : `var(--color-pastel-${tone}-ink)` }}
+              >
+                {icon}
+              </span>
+              <div className="min-w-0 leading-tight">
+                <div className="text-[11px] text-[var(--color-muted)]">{k}</div>
+                <div
+                  className="truncate text-[13px] font-semibold"
+                  style={{ color: tone === "surface" ? "var(--color-ink)" : `var(--color-pastel-${tone}-ink)` }}
+                >
+                  {v}
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
 
-      <p className="mt-2 font-mono text-[11px] text-[var(--color-faint)]">id {n.id}</p>
+        <p className="mt-2 font-code text-[11px] text-[var(--color-faint)]">id {n.id}</p>
 
-      {advice && (
-        <p className="mt-2 text-[12.5px] text-[var(--color-muted)]">
-          <strong className="text-[var(--color-ink)]">Next:</strong> {advice}
-        </p>
-      )}
+        {!assignment && (
+          <p className="mt-2 rounded-[8px] bg-[var(--color-danger-soft)] px-3 py-2 text-[12.5px] text-[var(--color-danger)]">
+            This number is not assigned to a company, so messages sent to it do not reach any inbox. System Logs shows what was held back.
+          </p>
+        )}
+
+        {advice && (
+          <p className="mt-2 text-[12.5px] text-[var(--color-muted)]">
+            <strong className="text-[var(--color-ink)]">Next:</strong> {advice}
+          </p>
+        )}
 
       <CompanyAssignment n={n} assignment={assignment} companies={companies} />
 
@@ -709,6 +713,7 @@ function NumberCard({
       {n.connection === "CONNECTED" && <ProfileEditor n={n} />}
 
       <NumberActions n={n} managerUrl={managerUrl} />
+      </div>
     </div>
   );
 }

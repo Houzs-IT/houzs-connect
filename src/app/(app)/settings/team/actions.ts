@@ -18,6 +18,7 @@ import { getDb } from "@/db/client";
 import { bypassReadCache } from "@/db/fresh";
 import { company, member } from "@/db/schema";
 import { getCurrentMember } from "@/lib/current-member";
+import { isAdminRole } from "@/lib/permissions";
 
 const GRANTABLE = ["ADMIN", "MANAGER", "AGENT", "SALES", "VIEWER", "DRIVER"] as const;
 type Grantable = (typeof GRANTABLE)[number];
@@ -27,7 +28,7 @@ function cleanRole(v: string): Grantable {
 
 async function manager() {
   const me = await getCurrentMember();
-  if (!me || (me.role !== "OWNER" && me.role !== "ADMIN")) return null;
+  if (!me || !isAdminRole(me.role)) return null;
   return me;
 }
 
@@ -179,15 +180,36 @@ export async function setRoleForm(formData: FormData): Promise<void> {
   const me = await manager();
   if (!me) return;
   const email = String(formData.get("email") ?? "").trim().toLowerCase();
-  const role = cleanRole(String(formData.get("role") ?? "AGENT"));
+  const raw = String(formData.get("role") ?? "AGENT");
   if (!email) return;
   const db = getDb();
-  // Manual grants only — an ERP-synced member's role is the ERP's, overwritten on
-  // their next sign-in.
-  await db
-    .update(member)
-    .set({ role })
-    .where(and(eq(member.email, email), isNull(member.erpUserId)));
+  const rows = await db.query.member.findMany({ where: eq(member.email, email) });
+  const wasSuper = rows.some((r) => r.role === "SUPER_ADMIN");
+  const supers = await db.query.member.findMany({ columns: { email: true }, where: eq(member.role, "SUPER_ADMIN") });
+  const superEmails = new Set(supers.map((x) => x.email.toLowerCase()));
+
+  if (raw === "SUPER_ADMIN" || wasSuper) {
+    // Granting or removing SUPER_ADMIN is a Super Admin's call. The one
+    // exception is the very first: with none in the system, an owner or admin
+    // may name one, or nobody ever could.
+    const allowed = me.role === "SUPER_ADMIN" || (raw === "SUPER_ADMIN" && superEmails.size === 0);
+    if (!allowed) return;
+    // Never leave the system without one.
+    if (wasSuper && raw !== "SUPER_ADMIN" && superEmails.size <= 1) return;
+    // SUPER_ADMIN is held on every one of the person's rows, ERP-synced ones
+    // included — sign-in and the ERP sync keep it (login/actions.ts, erp-org.ts).
+    await db
+      .update(member)
+      .set({ role: raw === "SUPER_ADMIN" ? "SUPER_ADMIN" : cleanRole(raw) })
+      .where(eq(member.email, email));
+  } else {
+    // Manual grants only — an ERP-synced member's role is the ERP's, overwritten
+    // on their next sign-in.
+    await db
+      .update(member)
+      .set({ role: cleanRole(raw) })
+      .where(and(eq(member.email, email), isNull(member.erpUserId)));
+  }
   revalidatePath("/settings/team");
   revalidatePath("/inbox");
 }

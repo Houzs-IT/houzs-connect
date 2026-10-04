@@ -28,6 +28,7 @@ import {
 import { startRun } from "@/lib/automation/engine";
 import { getOrCreateConversation } from "@/lib/whatsapp/transport";
 import { getCurrentMember } from "@/lib/current-member";
+import { can } from "@/lib/permissions";
 
 const MAX_VERSIONS = 10;
 
@@ -42,7 +43,7 @@ const MAX_VERSIONS = 10;
 async function authorizeAutomation(automationId: string) {
   if (!automationId) return null;
   const me = await getCurrentMember();
-  if (!me) return null;
+  if (!me || !(await can(me, "automations"))) return null;
   const db = getDb();
   const row = await db.query.automation.findFirst({
     where: eq(automation.id, automationId),
@@ -200,7 +201,7 @@ const CREATABLE_TRIGGER_TYPES = new Set([
  */
 export async function createAutomation(formData: FormData) {
   const me = await getCurrentMember();
-  if (!me) return;
+  if (!me || !(await can(me, "automations"))) return;
 
   const name = String(formData.get("name") ?? "").trim();
   if (!name) return;

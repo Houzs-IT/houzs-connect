@@ -108,3 +108,17 @@ export function tint(seed: string): string {
   for (let i = 0; i < seed.length; i++) h = (h * 31 + seed.charCodeAt(i)) >>> 0;
   return palette[h % palette.length];
 }
+
+/**
+ * A Malaysian WhatsApp number written the way people read it:
+ * "601161556133" → "+60 11-6155 6133". Anything else gets a leading "+".
+ */
+export function formatPhone(raw: string): string {
+  const d = (raw ?? "").replace(/\D/g, "");
+  if (d.startsWith("60")) {
+    const r = d.slice(2);
+    if (r.length === 9) return `+60 ${r.slice(0, 2)}-${r.slice(2, 5)} ${r.slice(5)}`;
+    if (r.length === 10) return `+60 ${r.slice(0, 2)}-${r.slice(2, 6)} ${r.slice(6)}`;
+  }
+  return d ? `+${d}` : raw;
+}

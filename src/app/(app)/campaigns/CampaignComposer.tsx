@@ -1,31 +1,24 @@
 "use client";
 
-// The campaign wizard — the six steps Seampify walks an operator through
-// (docs/seampify-spec.md §2), because the owner's instruction was that the
-// Campaigns page must line up with how Templates work and must explain itself.
+// The campaign wizard: Audience → Message → Review & send, with the message
+// previewed on a phone the whole way through.
 //
-// What it replaced, and why:
-//
-//   • "Template name (optional)" was a free-text box. An operator was expected
-//     to type an approved template's exact name from memory, and a typo meant a
-//     run of silent rejections. Step 4 is now a picker over the account's real
-//     APPROVED templates.
-//   • The message box offered NAMED merge chips ({{full_name}}, {{ref_1}}) while
-//     a Meta template body uses POSITIONAL {{1}}, {{2}}. Those two cannot both be
-//     right. Step 4 binds each {{n}} to a field using the SAME `VariableRows`
-//     and `MessagePreview` the Templates page uses, so the two pages behave
-//     identically and there is only one mapping mechanism in the product.
-//   • The footnote said "DEMO sends via the stubbed transport" on a system where
-//     WHATSAPP_MODE=LIVE. Every step now states what will really happen, to how
-//     many people, from which number.
-//   • One unguarded "Send broadcast" button could message the whole address
-//     book. Sending now needs a review and a two-click confirm, with a test send
-//     available first.
+// What it keeps from the six-step version it replaced: the template is picked
+// from the account's APPROVED templates (never typed from memory); every {{n}}
+// is bound with the same VariableRows the Templates page uses, so there is one
+// mapping mechanism in the product; the recipient count comes from the same
+// resolver the send runs; and a send needs a review plus a two-click confirm.
 
-import { useEffect, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { useEffect, useState } from "react";
+import { ActionDialog } from "@/components/ActionConfirm";
+import { IconClose } from "@/components/icons";
+import { useShell } from "@/components/shell/ShellProvider";
 import { templateBindingGaps, type VarBinding } from "@/lib/automation/vars";
-import { MessagePreview, VariableRows } from "@/app/(app)/templates/TemplateFields";
+import { formatPhone, initials, tint } from "@/lib/format";
+import { fmt } from "@/lib/i18n/dict";
+import { VariableRows } from "@/app/(app)/templates/TemplateFields";
 import type { FieldOption } from "@/app/(app)/templates/types";
 import {
   countAudience,
@@ -35,6 +28,7 @@ import {
   sendCampaignNow,
   sendTestMessage,
 } from "./actions";
+import { PhonePreview, fillBody } from "./PhonePreview";
 import {
   NAME_MAX,
   emptySpec,
@@ -44,7 +38,6 @@ import {
   type AudienceSpec,
   type CampaignSpec,
   type CampaignTemplate,
-  type SavedStatus,
   type SendPreview,
 } from "./spec";
 
@@ -68,29 +61,17 @@ export interface CampaignDraft {
   spec: CampaignSpec;
   /** Pre-formatted for <input type="datetime-local">. */
   scheduleAt: string;
+  requiresApproval: boolean;
 }
 
-const STEPS = ["Name", "Sender", "Contacts", "Template", "Test send", "Review"] as const;
-
-const inputCls =
-  "w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] px-2.5 py-1.5 text-[13px] text-[var(--color-ink)] outline-none placeholder:text-[var(--color-faint)] focus:border-[var(--color-accent)]";
-const labelCls = "mb-1 block text-[11px] text-[var(--color-muted)]";
-const primaryBtn =
-  "rounded-lg bg-[var(--color-accent)] px-3 py-2 text-[13px] font-medium text-white disabled:opacity-40";
-const secondaryBtn =
-  "rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-[13px] font-medium text-[var(--color-muted)] hover:text-[var(--color-ink)] disabled:opacity-40";
-
-/** Seampify shows these beside the name box; the advice is genuinely useful. */
-const DOS = [
-  "Keep the name under 50 characters so it fits the history table.",
-  "Say what it is and when — “Sept balance reminder”, not “Campaign 3”.",
-  "One campaign per template, so the figures mean something.",
-];
-const DONTS = [
-  "Do not send the same offer twice in a week — Meta scores that against the number.",
-  "Do not use a MARKETING template for a delivery update; use UTILITY.",
-  "Do not skip the test send.",
-];
+const card = "rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)]";
+const input =
+  "h-[36px] w-full rounded-[8px] border border-[var(--color-border)] bg-[var(--color-surface)] px-3 text-[13px] text-[var(--color-ink)] outline-none placeholder:text-[var(--color-faint)] focus:border-[var(--color-accent)] focus:shadow-[0_0_0_3px_var(--color-accent-ring)] disabled:opacity-60";
+const label = "mb-1.5 block text-[12px] font-semibold text-[var(--color-ink)]";
+const btn2 =
+  "flex h-[34px] items-center rounded-[8px] border border-[var(--color-border)] bg-[var(--color-surface)] px-3.5 text-[13px] font-semibold text-[var(--color-ink)] hover:border-[var(--color-border-strong)] hover:bg-[var(--color-surface-2)] disabled:opacity-40";
+const btn1 =
+  "flex h-[34px] items-center rounded-[8px] bg-[var(--color-accent)] px-3.5 text-[13px] font-semibold text-white shadow-[var(--shadow-primary)] hover:bg-[var(--color-accent-hi)] disabled:opacity-40 disabled:shadow-none";
 
 export function CampaignComposer({
   channels,
@@ -113,42 +94,42 @@ export function CampaignComposer({
   live: boolean;
   initial: CampaignDraft | null;
 }) {
+  const router = useRouter();
+  const { t } = useShell();
+  const L = t.camp;
+
   const [step, setStep] = useState(0);
   const [campaignId, setCampaignId] = useState<string | null>(initial?.id ?? null);
+  const [savedOnce, setSavedOnce] = useState(!!initial);
   const [name, setName] = useState(initial?.name ?? "");
   const [channelId, setChannelId] = useState(
     initial?.channelId ?? channels.find((c) => c.isDefault)?.id ?? channels[0]?.id ?? ""
   );
   const [spec, setSpec] = useState<CampaignSpec>(initial?.spec ?? emptySpec());
+  const [mode, setMode] = useState<"now" | "schedule">(initial?.scheduleAt ? "schedule" : "now");
   const [scheduleAt, setScheduleAt] = useState(initial?.scheduleAt ?? "");
+  const [needApproval, setNeedApproval] = useState(initial?.requiresApproval ?? false);
   const [templates, setTemplates] = useState(initialTemplates);
   const [templateQuery, setTemplateQuery] = useState("");
   const [refreshing, setRefreshing] = useState(false);
-  const [showAdvanced, setShowAdvanced] = useState(false);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  // Test send (step 5)
   const [testPhone, setTestPhone] = useState("");
-  const [testArmed, setTestArmed] = useState(false);
   const [testResult, setTestResult] = useState<string | null>(null);
 
-  // Review (step 6)
   const [preview, setPreview] = useState<SendPreview | null>(null);
-  const [sendArmed, setSendArmed] = useState(false);
-  const [savedStatus, setSavedStatus] = useState<SavedStatus | null>(null);
+  const [armed, setArmed] = useState(false);
 
   // ── Live recipient count ────────────────────────────────────────────────
-  // Keyed on the serialised audience so the effect body needs no object in its
-  // dependency list, and so "is this figure current?" is derived during render
-  // rather than written by a setState inside the effect.
+  // Keyed on the serialised audience so "is this figure current?" is derived
+  // during render rather than written by a setState inside the effect.
   const audKey = JSON.stringify(spec.audience);
   const [counted, setCounted] = useState<{ key: string; data: AudienceCount } | null>(null);
   useEffect(() => {
     let cancelled = false;
     const aud = JSON.parse(audKey) as AudienceSpec;
-    // Typing an attribute value would otherwise fire this on every keystroke.
     const timer = setTimeout(() => {
       void countAudience(aud).then((data) => {
         if (!cancelled) setCounted({ key: audKey, data });
@@ -162,40 +143,16 @@ export function CampaignComposer({
   const counts = counted?.key === audKey ? counted.data : null;
   const sample = counts?.sampleContact ?? null;
 
-  const chosen = templates.find((t) => t.name === spec.templateName) ?? null;
+  const chosen = templates.find((x) => x.name === spec.templateName) ?? null;
   const gaps = spec.templateBody ? templateBindingGaps(spec.templateBody, spec.bindings) : [];
-
-  // Whether a time has been TYPED — a label question, answerable during render.
-  // Whether that time is still in the FUTURE is a clock question, and a
-  // component must not ask the clock while rendering (it would answer
-  // differently on each re-render). The server decides and says so in
-  // `savedStatus`; until then the wizard only claims a time was entered.
-  const scheduleEntered = !!scheduleAt.trim();
-  const heldForLater = savedStatus === "scheduled";
+  const channel = channels.find((c) => c.id === channelId) ?? null;
 
   function patchSpec(p: Partial<CampaignSpec>) {
     setSpec((s) => ({ ...s, ...p }));
-    // Any edit invalidates a review that was already run.
     setPreview(null);
-    setSendArmed(false);
-    setSavedStatus(null);
+    setArmed(false);
   }
-
-  function setAudience(p: Partial<AudienceSpec>) {
-    patchSpec({ audience: { ...spec.audience, ...p } });
-  }
-
-  function chooseTemplate(t: CampaignTemplate) {
-    // Seed the per-send bindings from whatever the Templates page already saved
-    // for this template, so a mapped template arrives ready to send instead of
-    // asking for the same four dropdowns again.
-    patchSpec({
-      templateName: t.name,
-      templateLang: t.language,
-      templateBody: t.body,
-      bindings: t.bindings,
-    });
-  }
+  const setAudience = (p: Partial<AudienceSpec>) => patchSpec({ audience: { ...spec.audience, ...p } });
 
   async function refreshTemplates() {
     setRefreshing(true);
@@ -206,45 +163,79 @@ export function CampaignComposer({
     }
   }
 
-  function currentInput() {
-    return {
-      id: campaignId ?? undefined,
-      name,
-      channelId,
-      spec,
-      scheduleAt: toInstant(scheduleAt),
-    };
+  const currentInput = (schedule: boolean) => ({
+    id: campaignId ?? undefined,
+    name,
+    channelId,
+    spec,
+    scheduleAt: schedule ? toInstant(scheduleAt) : null,
+    requiresApproval: needApproval,
+  });
+
+  async function save(schedule: boolean) {
+    setBusy(true);
+    setError(null);
+    setNotice(null);
+    const res = await saveCampaign(currentInput(schedule));
+    setBusy(false);
+    if (!res.ok) {
+      setError(res.error ?? "Could not save.");
+      return null;
+    }
+    if (res.id) setCampaignId(res.id);
+    setSavedOnce(true);
+    return res;
   }
 
   async function onSaveDraft() {
-    setBusy(true);
-    setError(null);
-    setNotice(null);
-    const res = await saveCampaign(currentInput());
-    setBusy(false);
-    if (!res.ok) return setError(res.error ?? "Could not save.");
-    if (res.id) setCampaignId(res.id);
-    setSavedStatus(res.status ?? null);
-    setNotice(
-      res.status === "scheduled"
-        ? "Scheduled. Nothing has been sent."
-        : scheduleEntered
-          ? "Saved as a draft — the time you picked has already passed, so it was not scheduled."
-          : "Draft saved. Nothing has been sent."
-    );
+    const res = await save(mode === "schedule" && !!scheduleAt);
+    if (res) setNotice(res.status === "scheduled" ? L.scheduledDone : L.draftSaved);
   }
 
-  async function onReview() {
+  async function onPrimary() {
+    if (step < 2) return setStep((s) => s + 1);
+    if (mode === "schedule") {
+      if (!scheduleAt) return setError(L.pastTime);
+      const res = await save(true);
+      if (!res) return;
+      if (res.status !== "scheduled") return setError(L.pastTime);
+      router.push("/campaigns");
+      return;
+    }
+    if (needApproval) {
+      const res = await save(false);
+      if (res) {
+        setNotice(L.waitApproval);
+        router.push("/campaigns?status=approval");
+      }
+      return;
+    }
     setBusy(true);
     setError(null);
-    setNotice(null);
-    setSendArmed(false);
-    const res = await prepareSend(currentInput());
+    setArmed(false);
+    const res = await prepareSend(currentInput(false));
     setBusy(false);
-    if (res.id) setCampaignId(res.id);
-    setSavedStatus(res.status ?? null);
+    if (res.id) {
+      setCampaignId(res.id);
+      setSavedOnce(true);
+    }
     setPreview(res.preview ?? null);
     if (!res.ok) setError(res.error ?? "Could not prepare this send.");
+  }
+
+  async function onSendForReal() {
+    if (!campaignId) return;
+    setBusy(true);
+    setError(null);
+    // Chunked send (see sendCampaignNow) — loop until nothing remains.
+    let res = await sendCampaignNow({ campaignId, confirm: "SEND" });
+    while (res.ok && (res.remaining ?? 0) > 0) {
+      res = await sendCampaignNow({ campaignId, confirm: "SEND" });
+    }
+    setBusy(false);
+    setArmed(false);
+    if (!res.ok) return setError(res.error ?? "The send failed.");
+    router.push(`/campaigns/${campaignId}`);
   }
 
   async function onTestSend() {
@@ -253,641 +244,562 @@ export function CampaignComposer({
     setTestResult(null);
     const res = await sendTestMessage({ spec, channelId, phone: testPhone });
     setBusy(false);
-    setTestArmed(false);
     if (!res.ok) return setError(res.error ?? "The test send failed.");
-    setTestResult(`Sent to ${res.to}.`);
-  }
-
-  async function onSendForReal() {
-    if (!campaignId) return;
-    setBusy(true);
-    setError(null);
-    // The send runs in chunks (see sendCampaignNow) so one request never runs the
-    // Worker out of budget mid-broadcast; loop until nothing remains.
-    let res = await sendCampaignNow({ campaignId, confirm: "SEND" });
-    while (res.ok && (res.remaining ?? 0) > 0) {
-      res = await sendCampaignNow({ campaignId, confirm: "SEND" });
-    }
-    setBusy(false);
-    setSendArmed(false);
-    if (!res.ok) return setError(res.error ?? "The send failed.");
-    setNotice(
-      `Sent to ${res.sent} of ${res.recipients} recipients${
-        res.failed ? `, ${res.failed} refused by WhatsApp` : ""
-      }.`
-    );
-    setPreview(null);
-    setCampaignId(null);
-    setSavedStatus(null);
-    setStep(0);
-    setName("");
-    setSpec(emptySpec());
-    setScheduleAt("");
+    setTestResult(fmt(L.testSent, { to: res.to ?? testPhone }));
   }
 
   // ── Step gating ─────────────────────────────────────────────────────────
-  const stepBlocked: (string | null)[] = [
-    name.trim() ? null : "Give the campaign a name.",
-    channelId ? null : "Select a channel.",
-    // While the count is in flight the answer is unknown, not zero — saying
-    // "reaches nobody" there would be the same kind of confident wrong number
-    // this whole change is about.
-    !counts
-      ? "Counting who this reaches…"
-      : counts.recipients > 0
-        ? null
-        : "This audience reaches nobody.",
+  const blocked: (string | null)[] = [
+    !name.trim()
+      ? L.name
+      : !channelId
+        ? L.sender
+        : !counts
+          ? L.counting
+          : counts.recipients > 0
+            ? null
+            : "This audience reaches nobody.",
     sendBlocker(spec) ??
       (gaps.length > 0
         ? `${gaps.map((n) => `{{${n}}}`).join(", ")} still ${gaps.length === 1 ? "has" : "have"} no value.`
         : null),
-    null, // the test send is optional, but strongly advised
     null,
   ];
-  const blockedHere = stepBlocked[step];
+  const reachable = (i: number) => blocked.slice(0, i).every((b) => b == null);
+
+  const steps = [L.stepAudience, L.stepMessage, L.stepReview];
+  const primaryLabel =
+    step < 2 ? L.next : mode === "schedule" ? L.scheduleCampaign : needApproval ? L.saveDraft : L.sendCampaign;
+
+  const filled = chosen ? fillBody(spec.templateBody, spec.bindings, sample) : null;
+  const sampleName = sample?.name || (sample ? formatPhone(sample.phone) : null);
 
   return (
-    <div className="h-fit rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
-      {/* Step strip */}
-      <ol className="mb-4 flex flex-wrap gap-1">
-        {STEPS.map((s, i) => (
-          <li key={s}>
-            <button
-              type="button"
-              onClick={() => setStep(i)}
-              aria-current={i === step ? "step" : undefined}
-              className={`rounded-md px-2 py-1 text-[11px] font-medium transition-colors ${
-                i === step
-                  ? "bg-[var(--color-accent-soft)] text-[var(--color-accent-ink)]"
-                  : "text-[var(--color-faint)] hover:text-[var(--color-ink)]"
-              }`}
-            >
-              <span className="font-mono">{i + 1}</span> {s}
+    <div className="flex min-w-0 flex-1 flex-col bg-[var(--color-canvas)]">
+      {/* ── Header ── */}
+      <header className="flex h-14 shrink-0 items-center gap-3 border-b border-[var(--color-border)] bg-[var(--color-surface)] px-4">
+        <Link
+          href="/campaigns"
+          aria-label="Close"
+          className="grid h-8 w-8 shrink-0 place-items-center rounded-[8px] border border-[var(--color-border)] text-[var(--color-muted)] hover:bg-[var(--color-surface-2)] hover:text-[var(--color-ink)]"
+        >
+          <IconClose width={15} height={15} />
+        </Link>
+        <div className="min-w-0 leading-tight">
+          <div className="truncate text-[14px] font-semibold text-[var(--color-ink)]">{name.trim() || L.untitled}</div>
+          <div className="truncate text-[11.5px] text-[var(--color-faint)]">{savedOnce ? L.savedJust : L.unsaved}</div>
+        </div>
+
+        <ol className="mx-auto hidden items-center gap-2 lg:flex">
+          {steps.map((s, i) => {
+            const done = i < step;
+            const on = i === step;
+            return (
+              <li key={s} className="flex items-center gap-2">
+                {i > 0 && <span className="h-px w-7 bg-[var(--color-border)]" />}
+                <button
+                  type="button"
+                  disabled={!reachable(i)}
+                  onClick={() => setStep(i)}
+                  className={`flex items-center gap-2 rounded-full py-1 pl-1 pr-3 text-[13px] font-semibold disabled:cursor-not-allowed ${
+                    on ? "bg-[var(--color-accent-soft)] text-[var(--color-accent-ink)]" : "text-[var(--color-ink)]"
+                  }`}
+                >
+                  <span
+                    className={`grid h-[22px] w-[22px] place-items-center rounded-full text-[11px] font-bold ${
+                      done || on ? "bg-[var(--color-accent)] text-white" : "border border-[var(--color-border-strong)] text-[var(--color-faint)]"
+                    }`}
+                  >
+                    {done ? (
+                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                        <path d="M5 12l5 5 9-10" />
+                      </svg>
+                    ) : (
+                      i + 1
+                    )}
+                  </span>
+                  {s}
+                </button>
+              </li>
+            );
+          })}
+        </ol>
+
+        <div className="ml-auto flex shrink-0 items-center gap-2 lg:ml-0">
+          {step > 0 ? (
+            <button type="button" className={btn2} onClick={() => setStep((s) => s - 1)}>
+              {L.back}
             </button>
-          </li>
-        ))}
-      </ol>
-
-      {/* Only while this really is that campaign — a completed send clears
-          `campaignId`, and the banner must not keep claiming otherwise. */}
-      {initial && campaignId === initial.id && (
-        <p className="mb-3 rounded-lg bg-[var(--color-surface-2)] px-3 py-2 text-[11px] text-[var(--color-muted)]">
-          Editing “{initial.name}”.{" "}
-          <Link href="/campaigns" className="text-[var(--color-accent)] underline">
-            Start a new one instead
-          </Link>
-        </p>
-      )}
-
-      {/* ── 1. Name ── */}
-      {step === 0 && (
-        <div>
-          <label className={labelCls} htmlFor="campaign-name">
-            Campaign name
-          </label>
-          <input
-            id="campaign-name"
-            value={name}
-            maxLength={NAME_MAX}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="e.g. Sept balance reminder"
-            className={inputCls}
-          />
-          <div className="mb-3 mt-1 text-right text-[10px] tabular-nums text-[var(--color-faint)]">
-            {name.length}/{NAME_MAX}
-          </div>
-
-          <div className="mb-3 grid gap-2 sm:grid-cols-2">
-            <div className="rounded-lg border border-[color-mix(in_srgb,var(--color-success)_35%,transparent)] bg-[var(--color-success-soft)] p-2.5">
-              <h4 className="mb-1 text-[11px] font-semibold text-[var(--color-success)]">Do</h4>
-              <ul className="space-y-1 text-[11px] leading-relaxed text-[var(--color-muted)]">
-                {DOS.map((d) => (
-                  <li key={d}>{d}</li>
-                ))}
-              </ul>
-            </div>
-            <div className="rounded-lg border border-[color-mix(in_srgb,var(--color-danger)_35%,transparent)] bg-[var(--color-danger-soft)] p-2.5">
-              <h4 className="mb-1 text-[11px] font-semibold text-[var(--color-danger)]">Do not</h4>
-              <ul className="space-y-1 text-[11px] leading-relaxed text-[var(--color-muted)]">
-                {DONTS.map((d) => (
-                  <li key={d}>{d}</li>
-                ))}
-              </ul>
-            </div>
-          </div>
-
+          ) : (
+            <button type="button" className={btn2} disabled={busy || !name.trim()} onClick={() => void onSaveDraft()}>
+              {L.saveDraft}
+            </button>
+          )}
           <button
             type="button"
-            onClick={() => setShowAdvanced((v) => !v)}
-            className="mb-2 text-[11px] font-medium text-[var(--color-muted)] hover:text-[var(--color-ink)]"
+            className={btn1}
+            disabled={busy || !!blocked[step] || (step === 2 && !reachable(2))}
+            title={blocked[step] ?? undefined}
+            onClick={() => void onPrimary()}
           >
-            {showAdvanced ? "▾" : "▸"} Advanced configuration
+            {busy && step === 2 ? L.checking : primaryLabel}
           </button>
-          {showAdvanced && (
-            <div className="rounded-lg bg-[var(--color-surface-2)] p-2.5">
-              <label className={labelCls} htmlFor="campaign-schedule">
-                Send at
-              </label>
-              <input
-                id="campaign-schedule"
-                type="datetime-local"
-                value={scheduleAt}
-                onChange={(e) => {
-                  setScheduleAt(e.target.value);
-                  setSavedStatus(null);
-                  setPreview(null);
-                  setSendArmed(false);
-                }}
-                className={inputCls}
-              />
-              <p className="mt-1.5 text-[11px] leading-relaxed text-[var(--color-faint)]">
-                {scheduleEntered
-                  ? "A time in the future holds this as Scheduled. Nothing on this Worker dispatches it on a timer — once it is due it appears at the top of this page for someone to send. A time that has already passed simply saves a draft."
-                  : "Leave this empty to send immediately, once you have reviewed it."}
+        </div>
+      </header>
+
+      <div className="flex min-h-0 flex-1">
+        {/* ── Left: the step ── */}
+        <div className="scroll-thin min-w-0 flex-1 overflow-y-auto px-4 py-5 md:px-6">
+          <div className="mx-auto flex max-w-[948px] flex-col gap-4">
+            {(error || notice) && (
+              <p
+                className={`rounded-[10px] px-3 py-2 text-[12.5px] ${
+                  error
+                    ? "bg-[var(--color-danger-soft)] text-[var(--color-danger)]"
+                    : "bg-[var(--color-success-soft)] text-[var(--color-success)]"
+                }`}
+              >
+                {error ?? notice}
               </p>
-            </div>
-          )}
-        </div>
-      )}
+            )}
 
-      {/* ── 2. Sender ── */}
-      {step === 1 && (
-        <div>
-          <label className={labelCls}>Which WhatsApp number does this go out from?</label>
-          {channels.length === 0 && (
-            <p className="text-[12px] text-[var(--color-danger)]">
-              No WhatsApp channel is configured for this company, so nothing can be sent.
-            </p>
-          )}
-          <div className="grid gap-2">
-            {channels.map((ch) => (
-              <button
-                key={ch.id}
-                type="button"
-                onClick={() => setChannelId(ch.id)}
-                aria-pressed={channelId === ch.id}
-                className={`rounded-lg border p-3 text-left transition-colors ${
-                  channelId === ch.id
-                    ? "border-[var(--color-accent)] bg-[var(--color-accent-soft)]"
-                    : "border-[var(--color-border)] bg-[var(--color-surface-2)] hover:border-[var(--color-border-strong)]"
-                }`}
-              >
-                <div className="text-[13px] font-medium text-[var(--color-ink)]">
-                  {ch.displayName}
-                </div>
-                <div className="font-mono text-[11px] text-[var(--color-muted)]">{ch.phone}</div>
-                {ch.isDefault && (
-                  <div className="mt-0.5 text-[10px] text-[var(--color-faint)]">Default number</div>
-                )}
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* ── 3. Contacts ── */}
-      {step === 2 && (
-        <div>
-          <label className={labelCls}>Who receives it</label>
-          <div className="mb-2 flex gap-1 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] p-0.5">
-            {(["all", "tag", "attribute"] as const).map((k) => (
-              <button
-                key={k}
-                type="button"
-                onClick={() => setAudience({ kind: k })}
-                aria-pressed={spec.audience.kind === k}
-                className={`flex-1 rounded-md px-2 py-1 text-[12px] font-medium transition-colors ${
-                  spec.audience.kind === k
-                    ? "bg-[var(--color-surface)] text-[var(--color-accent)] shadow-card"
-                    : "text-[var(--color-muted)] hover:text-[var(--color-ink)]"
-                }`}
-              >
-                {k === "all" ? "All" : k === "tag" ? "By tag" : "By attribute"}
-              </button>
-            ))}
-          </div>
-
-          {spec.audience.kind === "tag" && (
-            // With no tags configured this select has nothing to choose between,
-            // so it says so rather than sitting there looking like a live picker.
-            <select
-              aria-label="Tag"
-              value={spec.audience.tag ?? ""}
-              onChange={(e) => setAudience({ tag: e.target.value })}
-              disabled={tags.length === 0}
-              title={
-                tags.length === 0
-                  ? "No tags exist yet — create them under Settings, then tag some contacts."
-                  : undefined
-              }
-              className={`mb-3 ${inputCls} disabled:cursor-not-allowed disabled:opacity-60`}
-            >
-              <option value="">{tags.length === 0 ? "No tags yet" : "Choose a tag…"}</option>
-              {tags.map((t) => (
-                <option key={t.name} value={t.name}>
-                  {t.name} ({t.count} reachable)
-                </option>
-              ))}
-            </select>
-          )}
-
-          {spec.audience.kind === "attribute" && (
-            <div className="mb-3 grid grid-cols-2 gap-2">
-              <select
-                aria-label="Attribute"
-                value={spec.audience.attrKey ?? ""}
-                onChange={(e) => setAudience({ attrKey: e.target.value })}
-                disabled={attributeFields.length === 0}
-                className={`${inputCls} disabled:cursor-not-allowed disabled:opacity-60`}
-              >
-                <option value="">
-                  {attributeFields.length === 0 ? "No contact fields yet" : "Choose an attribute…"}
-                </option>
-                {attributeFields.map((f) => (
-                  <option key={f.key} value={f.key}>
-                    {f.name} ({f.key})
-                  </option>
-                ))}
-              </select>
-              <input
-                aria-label="Attribute value"
-                value={spec.audience.attrValue ?? ""}
-                onChange={(e) => setAudience({ attrValue: e.target.value })}
-                placeholder="equals… (blank = any value)"
-                className={inputCls}
-              />
-            </div>
-          )}
-
-          <div className="mb-2 rounded-lg bg-[var(--color-surface-2)] px-3 py-2 text-[12px]">
-            {!counts && <span className="text-[var(--color-faint)]">Counting…</span>}
-            {counts && (
+            {step === 0 && (
               <>
-                <div className="text-[var(--color-ink)]">
-                  <span className="font-mono text-[15px] font-semibold">{counts.recipients}</span>{" "}
-                  will receive this
-                </div>
-                <div className="mt-0.5 text-[11px] leading-relaxed text-[var(--color-muted)]">
-                  {counts.matched} matched
-                  {counts.blocked > 0 && ` · ${counts.blocked} blocked`}
-                  {counts.optedOut > 0 && ` · ${counts.optedOut} switched marketing off`}
-                  {counts.blocked + counts.optedOut > 0 && " — those are not sent to."}
-                </div>
+                <h1 className="text-[18px] font-semibold text-[var(--color-ink)]">{L.pickAudience}</h1>
+                <section className={`${card} grid gap-4 p-4 md:grid-cols-2`}>
+                  <div>
+                    <label className={label} htmlFor="campaign-name">
+                      {L.name}
+                    </label>
+                    <input
+                      id="campaign-name"
+                      value={name}
+                      maxLength={NAME_MAX}
+                      onChange={(e) => setName(e.target.value)}
+                      placeholder={L.namePh}
+                      className={input}
+                    />
+                  </div>
+                  <div>
+                    <label className={label} htmlFor="campaign-channel">
+                      {L.sender}
+                    </label>
+                    <select
+                      id="campaign-channel"
+                      value={channelId}
+                      onChange={(e) => setChannelId(e.target.value)}
+                      disabled={channels.length === 0}
+                      className={input}
+                    >
+                      {channels.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.displayName} · {formatPhone(c.phone)}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </section>
+
+                <section className={`${card} p-4`}>
+                  <span className={label}>{L.who}</span>
+                  <div className="mb-3 inline-flex gap-1 rounded-[10px] border border-[var(--color-border)] bg-[var(--color-surface-2)] p-1">
+                    {(["all", "tag", "attribute"] as const).map((k) => (
+                      <button
+                        key={k}
+                        type="button"
+                        onClick={() => setAudience({ kind: k })}
+                        aria-pressed={spec.audience.kind === k}
+                        className={`h-[28px] rounded-[7px] px-3 text-[12.5px] font-semibold ${
+                          spec.audience.kind === k
+                            ? "bg-[var(--color-surface)] text-[var(--color-ink)] shadow-[0_1px_2px_rgba(17,23,34,0.08)]"
+                            : "text-[var(--color-muted)] hover:text-[var(--color-ink)]"
+                        }`}
+                      >
+                        {k === "all" ? L.byAll : k === "tag" ? L.byTag : L.byAttr}
+                      </button>
+                    ))}
+                  </div>
+                  {spec.audience.kind === "tag" && (
+                    <div className="flex flex-wrap gap-2">
+                      {tags.length === 0 && <span className="text-[12.5px] text-[var(--color-faint)]">{L.noTags}</span>}
+                      {tags.map((tg) => {
+                        const on = spec.audience.tag === tg.name;
+                        return (
+                          <button
+                            key={tg.name}
+                            type="button"
+                            onClick={() => setAudience({ tag: tg.name })}
+                            className={`flex h-[30px] items-center gap-1.5 rounded-full border px-3 text-[12.5px] ${
+                              on
+                                ? "border-[var(--color-accent)] bg-[var(--color-accent-soft)] text-[var(--color-accent-ink)]"
+                                : "border-[var(--color-border)] text-[var(--color-ink)] hover:border-[var(--color-border-strong)]"
+                            }`}
+                          >
+                            <span className="h-2 w-2 rounded-full" style={{ background: tg.color }} />
+                            {tg.name}
+                            <span className="text-[11px] text-[var(--color-faint)]">{tg.count}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                  {spec.audience.kind === "attribute" && (
+                    <div className="grid gap-2 md:grid-cols-2">
+                      <select
+                        aria-label={L.byAttr}
+                        value={spec.audience.attrKey ?? ""}
+                        onChange={(e) => setAudience({ attrKey: e.target.value })}
+                        disabled={attributeFields.length === 0}
+                        className={input}
+                      >
+                        <option value="">{L.chooseAttr}</option>
+                        {attributeFields.map((f) => (
+                          <option key={f.key} value={f.key}>
+                            {f.name} ({f.key})
+                          </option>
+                        ))}
+                      </select>
+                      <input
+                        aria-label="Value"
+                        value={spec.audience.attrValue ?? ""}
+                        onChange={(e) => setAudience({ attrValue: e.target.value })}
+                        placeholder={L.attrValue}
+                        className={input}
+                      />
+                    </div>
+                  )}
+                </section>
+
+                <Breakdown counts={counts} spec={spec.audience} L={L} />
+              </>
+            )}
+
+            {step === 1 && (
+              <>
+                <h1 className="text-[18px] font-semibold text-[var(--color-ink)]">{L.pickMessage}</h1>
+                <section className={`${card} p-4`}>
+                  <div className="mb-2 flex items-center justify-between gap-2">
+                    <span className={`${label} mb-0`}>{L.template}</span>
+                    <div className="flex items-center gap-3 text-[12px] font-semibold">
+                      <button
+                        type="button"
+                        onClick={() => void refreshTemplates()}
+                        disabled={refreshing}
+                        className="text-[var(--color-muted)] hover:text-[var(--color-ink)] disabled:opacity-40"
+                      >
+                        {refreshing ? L.checking : L.refresh}
+                      </button>
+                      <Link href="/templates" className="text-[var(--color-accent)] hover:underline">
+                        {L.createTpl}
+                      </Link>
+                    </div>
+                  </div>
+                  {!templatesConfigured && (
+                    <p className="mb-2 rounded-[8px] bg-[var(--color-danger-soft)] px-3 py-2 text-[12px] text-[var(--color-danger)]">
+                      {L.waOff}
+                    </p>
+                  )}
+                  <input
+                    value={templateQuery}
+                    onChange={(e) => setTemplateQuery(e.target.value)}
+                    placeholder={L.searchTpl}
+                    className={`${input} mb-2`}
+                  />
+                  <div className="scroll-thin max-h-[240px] overflow-y-auto rounded-[10px] border border-[var(--color-border)]">
+                    {templates.length === 0 && templatesConfigured && (
+                      <p className="px-3 py-3 text-[12px] text-[var(--color-faint)]">{L.noTpl}</p>
+                    )}
+                    {templates
+                      .filter((x) => x.name.toLowerCase().includes(templateQuery.trim().toLowerCase()))
+                      .map((x) => {
+                        const on = spec.templateName === x.name && spec.templateLang === x.language;
+                        return (
+                          <button
+                            key={`${x.name}-${x.language}`}
+                            type="button"
+                            onClick={() =>
+                              patchSpec({
+                                templateName: x.name,
+                                templateLang: x.language,
+                                templateBody: x.body,
+                                bindings: x.bindings,
+                              })
+                            }
+                            className={`flex w-full items-start gap-3 border-b border-[var(--color-border-subtle)] px-3 py-2.5 text-left last:border-0 ${
+                              on ? "bg-[var(--color-accent-soft)]" : "hover:bg-[var(--color-surface-2)]"
+                            }`}
+                          >
+                            <span
+                              className={`mt-0.5 grid h-4 w-4 shrink-0 place-items-center rounded-full border ${
+                                on ? "border-[var(--color-accent)]" : "border-[var(--color-border-strong)]"
+                              }`}
+                            >
+                              {on && <span className="h-2 w-2 rounded-full bg-[var(--color-accent)]" />}
+                            </span>
+                            <span className="min-w-0">
+                              <span className="block text-[13px] font-semibold text-[var(--color-ink)]">
+                                {x.name} <span className="font-normal text-[var(--color-faint)]">({x.language})</span>
+                              </span>
+                              <span className="line-clamp-1 text-[12px] text-[var(--color-muted)]">{x.body}</span>
+                            </span>
+                          </button>
+                        );
+                      })}
+                  </div>
+                </section>
+
+                {chosen && (
+                  <section className={`${card} p-4`}>
+                    <VariableRows
+                      body={chosen.body}
+                      bindings={spec.bindings}
+                      fields={fields}
+                      sample={sample}
+                      onBindingsChange={(next: VarBinding[]) => patchSpec({ bindings: next })}
+                    />
+                  </section>
+                )}
+
+                <section className={`${card} p-4`}>
+                  <span className={label}>{L.test}</span>
+                  <p className="mb-2 text-[12px] text-[var(--color-faint)]">{L.testHint}</p>
+                  <div className="flex gap-2">
+                    <input
+                      value={testPhone}
+                      onChange={(e) => setTestPhone(e.target.value)}
+                      inputMode="tel"
+                      placeholder="60111108822"
+                      className={`${input} max-w-[260px]`}
+                    />
+                    <button
+                      type="button"
+                      className={btn2}
+                      disabled={!testPhone.trim() || !!sendBlocker(spec) || busy}
+                      onClick={() => void onTestSend()}
+                    >
+                      {L.testBtn}
+                    </button>
+                  </div>
+                  {testResult && <p className="mt-2 text-[12px] text-[var(--color-success)]">{testResult}</p>}
+                </section>
+              </>
+            )}
+
+            {step === 2 && (
+              <>
+                <h1 className="text-[18px] font-semibold text-[var(--color-ink)]">{L.checkTitle}</h1>
+                <Breakdown counts={counts} spec={spec.audience} L={L} />
+
+                {counts && counts.sample.length > 0 && (
+                  <section className={`${card} overflow-hidden`}>
+                    <div className="border-b border-[var(--color-border)] px-4 py-3 text-[12px] font-semibold text-[var(--color-ink)]">
+                      {L.firstMatched}
+                    </div>
+                    {counts.sample.map((r) => {
+                      const who = r.name || formatPhone(r.phone);
+                      const c = tint(r.id);
+                      return (
+                        <div
+                          key={r.id}
+                          className="flex items-center gap-3 border-b border-[var(--color-border-subtle)] px-4 py-2.5 last:border-0"
+                        >
+                          <span
+                            className="grid h-6 w-6 shrink-0 place-items-center rounded-full text-[9px] font-bold"
+                            style={{ background: `color-mix(in srgb, ${c} 14%, white)`, color: c }}
+                          >
+                            {initials(who)}
+                          </span>
+                          <span className="min-w-0 flex-1 truncate text-[13px] text-[var(--color-ink)]">{who}</span>
+                          <span className="text-[12.5px] tabular-nums text-[var(--color-muted)]">{formatPhone(r.phone)}</span>
+                          <span
+                            className={`w-[92px] text-right text-[11.5px] font-semibold ${
+                              r.blocked
+                                ? "text-[var(--color-danger)]"
+                                : r.optedOut
+                                  ? "text-[var(--color-warning)]"
+                                  : "text-[var(--color-success)]"
+                            }`}
+                          >
+                            {r.blocked ? L.blocked : r.optedOut ? L.optedOut : L.willReceiveL}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </section>
+                )}
+
+                <section className={`${card} p-4`}>
+                  <span className={label}>{L.when}</span>
+                  <div className="grid gap-2.5 md:grid-cols-2">
+                    <Choice on={mode === "now"} onClick={() => setMode("now")}>
+                      {L.sendNowOpt}
+                    </Choice>
+                    <Choice on={mode === "schedule"} onClick={() => setMode("schedule")}>
+                      {L.scheduleOpt}
+                      <span className="text-[var(--color-faint)]">·</span>
+                      <input
+                        type="datetime-local"
+                        value={scheduleAt}
+                        onFocus={() => setMode("schedule")}
+                        onChange={(e) => {
+                          setScheduleAt(e.target.value);
+                          setMode("schedule");
+                        }}
+                        className="min-w-0 flex-1 bg-transparent text-[13px] text-[var(--color-ink)] outline-none"
+                      />
+                    </Choice>
+                  </div>
+                  <label className="mt-3 flex items-center gap-2 text-[12.5px] text-[var(--color-muted)]">
+                    <input
+                      type="checkbox"
+                      checked={needApproval}
+                      onChange={(e) => setNeedApproval(e.target.checked)}
+                      className="h-4 w-4 accent-[var(--color-accent)]"
+                    />
+                    {L.needApproval}
+                  </label>
+                  <p className="mt-3 text-[11.5px] text-[var(--color-faint)]">{live ? L.live : L.notLive}</p>
+                </section>
               </>
             )}
           </div>
-
-          {counts && counts.sample.length > 0 && (
-            <div className="mb-2 overflow-x-auto rounded-lg border border-[var(--color-border)]">
-              <table className="w-full min-w-[380px] text-left text-[11.5px]">
-                <thead>
-                  <tr className="border-b border-[var(--color-border)] bg-[var(--color-surface-2)] text-[10px] uppercase tracking-wide text-[var(--color-faint)]">
-                    <th className="px-2 py-1.5 font-medium">Phone</th>
-                    <th className="px-2 py-1.5 font-medium">Name</th>
-                    <th className="px-2 py-1.5 font-medium">Receives</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {counts.sample.map((r) => (
-                    <tr key={r.id} className="border-b border-[var(--color-border)] last:border-0">
-                      <td className="px-2 py-1.5 font-mono text-[var(--color-muted)]">{r.phone}</td>
-                      <td className="px-2 py-1.5 text-[var(--color-ink)]">{r.name ?? "—"}</td>
-                      <td className="px-2 py-1.5">
-                        {r.blocked ? (
-                          <span className="text-[var(--color-danger)]">No — blocked</span>
-                        ) : r.optedOut ? (
-                          <span style={{ color: "var(--color-warning)" }}>No — opted out</span>
-                        ) : (
-                          <span className="text-[var(--color-success)]">Yes</span>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-
-          <p className="text-[11px] leading-relaxed text-[var(--color-faint)]">
-            Showing the first {counts?.sample.length ?? 0} of {counts?.matched ?? 0} matched
-            contacts. Uploading a recipient list from CSV is not built here — add the people on the
-            Contacts page, tag them, then pick that tag above.
-          </p>
         </div>
-      )}
 
-      {/* ── 4. Template ── */}
-      {step === 3 && (
-        <div>
-          <div className="mb-1 flex items-center justify-between">
-            <label className={labelCls}>Approved template</label>
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => void refreshTemplates()}
-                disabled={refreshing}
-                className="text-[11px] font-medium text-[var(--color-muted)] hover:text-[var(--color-ink)] disabled:opacity-40"
-              >
-                {refreshing ? "Refreshing…" : "↻ Refresh"}
-              </button>
-              <Link
-                href="/templates"
-                className="text-[11px] font-medium text-[var(--color-accent)] hover:underline"
-              >
-                Create template ↗
-              </Link>
-            </div>
-          </div>
-
-          {!templatesConfigured && (
-            <p className="mb-2 rounded-lg bg-[var(--color-danger-soft)] px-2.5 py-2 text-[11.5px] leading-relaxed text-[var(--color-danger)]">
-              WhatsApp is not connected (WHATSAPP_WABA_ID / WHATSAPP_TOKEN are unset), so the
-              approved template list cannot be read and no broadcast can be sent.
-            </p>
-          )}
-
-          <input
-            value={templateQuery}
-            onChange={(e) => setTemplateQuery(e.target.value)}
-            placeholder="Search templates…"
-            aria-label="Search templates"
-            className={`mb-2 ${inputCls}`}
+        {/* ── Right: the phone ── */}
+        <aside className="hidden w-[392px] shrink-0 flex-col px-5 py-5 xl:flex">
+          <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.1em] text-[var(--color-faint)]">{L.preview}</div>
+          <PhonePreview
+            className="min-h-0 flex-1"
+            bizName={channel?.displayName ?? "Houzs Century"}
+            subtitle={L.businessAccount}
+            text={filled}
+            time="10:00"
+            empty={L.previewEmpty}
           />
-          <div className="mb-3 max-h-[168px] overflow-y-auto rounded-lg border border-[var(--color-border)]">
-            {templates.length === 0 && templatesConfigured && (
-              <p className="px-2.5 py-3 text-[11.5px] leading-relaxed text-[var(--color-faint)]">
-                No approved templates on this account yet. Submit one on the Templates page — Meta
-                review takes about 24 hours.
+          {sampleName && chosen && (
+            <p className="mt-2 text-[11.5px] text-[var(--color-faint)]">{fmt(L.previewAs, { name: sampleName })}</p>
+          )}
+        </aside>
+      </div>
+
+      <ActionDialog open={!!preview} title={fmt(L.sendTitle, { name })} onClose={() => setPreview(null)}>
+        {preview && (
+          <div className="flex flex-col gap-2.5">
+            <p className="text-[13px] text-[var(--color-ink)]">
+              {fmt(L.willGet, {
+                n: preview.recipients,
+                from: preview.channelLabel,
+                tpl: `${preview.templateName} (${preview.templateLang})`,
+              })}
+            </p>
+            {preview.sampleMessage && (
+              <p className="whitespace-pre-wrap break-words rounded-[10px] bg-[var(--color-out)] p-3 text-[12.5px] leading-relaxed text-[var(--color-ink)]">
+                {preview.sampleMessage}
               </p>
             )}
-            {templates
-              .filter((t) => t.name.toLowerCase().includes(templateQuery.trim().toLowerCase()))
-              .map((t) => (
-                <button
-                  key={`${t.name}-${t.language}`}
-                  type="button"
-                  onClick={() => chooseTemplate(t)}
-                  aria-pressed={spec.templateName === t.name}
-                  className={`flex w-full flex-col gap-0.5 border-b border-[var(--color-border)] px-2.5 py-2 text-left last:border-0 ${
-                    spec.templateName === t.name
-                      ? "bg-[var(--color-accent-soft)]"
-                      : "hover:bg-[var(--color-surface-2)]"
-                  }`}
-                >
-                  <span className="font-code text-[12px] text-[var(--color-ink)]">
-                    {t.name} ({t.language})
-                  </span>
-                  <span className="line-clamp-1 text-[11.5px] text-[var(--color-muted)]">
-                    {t.body}
-                  </span>
-                </button>
-              ))}
-          </div>
-
-          {chosen && (
-            <div className="flex flex-col gap-3">
-              {/* Same placeholder editor the Templates page uses, so the two
-                  pages cannot drift apart — the owner's instruction was that
-                  Campaigns must match Templates exactly. */}
-              <VariableRows
-                body={chosen.body}
-                bindings={spec.bindings}
-                fields={fields}
-                sample={sample}
-                onBindingsChange={(next: VarBinding[]) => patchSpec({ bindings: next })}
-              />
-              <MessagePreview
-                body={chosen.body}
-                buttons={[]}
-                bindings={spec.bindings}
-                sample={sample}
-              />
-              <p className="text-[11px] leading-relaxed text-[var(--color-faint)]">
-                The mapping starts from whatever this template was given on the Templates page;
-                changing it here applies to this campaign only. The preview shows the body — a
-                header, footer or buttons on the approved template are sent by Meta but are not in
-                the list this picker reads.
-              </p>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* ── 5. Test send ── */}
-      {step === 4 && (
-        <div>
-          <label className={labelCls} htmlFor="test-phone">
-            Send one copy to a number you can check
-          </label>
-          <input
-            id="test-phone"
-            value={testPhone}
-            onChange={(e) => {
-              setTestPhone(e.target.value);
-              setTestArmed(false);
-            }}
-            inputMode="tel"
-            placeholder="60111108822"
-            className={inputCls}
-          />
-          <p className="mb-3 mt-1.5 text-[11px] leading-relaxed text-[var(--color-faint)]">
-            The number must already be a contact in this company — a test send is not a way to
-            message someone who is not in the address book, and it will not create one. This sends
-            one real WhatsApp message immediately.
-          </p>
-
-          {!testArmed ? (
-            <button
-              type="button"
-              disabled={!testPhone.trim() || !!sendBlocker(spec) || busy}
-              onClick={() => setTestArmed(true)}
-              className={secondaryBtn}
-            >
-              Send test message
-            </button>
-          ) : (
-            <div className="flex flex-wrap items-center gap-2">
-              <button
-                type="button"
-                disabled={busy}
-                onClick={() => void onTestSend()}
-                className={primaryBtn}
-              >
-                {busy ? "Sending…" : `Yes — send one real message to ${testPhone}`}
+            {error && <p className="text-[12px] text-[var(--color-danger)]">{error}</p>}
+            <div className="flex justify-end gap-2 pt-1">
+              <button type="button" className={btn2} onClick={() => setPreview(null)}>
+                {L.back}
               </button>
-              <button type="button" onClick={() => setTestArmed(false)} className={secondaryBtn}>
-                Cancel
-              </button>
-            </div>
-          )}
-
-          {testResult && (
-            <p className="mt-3 rounded-lg bg-[var(--color-success-soft)] px-2.5 py-2 text-[12px] text-[var(--color-success)]">
-              {testResult}
-            </p>
-          )}
-        </div>
-      )}
-
-      {/* ── 6. Review ── */}
-      {step === 5 && (
-        <div>
-          {!preview && (
-            <button
-              type="button"
-              disabled={busy || !!sendBlocker(spec)}
-              onClick={() => void onReview()}
-              className={primaryBtn}
-            >
-              {busy ? "Checking…" : "Check this campaign"}
-            </button>
-          )}
-
-          {preview && (
-            <div className="mb-3 space-y-2 rounded-lg bg-[var(--color-surface-2)] p-3">
-              <div className="text-[13px] text-[var(--color-ink)]">
-                <span className="font-mono text-[17px] font-semibold">{preview.recipients}</span>{" "}
-                {preview.recipients === 1 ? "person" : "people"} will receive this
-              </div>
-              <dl className="space-y-1 text-[11.5px] leading-relaxed text-[var(--color-muted)]">
-                <div>
-                  <dt className="inline text-[var(--color-faint)]">From: </dt>
-                  <dd className="inline">{preview.channelLabel}</dd>
-                </div>
-                <div>
-                  <dt className="inline text-[var(--color-faint)]">Template: </dt>
-                  <dd className="inline font-code">
-                    {preview.templateName} ({preview.templateLang})
-                  </dd>
-                </div>
-                <div>
-                  <dt className="inline text-[var(--color-faint)]">Matched: </dt>
-                  <dd className="inline">
-                    {preview.matched}
-                    {preview.blocked > 0 && ` · ${preview.blocked} blocked`}
-                    {preview.optedOut > 0 && ` · ${preview.optedOut} opted out`}
-                  </dd>
-                </div>
-                <div>
-                  <dt className="inline text-[var(--color-faint)]">When: </dt>
-                  <dd className="inline">
-                    {heldForLater ? `Scheduled for ${scheduleAt.replace("T", " ")}` : "Immediately"}
-                  </dd>
-                </div>
-              </dl>
-              {preview.blankSlots.length > 0 && (
-                <p className="text-[11.5px]" style={{ color: "var(--color-warning)" }}>
-                  {preview.sampleName} has nothing in{" "}
-                  {preview.blankSlots.map((n) => `{{${n}}}`).join(", ")} and would read a dash there.
-                  Contacts that do have those fields are fine.
-                </p>
-              )}
-              {preview.sampleMessage && (
-                <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-out)] p-2.5">
-                  <div className="mb-1 text-[10px] uppercase tracking-wide text-[var(--color-faint)]">
-                    What {preview.sampleName} receives
-                  </div>
-                  <p className="whitespace-pre-wrap break-words text-[12.5px] leading-relaxed text-[var(--color-ink)]">
-                    {preview.sampleMessage}
-                  </p>
-                </div>
-              )}
-            </div>
-          )}
-
-          {preview && !heldForLater && (
-            <>
-              {!sendArmed ? (
-                <button
-                  type="button"
-                  disabled={busy || !campaignId}
-                  onClick={() => setSendArmed(true)}
-                  className={primaryBtn}
-                >
-                  Send broadcast
+              {!armed ? (
+                <button type="button" className={btn1} disabled={preview.recipients === 0} onClick={() => setArmed(true)}>
+                  {L.sendCampaign}
                 </button>
               ) : (
-                <div className="flex flex-wrap items-center gap-2">
-                  <button
-                    type="button"
-                    disabled={busy}
-                    onClick={() => void onSendForReal()}
-                    className="rounded-lg bg-[var(--color-danger)] px-3 py-2 text-[13px] font-semibold text-white disabled:opacity-40"
-                  >
-                    {busy
-                      ? "Sending…"
-                      : `Yes — message ${preview.recipients} ${
-                          preview.recipients === 1 ? "person" : "people"
-                        } now`}
-                  </button>
-                  <button type="button" onClick={() => setSendArmed(false)} className={secondaryBtn}>
-                    Cancel
-                  </button>
-                </div>
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => void onSendForReal()}
+                  className="flex h-[34px] items-center rounded-[8px] bg-[var(--color-danger)] px-3.5 text-[13px] font-semibold text-white disabled:opacity-40"
+                >
+                  {busy ? L.sendingNow : fmt(L.confirmSend, { n: preview.recipients })}
+                </button>
               )}
-            </>
-          )}
-
-          {preview && heldForLater && (
-            <p className="text-[11.5px] leading-relaxed text-[var(--color-muted)]">
-              This campaign is scheduled, so saving keeps it held. It appears at the top of this
-              page once it is due, and someone sends it from there.
-            </p>
-          )}
-        </div>
-      )}
-
-      {/* ── Footer: what will really happen, and the controls ── */}
-      <div className="mt-4 border-t border-[var(--color-border)] pt-3">
-        <p className="mb-2 text-[11px] leading-relaxed text-[var(--color-faint)]">
-          {live
-            ? "This system is LIVE: sending here puts real WhatsApp messages on real customers' phones. Every broadcast must be an approved template — Meta refuses free-form text outside the 24-hour reply window."
-            : "WhatsApp is not in LIVE mode on this Worker, so messages are recorded here but not delivered. A broadcast still requires an approved template."}
-        </p>
-
-        {blockedHere && step < 5 && (
-          <p className="mb-2 text-[11.5px]" style={{ color: "var(--color-warning)" }}>
-            {blockedHere}
-          </p>
+            </div>
+          </div>
         )}
-        {error && (
-          <p className="mb-2 rounded-lg bg-[var(--color-danger-soft)] px-2.5 py-2 text-[11.5px] leading-relaxed text-[var(--color-danger)]">
-            {error}
-          </p>
-        )}
-        {notice && (
-          <p className="mb-2 rounded-lg bg-[var(--color-success-soft)] px-2.5 py-2 text-[11.5px] text-[var(--color-success)]">
-            {notice}
-          </p>
-        )}
-
-        <div className="flex flex-wrap items-center gap-2">
-          <button
-            type="button"
-            disabled={step === 0}
-            onClick={() => setStep((s) => Math.max(0, s - 1))}
-            className={secondaryBtn}
-          >
-            Back
-          </button>
-          <button
-            type="button"
-            disabled={step === STEPS.length - 1 || !!blockedHere}
-            onClick={() => setStep((s) => Math.min(STEPS.length - 1, s + 1))}
-            className={primaryBtn}
-          >
-            Next
-          </button>
-          <button
-            type="button"
-            disabled={busy || !name.trim()}
-            onClick={() => void onSaveDraft()}
-            className={secondaryBtn}
-          >
-            {busy ? "Saving…" : scheduleEntered ? "Save + schedule" : "Save draft"}
-          </button>
-        </div>
-      </div>
+      </ActionDialog>
     </div>
+  );
+}
+
+function Choice({ on, onClick, children }: { on: boolean; onClick: () => void; children: React.ReactNode }) {
+  return (
+    <div
+      role="radio"
+      aria-checked={on}
+      tabIndex={0}
+      onClick={onClick}
+      onKeyDown={(e) => (e.key === " " || e.key === "Enter") && onClick()}
+      className={`flex h-[40px] cursor-pointer items-center gap-2.5 rounded-[10px] border px-3 text-[13px] text-[var(--color-ink)] ${
+        on ? "border-[var(--color-accent)] bg-[var(--color-accent-soft)]" : "border-[var(--color-border)] hover:border-[var(--color-border-strong)]"
+      }`}
+    >
+      <span
+        className={`grid h-4 w-4 shrink-0 place-items-center rounded-full border ${
+          on ? "border-[var(--color-accent)]" : "border-[var(--color-border-strong)]"
+        }`}
+      >
+        {on && <span className="h-2 w-2 rounded-full bg-[var(--color-accent)]" />}
+      </span>
+      {children}
+    </div>
+  );
+}
+
+/** matched = will receive + opted out + blocked — the same split resolveAudience makes. */
+function Breakdown({
+  counts,
+  spec,
+  L,
+}: {
+  counts: AudienceCount | null;
+  spec: AudienceSpec;
+  L: ReturnType<typeof useShell>["t"]["camp"];
+}) {
+  if (!counts) {
+    return <section className={`${card} p-4 text-[13px] text-[var(--color-faint)]`}>{L.counting}</section>;
+  }
+  const total = Math.max(counts.matched, 1);
+  const pct = (v: number) => `${(v / total) * 100}%`;
+  const rule =
+    spec.kind === "tag" && spec.tag
+      ? fmt(L.ruleTag, { tag: spec.tag })
+      : spec.kind === "attribute" && spec.attrKey
+        ? fmt(L.ruleAttr, { key: spec.attrKey, val: spec.attrValue ? `= ${spec.attrValue}` : "" })
+        : L.ruleAll;
+  const tiles: [string, number, string, string][] = [
+    [L.matched, counts.matched, "var(--color-surface-2)", "#737c8c"],
+    [L.willReceiveL, counts.recipients, "var(--color-pastel-blue)", "var(--color-pastel-blue-ink)"],
+    [L.optedOut, counts.optedOut, "var(--color-pastel-orange)", "var(--color-pastel-orange-ink)"],
+    [L.blocked, counts.blocked, "var(--color-danger-soft)", "var(--color-danger)"],
+  ];
+  return (
+    <section className={`${card} p-4`}>
+      <div className="flex items-baseline gap-2.5">
+        <span className="text-[34px] font-medium leading-none tabular-nums text-[var(--color-ink)]">
+          {counts.recipients.toLocaleString("en-US")}
+        </span>
+        <span className="text-[13px] text-[var(--color-muted)]">{L.willReceive}</span>
+      </div>
+      <div className="mt-4 flex h-[10px] overflow-hidden rounded-full bg-[var(--color-surface-dim)]">
+        <span className="bg-[var(--color-pastel-blue-ink)]" style={{ width: pct(counts.recipients) }} />
+        <span className="bg-[var(--color-pastel-orange-ink)]" style={{ width: pct(counts.optedOut) }} />
+        <span className="bg-[var(--color-danger)]" style={{ width: pct(counts.blocked) }} />
+      </div>
+      <div className="mt-3 grid grid-cols-2 gap-2.5 md:grid-cols-4">
+        {tiles.map(([k, v, bg, dot]) => (
+          <div key={k} className="rounded-[10px] px-3 py-2.5" style={{ background: bg }}>
+            <div className="flex items-center gap-1.5 text-[11.5px] text-[var(--color-muted)]">
+              <span className="h-2 w-2 rounded-[2px]" style={{ background: dot }} />
+              {k}
+            </div>
+            <div className="mt-1 text-[20px] font-medium tabular-nums text-[var(--color-ink)]">{v.toLocaleString("en-US")}</div>
+          </div>
+        ))}
+      </div>
+      <p className="mt-3 text-[11.5px] text-[var(--color-faint)]">{fmt(L.matchedNote, { n: counts.matched, rule })}</p>
+    </section>
   );
 }

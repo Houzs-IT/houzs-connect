@@ -24,7 +24,7 @@ export async function addQuickReply(formData: FormData) {
     .insert(quickReply)
     .values({ companyId: c.companyId, shortcut, body })
     .onConflictDoUpdate({ target: [quickReply.companyId, quickReply.shortcut], set: { body } });
-  revalidatePath("/settings");
+  revalidatePath("/settings", "layout");
 }
 
 export async function deleteQuickReply(formData: FormData) {
@@ -33,7 +33,7 @@ export async function deleteQuickReply(formData: FormData) {
   const id = String(formData.get("id") ?? "");
   if (!id) return;
   await c.db.delete(quickReply).where(and(eq(quickReply.id, id), eq(quickReply.companyId, c.companyId)));
-  revalidatePath("/settings");
+  revalidatePath("/settings", "layout");
 }
 
 // ── Contact fields (the CRM attribute schema) ──────────────
@@ -54,7 +54,7 @@ export async function addContactField(formData: FormData) {
     .insert(contactField)
     .values({ companyId: c.companyId, key, name, type })
     .onConflictDoUpdate({ target: [contactField.companyId, contactField.key], set: { name, type } });
-  revalidatePath("/settings");
+  revalidatePath("/settings", "layout");
 }
 
 export async function deleteContactField(formData: FormData) {
@@ -63,7 +63,7 @@ export async function deleteContactField(formData: FormData) {
   const id = String(formData.get("id") ?? "");
   if (!id) return;
   await c.db.delete(contactField).where(and(eq(contactField.id, id), eq(contactField.companyId, c.companyId)));
-  revalidatePath("/settings");
+  revalidatePath("/settings", "layout");
 }
 
 // ── Tags ────────────────────────────────────────────────────
@@ -77,7 +77,7 @@ export async function addTag(formData: FormData) {
     .insert(tag)
     .values({ companyId: c.companyId, name, color })
     .onConflictDoUpdate({ target: [tag.companyId, tag.name], set: { color } });
-  revalidatePath("/settings");
+  revalidatePath("/settings", "layout");
 }
 
 export async function deleteTag(formData: FormData) {
@@ -86,5 +86,5 @@ export async function deleteTag(formData: FormData) {
   const id = String(formData.get("id") ?? "");
   if (!id) return;
   await c.db.delete(tag).where(and(eq(tag.id, id), eq(tag.companyId, c.companyId)));
-  revalidatePath("/settings");
+  revalidatePath("/settings", "layout");
 }

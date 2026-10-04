@@ -3,6 +3,9 @@ import { and, gt, ne } from "drizzle-orm";
 import { Sidebar } from "@/components/Sidebar";
 import { MobileTabBar } from "@/components/shell/MobileTabBar";
 import { ShellProvider } from "@/components/shell/ShellProvider";
+import { PresencePing } from "@/components/shell/PresencePing";
+import { NotifyPoller } from "@/components/shell/NotifyPoller";
+import { touchPresence } from "@/lib/presence";
 import { getLang, getMenuCollapsed } from "@/lib/i18n/server";
 import { getDb } from "@/db/client";
 import { ensureContactColumns } from "@/db/ensure";
@@ -15,6 +18,7 @@ import {
   conversationVisibilityWhere,
   getVisibility,
 } from "@/lib/access";
+import { can } from "@/lib/permissions";
 
 // This is a live, data-driven console backed by per-request Cloudflare bindings
 // (Hyperdrive). Nothing here is static — force dynamic rendering for the whole
@@ -42,11 +46,13 @@ export default async function AppLayout({
   // Same window, for the channel's phone number id (ensure-channel.ts): the
   // automations, campaigns and phone-number pages all read channel rows.
   await ensureChannelColumns(db).catch(() => {});
+  // Online status (lib/presence.ts): any page render counts as being here.
+  await touchPresence(me.id);
 
   const allMembers = await db.query.member.findMany({
     columns: { id: true, managerId: true },
   });
-  const vis = getVisibility(me, allMembers);
+  const vis = getVisibility(me, allMembers, await can(me, "seeAll"));
   const unread = await db.$count(
     conversation,
     and(
@@ -66,6 +72,8 @@ export default async function AppLayout({
   // (PageChrome), so the two simply sit side by side.
   return (
     <ShellProvider lang={await getLang()} menuCollapsed={await getMenuCollapsed()}>
+      <PresencePing />
+      <NotifyPoller />
       <div data-shell className="flex h-dvh flex-col overflow-hidden">
         <div className="flex min-h-0 flex-1">
           <Sidebar unread={unread} live={live} me={{ name: me.name }} />

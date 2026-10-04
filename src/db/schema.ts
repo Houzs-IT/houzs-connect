@@ -30,6 +30,9 @@ export const connect = pgSchema("connect");
 // ─────────────────────────── Enums ───────────────────────────
 
 export const roleEnum = connect.enum("Role", [
+  // Added by migration 0013: every permission, plus final approval of access
+  // requests and control of roles, billing and channels.
+  "SUPER_ADMIN",
   "OWNER",
   "ADMIN",
   "MANAGER",
@@ -133,6 +136,9 @@ export const member = connect.table(
     concurrencyLimit: integer("concurrency_limit").notNull().default(0),
     managerId: text("manager_id"),
     departmentId: text("department_id"),
+    // NOTE: connect.member also has `last_seen_at` (migration 0010). It is left
+    // out of this definition on purpose and read/written by lib/presence.ts —
+    // see the note there.
     // ERP org sync: the ERP users.id this member mirrors, and a soft-delete flag
     // (members are never hard-deleted — they may own conversation assignments —
     // so a user removed from the ERP is marked active=false instead).
@@ -295,6 +301,8 @@ export const message = connect.table(
     isBot: boolean("is_bot").notNull().default(false),
     waMessageId: text("wa_message_id"),
     interactivePayload: jsonb("interactive_payload"),
+    // NOTE: connect.message also has `campaign_id` (migration 0011), left out
+    // of this definition on purpose — see src/lib/campaign-messages.ts.
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({ conversationIdx: index("message_conversation_idx").on(t.conversationId) })
@@ -487,6 +495,61 @@ export const campaign = connect.table(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({ companyIdx: index("campaign_company_idx").on(t.companyId) })
+);
+
+// ─────────────────────────── Internal chat ───────────────────────────
+// Staff-to-staff channels and direct messages (migration 0012, also
+// self-applied by db/ensure-internal.ts).
+
+export const internalChannel = connect.table(
+  "internal_channel",
+  {
+    id: id(),
+    companyId: text("company_id").notNull(),
+    /** "channel" (everyone in the company) or "dm" (exactly two members). */
+    kind: text("kind").notNull().default("channel"),
+    name: text("name").notNull(),
+    topic: text("topic"),
+    departmentId: text("department_id"),
+    /** For a DM: the two member ids, sorted and joined — one DM per pair. */
+    dmKey: text("dm_key"),
+    createdByMemberId: text("created_by_member_id"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({ companyIdx: index("internal_channel_company_idx").on(t.companyId) })
+);
+
+export const internalChannelMember = connect.table("internal_channel_member", {
+  channelId: text("channel_id").notNull(),
+  memberId: text("member_id").notNull(),
+  lastReadAt: timestamp("last_read_at", { withTimezone: true }),
+  joinedAt: timestamp("joined_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const internalMessage = connect.table(
+  "internal_message",
+  {
+    id: id(),
+    channelId: text("channel_id").notNull(),
+    authorMemberId: text("author_member_id"),
+    body: text("body").notNull().default(""),
+    /** Set on a thread reply: the message it answers. */
+    parentId: text("parent_id"),
+    /** A thread reply that was also posted to the channel. */
+    alsoInChannel: boolean("also_in_channel").notNull().default(false),
+    /** A customer conversation shown as a card under the message. */
+    conversationId: text("conversation_id"),
+    /** A recorded system action, e.g. { text: "ERP delivery date changed to 30/09" }. */
+    systemAction: jsonb("system_action"),
+    /** Member ids mentioned, plus "channel" for @channel. */
+    mentions: jsonb("mentions"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    editedAt: timestamp("edited_at", { withTimezone: true }),
+  },
+  (t) => ({
+    channelIdx: index("internal_message_channel_idx").on(t.channelId, t.createdAt),
+    parentIdx: index("internal_message_parent_idx").on(t.parentId),
+  })
 );
 
 // ─────────────────────── Template variable bindings ───────────────────────

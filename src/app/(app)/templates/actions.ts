@@ -7,6 +7,7 @@ import {
   deleteTemplate,
   listTemplates,
   templateConfig,
+  templateRequest,
   updateTemplate,
   type RemoteTemplate,
   type TemplateCategory,
@@ -14,6 +15,7 @@ import {
   type TemplateStatus,
 } from "@/lib/whatsapp/templates";
 import { saveTemplateBinding } from "@/lib/whatsapp/templateBindings";
+import { uploadForHandle } from "@/lib/whatsapp/profile";
 import { asBindings, type VarBinding } from "@/lib/automation/vars";
 import { STARTER_TEMPLATES } from "./starterTemplates";
 
@@ -72,6 +74,10 @@ export interface ComposerPayload {
   examples: string[];
   buttons: string[];
   bindings: VarBinding[];
+  /** Standard or call permission request; carousels go through submitCarouselTemplate. */
+  kind?: "standard" | "call_permission" | "carousel";
+  /** Carousel cards without their images (for Copy as cURL). */
+  cards?: { body: string; buttons: string[] }[];
 }
 
 /**
@@ -98,6 +104,7 @@ export async function submitTemplateWithBinding(
     footer: payload.footer?.trim() || undefined,
     examples: payload.examples,
     buttons: payload.buttons.slice(0, 3).map((text) => ({ type: "QUICK_REPLY" as const, text })),
+    kind: payload.kind === "call_permission" ? "call_permission" : "standard",
   };
 
   const bindings = asBindings(payload.bindings);
@@ -113,6 +120,40 @@ export async function submitTemplateWithBinding(
   }
 
   return await submitTemplate(draft);
+}
+
+/**
+ * The submit request as a cURL command, for the editor's "Copy as cURL". The
+ * access token is never included — the command reads it from $WHATSAPP_TOKEN.
+ */
+export async function templateCurl(payload: ComposerPayload): Promise<{ ok: boolean; curl?: string; error?: string }> {
+  if (!(await requireMember())) return { ok: false, error: "Not signed in." };
+  const req = templateRequest(templateConfig()?.wabaId ?? "<WABA_ID>", {
+    name: payload.name,
+    language: payload.language,
+    category: payload.category,
+    header: payload.header?.trim() || undefined,
+    body: payload.body,
+    footer: payload.footer?.trim() || undefined,
+    examples: payload.examples,
+    buttons: payload.buttons.slice(0, 3).map((text) => ({ type: "QUICK_REPLY" as const, text })),
+    kind: payload.kind ?? "standard",
+    // A card's image handle only exists after the upload; the command shows where it goes.
+    cards: payload.cards?.map((c) => ({ ...c, imageHandle: "<IMAGE_HANDLE>" })),
+  });
+  if (!req.ok) return { ok: false, error: req.error };
+  // Close the shell's single quote, emit an escaped quote, reopen: ' -> '\''
+  const json = JSON.stringify(req.body, null, 2).replace(/'/g, `'\\''`);
+  const bs = "\\";
+  return {
+    ok: true,
+    curl: [
+      `curl -X POST '${req.url}' ${bs}`,
+      `  -H "Authorization: Bearer $WHATSAPP_TOKEN" ${bs}`,
+      `  -H 'Content-Type: application/json' ${bs}`,
+      `  -d '${json}'`,
+    ].join("\n"),
+  };
 }
 
 /** Save (or replace) the {{n}} → field mapping for one existing template. */
@@ -250,4 +291,45 @@ export async function submitStarterSet(): Promise<StarterResult[]> {
  */
 export async function syncTemplates(): Promise<void> {
   revalidatePath("/templates");
+}
+
+/**
+ * Submit a carousel template: upload each card's image to Meta for a sample
+ * handle, then create the template. `payload` is the ComposerPayload as JSON
+ * plus `cards` ({ body, buttons }[]); the images arrive as image0, image1, …
+ */
+export async function submitCarouselTemplate(fd: FormData): Promise<SubmitResult> {
+  const me = await requireMember();
+  if (!me) return { ok: false, error: "Not signed in." };
+  const cfg = templateConfig();
+  if (!cfg) return { ok: false, error: "WhatsApp is not connected yet — WHATSAPP_WABA_ID and WHATSAPP_TOKEN are not set on the Worker." };
+  let payload: ComposerPayload;
+  try {
+    payload = JSON.parse(String(fd.get("payload") ?? "{}")) as ComposerPayload;
+  } catch {
+    return { ok: false, error: "The template could not be read." };
+  }
+  const cards = payload.cards ?? [];
+  const withImages = [];
+  for (let i = 0; i < cards.length; i++) {
+    const file = fd.get(`image${i}`);
+    if (!(file instanceof File) || file.size === 0) return { ok: false, error: `Card ${i + 1} has no image.` };
+    if (!/^image\/(jpeg|png)$/.test(file.type)) return { ok: false, error: `Card ${i + 1}: Meta takes JPEG or PNG images only.` };
+    if (file.size > 5 * 1024 * 1024) return { ok: false, error: `Card ${i + 1}: the image is over 5 MB.` };
+    const up = await uploadForHandle(cfg, await file.arrayBuffer(), file.type, file.name || `card-${i + 1}`);
+    if (!up.ok) return { ok: false, error: `Card ${i + 1}: ${up.error}` };
+    withImages.push({ imageHandle: up.data, body: cards[i].body, buttons: cards[i].buttons.filter((b) => b.trim()) });
+  }
+  const bindings = asBindings(payload.bindings);
+  const key = payload.name.trim().toLowerCase().replace(/[^a-z0-9_]+/g, "_").replace(/^_+|_+$/g, "");
+  if (bindings.length > 0 && key) await saveTemplateBinding(me.companyId, key, payload.language, bindings);
+  return await submitTemplate({
+    name: payload.name,
+    language: payload.language,
+    category: payload.category,
+    body: payload.body,
+    examples: payload.examples,
+    kind: "carousel",
+    cards: withImages,
+  });
 }

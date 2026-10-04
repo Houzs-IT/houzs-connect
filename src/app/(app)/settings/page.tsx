@@ -1,193 +1,76 @@
 import { notFound } from "next/navigation";
-import { asc, eq } from "drizzle-orm";
+import { asc, count, desc, eq } from "drizzle-orm";
 import { getDb } from "@/db/client";
-import { contactField, member, quickReply, tag } from "@/db/schema";
+import { channel, company, contactField, member, quickReply, tag } from "@/db/schema";
 import { PageChrome } from "@/components/PageChrome";
 import { getCurrentMember } from "@/lib/current-member";
-import {
-  addContactField,
-  addQuickReply,
-  addTag,
-  deleteContactField,
-  deleteQuickReply,
-  deleteTag,
-} from "./actions";
-import Link from "next/link";
+import { formatPhone } from "@/lib/format";
+import { getDict } from "@/lib/i18n/server";
+import { SetCard, SettingsHead } from "./ui";
 
-const inputCls =
-  "rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] px-3 py-2 text-[13px] text-[var(--color-ink)] outline-none focus:border-[var(--color-accent)]";
-const addBtnCls =
-  "rounded-lg bg-[var(--color-accent)] px-3 py-2 text-[13px] font-medium text-white transition-opacity hover:opacity-90";
-
-function Card({ title, subtitle, children }: { title: string; subtitle?: string; children: React.ReactNode }) {
-  return (
-    <div className="overflow-hidden rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] shadow-card">
-      <div className="border-b border-[var(--color-border)] px-4 py-3">
-        <h3 className="text-[13px] font-semibold text-[var(--color-ink)]">{title}</h3>
-        {subtitle && <p className="mt-0.5 text-[11px] text-[var(--color-faint)]">{subtitle}</p>}
-      </div>
-      {children}
-    </div>
-  );
-}
-
-function DeleteBtn({ action, id }: { action: (fd: FormData) => void; id: string }) {
-  return (
-    <form action={action}>
-      <input type="hidden" name="id" value={id} />
-      <button
-        type="submit"
-        className="rounded-md px-2 py-1 text-[11px] font-medium text-[var(--color-faint)] transition-colors hover:bg-[var(--color-danger-soft)] hover:text-[var(--color-danger)]"
-      >
-        Remove
-      </button>
-    </form>
-  );
-}
-
-export default async function SettingsPage() {
+/** General settings: this company as Connect knows it, and what it holds. */
+export default async function GeneralSettingsPage() {
   const me = await getCurrentMember();
   if (!me) notFound();
+  const t = await getDict();
+  const L = t.set;
   const db = getDb();
-
-  // Every one of these four was unfiltered, and the ERP org sync deliberately
-  // fans one ERP user out to one member row PER GRANTED COMPANY — so the org
-  // chart listed the same person once per company ("Bernard … Sales Department"
-  // directly above "Bernard … — —") and the count read 112 for a company with
-  // roughly half that many staff. Tags, fields and quick replies had the same
-  // hole, which is worse than a wrong number: the /bank quick reply carries a
-  // live account number, and an unscoped read would hand it to another tenant.
-  const [members, fields, tags, quickReplies] = await Promise.all([
-    db.query.member.findMany({
-      where: eq(member.companyId, me.companyId),
-      orderBy: asc(member.name),
-      with: { manager: true, department: true },
+  const n = (q: Promise<{ n: number }[]>) => q.then((r) => r[0]?.n ?? 0);
+  const [co, ch, members, fields, tags, replies] = await Promise.all([
+    db.query.company.findFirst({ where: eq(company.id, me.companyId) }),
+    db.query.channel.findFirst({
+      where: eq(channel.companyId, me.companyId),
+      orderBy: [desc(channel.isDefault), asc(channel.displayName)],
     }),
-    db.query.contactField.findMany({
-      where: eq(contactField.companyId, me.companyId),
-      orderBy: asc(contactField.name),
-    }),
-    db.query.tag.findMany({
-      where: eq(tag.companyId, me.companyId),
-      orderBy: asc(tag.name),
-    }),
-    db.query.quickReply.findMany({
-      where: eq(quickReply.companyId, me.companyId),
-      orderBy: asc(quickReply.shortcut),
-    }),
+    n(db.select({ n: count() }).from(member).where(eq(member.companyId, me.companyId))),
+    n(db.select({ n: count() }).from(contactField).where(eq(contactField.companyId, me.companyId))),
+    n(db.select({ n: count() }).from(tag).where(eq(tag.companyId, me.companyId))),
+    n(db.select({ n: count() }).from(quickReply).where(eq(quickReply.companyId, me.companyId))),
   ]);
 
-  const cards = [
-    { label: "Team members", value: members.length },
-    { label: "Custom fields", value: fields.length },
-    { label: "Tags", value: tags.length },
-    { label: "Quick replies", value: quickReplies.length },
+  const rows: [string, string][] = [
+    [L.companyName, co?.name ?? "—"],
+    [L.timezone, "Asia/Kuala_Lumpur"],
+    [L.defaultNumber, ch ? `${ch.displayName} · ${formatPhone(ch.phone)}` : "—"],
+  ];
+  const glance: [string, number, string][] = [
+    [L.members, members, "blue"],
+    [L.fields, fields, "cyan"],
+    [L.tags, tags, "purple"],
+    [L.quickReplies, replies, "orange"],
   ];
 
   return (
     <PageChrome section="settings" page="general">
-      <div className="space-y-6 p-6">
-        <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-          {cards.map((c) => (
-            <div key={c.label} className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-3">
-              <div className="text-[22px] font-semibold text-[var(--color-ink)]">{c.value}</div>
-              <div className="text-[11px] text-[var(--color-muted)]">{c.label}</div>
-            </div>
-          ))}
-        </div>
-
-        <div className="grid gap-6 lg:grid-cols-2">
-          {/* Quick replies */}
-          <Card title="Quick replies" subtitle="Typed after &quot;/&quot; in the composer.">
-            <div className="divide-y divide-[var(--color-border)]">
-              {quickReplies.map((q) => (
-                <div key={q.id} className="flex items-center gap-3 px-4 py-2.5">
-                  <span className="rounded bg-[var(--color-surface-2)] px-1.5 py-0.5 font-mono text-[11px] text-[var(--color-accent-ink)]">
-                    /{q.shortcut}
-                  </span>
-                  <span className="min-w-0 flex-1 truncate text-[12.5px] text-[var(--color-muted)]">{q.body}</span>
-                  <DeleteBtn action={deleteQuickReply} id={q.id} />
+      <div className="max-w-[1000px] p-4 md:p-6">
+        <SettingsHead title={L.general} sub={L.generalSub} />
+        <div className="flex flex-col gap-4">
+          <SetCard icon="▤" tone="blue" title={co?.name ?? L.general} sub={L.fromErp}>
+            <dl className="grid border-t border-[var(--color-border-subtle)] md:grid-cols-3">
+              {rows.map(([k, v]) => (
+                <div key={k} className="border-b border-[var(--color-border-subtle)] px-4 py-3 last:border-r-0 md:border-b-0 md:border-r">
+                  <dt className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--color-faint)]">{k}</dt>
+                  <dd className="mt-1 text-[13.5px] text-[var(--color-ink)]">{v}</dd>
                 </div>
               ))}
-              {quickReplies.length === 0 && (
-                <div className="px-4 py-3 text-[12px] text-[var(--color-faint)]">No quick replies yet.</div>
-              )}
-            </div>
-            <form action={addQuickReply} className="flex flex-wrap items-center gap-2 border-t border-[var(--color-border)] bg-[var(--color-surface-2)] px-4 py-3">
-              <input name="shortcut" placeholder="shortcut" required className={`${inputCls} w-28`} />
-              <input name="body" placeholder="Message body" required className={`${inputCls} min-w-0 flex-1`} />
-              <button type="submit" className={addBtnCls}>Add</button>
-            </form>
-          </Card>
-
-          {/* Tags */}
-          <Card title="Tags" subtitle="Label conversations and contacts.">
-            <div className="divide-y divide-[var(--color-border)]">
-              {tags.map((t) => (
-                <div key={t.id} className="flex items-center gap-3 px-4 py-2.5">
-                  <span className="h-3 w-3 shrink-0 rounded-full" style={{ background: t.color }} />
-                  <span className="min-w-0 flex-1 truncate text-[13px] text-[var(--color-ink)]">{t.name}</span>
-                  <DeleteBtn action={deleteTag} id={t.id} />
+            </dl>
+          </SetCard>
+          <div>
+            <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.1em] text-[var(--color-faint)]">{L.atAGlance}</div>
+            <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+              {glance.map(([k, v, tone]) => (
+                <div
+                  key={k}
+                  className="rounded-[12px] border border-[var(--color-border)] px-4 py-3"
+                  style={{ background: `linear-gradient(135deg,#ffffff 45%, var(--color-pastel-${tone}))` }}
+                >
+                  <div className="text-[12px] text-[var(--color-muted)]">{k}</div>
+                  <div className="mt-1 text-[22px] font-medium tabular-nums text-[var(--color-ink)]">{v}</div>
                 </div>
               ))}
-              {tags.length === 0 && (
-                <div className="px-4 py-3 text-[12px] text-[var(--color-faint)]">No tags yet.</div>
-              )}
             </div>
-            <form action={addTag} className="flex flex-wrap items-center gap-2 border-t border-[var(--color-border)] bg-[var(--color-surface-2)] px-4 py-3">
-              <input name="name" placeholder="Tag name" required className={`${inputCls} min-w-0 flex-1`} />
-              <input name="color" type="color" defaultValue="#16695f" className="h-9 w-10 cursor-pointer rounded border border-[var(--color-border)] bg-[var(--color-surface)]" />
-              <button type="submit" className={addBtnCls}>Add</button>
-            </form>
-          </Card>
+          </div>
         </div>
-
-        {/* Contact fields */}
-        <Card title="Contact fields" subtitle="The CRM attribute schema synced from ERP orders.">
-          <div className="grid grid-cols-1 divide-y divide-[var(--color-border)] sm:grid-cols-2 sm:divide-y-0">
-            {fields.map((f) => (
-              <div key={f.id} className="flex items-center gap-3 px-4 py-2.5">
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate text-[13px] text-[var(--color-ink)]">{f.name}</span>
-                  <span className="block truncate font-mono text-[10.5px] text-[var(--color-faint)]">{f.key}</span>
-                </span>
-                <span className="rounded bg-[var(--color-surface-2)] px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-[var(--color-muted)]">
-                  {f.type}
-                </span>
-                <DeleteBtn action={deleteContactField} id={f.id} />
-              </div>
-            ))}
-            {fields.length === 0 && (
-              <div className="px-4 py-3 text-[12px] text-[var(--color-faint)]">No fields yet.</div>
-            )}
-          </div>
-          <form action={addContactField} className="flex flex-wrap items-center gap-2 border-t border-[var(--color-border)] bg-[var(--color-surface-2)] px-4 py-3">
-            <input name="name" placeholder="Field name (e.g. Delivery Date)" required className={`${inputCls} min-w-0 flex-1`} />
-            <select name="type" className={inputCls} defaultValue="TEXT">
-              <option value="TEXT">Text</option>
-              <option value="NUMBER">Number</option>
-              <option value="DATE">Date</option>
-              <option value="BOOLEAN">Boolean</option>
-              <option value="SELECT">Select</option>
-            </select>
-            <button type="submit" className={addBtnCls}>Add</button>
-          </form>
-        </Card>
-
-        {/* Team & access is its own centralised module now (one place for every
-            person across all companies) — this card just points to it. */}
-        <Card title="Team & access" subtitle="Roles, departments, reporting, and which companies each person can read.">
-          <div className="px-4 py-3 text-[12.5px] text-[var(--color-muted)]">
-            Everyone in the workspace is managed in one place — open{" "}
-            <Link
-              href="/settings/team"
-              className="font-medium text-[var(--color-accent-ink)] underline underline-offset-2"
-            >
-              Team &amp; access
-            </Link>{" "}
-            in the sidebar to grant or remove a person&apos;s access to each company.
-          </div>
-        </Card>
       </div>
     </PageChrome>
   );

@@ -21,12 +21,13 @@ import {
   loadExistingOrg,
   planOrgSync,
 } from "@/lib/sync/erp-org";
+import { isAdminRole } from "@/lib/permissions";
 
 const DEFAULT_ERP_BASE = "https://erp.houzscentury.com";
 
 export async function syncFromErp(): Promise<void> {
   const me = await getCurrentMember();
-  if (!me || (me.role !== "OWNER" && me.role !== "ADMIN")) return;
+  if (!me || !isAdminRole(me.role)) return;
 
   const { env } = getCloudflareContext();
   const token = env.ERP_SERVICE_TOKEN;

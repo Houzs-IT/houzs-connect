@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { and, desc, eq, gt, isNotNull } from "drizzle-orm";
+import { and, desc, eq, gt, inArray, isNotNull } from "drizzle-orm";
 import { getCurrentMember } from "@/lib/current-member";
 import { getDb } from "@/db/client";
 import { automationRun, contact, conversation, conversationMember, member } from "@/db/schema";
@@ -10,6 +10,7 @@ import { conversationCompanyWhere, conversationVisibilityWhere, getVisibility } 
 import type { ConversationListItem } from "@/components/inbox/ConversationList";
 import { bypassReadCache } from "@/db/fresh";
 import { attrs } from "@/lib/format";
+import { can } from "@/lib/permissions";
 
 /**
  * A signed-in member, and the conversation must be in THEIR company.
@@ -65,7 +66,7 @@ export async function fetchConversations(
   const allMembers = await db.query.member.findMany({
     columns: { id: true, managerId: true },
   });
-  const vis = getVisibility(me, allMembers);
+  const vis = getVisibility(me, allMembers, await can(me, "seeAll"));
 
   // The watcher links are read below; on a deploy that lands before the
   // migration the table may not exist yet (see ensure-conversation-member.ts).
@@ -93,6 +94,17 @@ export async function fetchConversations(
   const hasMore = rows.length > PAGE_SIZE;
   const page = hasMore ? rows.slice(0, PAGE_SIZE) : rows;
 
+  // Customers a flow is currently waiting on — the "Bot handling" filter. One
+  // read for the whole page (automation_run is indexed by contact_id, mig 0008).
+  const contactIds = [...new Set(page.map((c) => c.contactId))];
+  const botRows = contactIds.length
+    ? await db
+        .selectDistinct({ contactId: automationRun.contactId })
+        .from(automationRun)
+        .where(and(inArray(automationRun.contactId, contactIds), eq(automationRun.status, "waiting")))
+    : [];
+  const botActive = new Set(botRows.map((r) => r.contactId));
+
   const items = page.map((c) => {
     const latest = c.messages[0];
     const a = attrs(c.contact.attributes);
@@ -119,6 +131,7 @@ export async function fetchConversations(
       deliveryDate: a.delivery_date_1 || null,
       starred: a.starred === "1",
       lastType: latest?.type ?? null,
+      botActive: botActive.has(c.contactId),
     };
   });
 

@@ -140,11 +140,13 @@ export async function sendOutbound(
       isBot: opts.isBot ?? true,
       sentByMemberId: opts.sentByMemberId ?? null,
       status: "SENT",
+      // A template send keeps its name, language and parameters, so System
+      // Logs can send exactly the same message again after a failure.
       interactivePayload: flowSend
         ? { kind: "flow", cta: opts.flow!.cta, flowToken: opts.flow!.flowToken }
         : interactive
           ? { kind: "buttons", buttons: opts.buttons }
-          : (opts.payload ?? null),
+          : (opts.payload ?? (opts.template ? { kind: "template", template: opts.template } : null)),
     })
     .returning();
   await db
@@ -206,7 +208,11 @@ export async function sendOutbound(
                 // interactivePayload is jsonb and is null on a plain outbound
                 // text, so the reason rides there rather than behind a new
                 // column and a migration on the hot send path.
-                interactivePayload: { kind: "send_error", reason: outcome.error ?? "Meta refused the message and gave no reason." },
+                interactivePayload: {
+                  kind: "send_error",
+                  reason: outcome.error ?? "Meta refused the message and gave no reason.",
+                  ...(opts.template ? { template: opts.template } : {}),
+                },
               }
         )
         .where(eq(message.id, msg.id));

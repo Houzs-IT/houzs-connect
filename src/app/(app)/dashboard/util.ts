@@ -4,15 +4,6 @@
  * reference — the streamed server sections could not call these from there.
  */
 
-export function pctOf(part: number, whole: number): number {
-  if (whole <= 0) return 0;
-  return (part / whole) * 100;
-}
-
-export function maxReach(tags: { reach: number }[]): number {
-  return Math.max(1, ...tags.map((t) => t.reach));
-}
-
 /**
  * The business is in Malaysia; the Worker's clock is UTC. Every bucket boundary
  * and every day label below is therefore pinned to Kuala Lumpur — a UTC day
@@ -43,26 +34,6 @@ export interface DayBucket {
   label: string;
 }
 
-/**
- * The seven-day reporting window, anchored to Malaysian calendar days.
- *
- * Reading the clock is impure, so this is called once at the top of a section
- * rather than inside a render. Malaysia is UTC+8 all year (no daylight saving),
- * so a day is exactly 86,400,000 ms and midnight local is a fixed +08:00 offset.
- */
-export function reportWindow(): { since: Date; days: DayBucket[] } {
-  const todayStart = new Date(`${klDayKey(new Date())}T00:00:00+08:00`);
-  const days: DayBucket[] = [];
-  for (let i = 6; i >= 0; i--) {
-    const d = new Date(todayStart.getTime() - i * 86_400_000);
-    days.push({
-      key: klDayKey(d),
-      label: d.toLocaleDateString("en-GB", { weekday: "short", timeZone: TZ }),
-    });
-  }
-  return { since: new Date(todayStart.getTime() - 6 * 86_400_000), days };
-}
-
 /** Plain-language elapsed time — "8s", "4m 12s", "2h 5m". */
 export function humanDuration(seconds: number): string {
   const s = Math.max(0, Math.round(seconds));
@@ -75,4 +46,59 @@ export function humanDuration(seconds: number): string {
   const h = Math.floor(m / 60);
   const rem = m % 60;
   return rem ? `${h}h ${rem}m` : `${h}h`;
+}
+
+/** Periods the dashboard offers, in days. */
+export const PERIODS = [7, 30, 90] as const;
+export type PeriodDays = (typeof PERIODS)[number];
+
+export function parsePeriod(v: string | undefined): PeriodDays {
+  const n = Number(v);
+  return (PERIODS as readonly number[]).includes(n) ? (n as PeriodDays) : 30;
+}
+
+export interface PeriodWindow {
+  days: PeriodDays;
+  /** Start of the first Malaysian day in the period. */
+  since: Date;
+  /** Start of the equally long period before it — for "vs prev period". */
+  prevSince: Date;
+  /** One bucket per Malaysian day, oldest first; label `dd/MM`. */
+  buckets: DayBucket[];
+  /** e.g. "3 Sep – 2 Oct 2026". */
+  rangeLabel: string;
+}
+
+/**
+ * An N-day reporting window ending today, anchored to Malaysian calendar days
+ * like `reportWindow`. Reads the clock — call once per request, not in render.
+ */
+export function periodWindow(days: PeriodDays, locale = "en-GB"): PeriodWindow {
+  const todayStart = new Date(`${klDayKey(new Date())}T00:00:00+08:00`);
+  const since = new Date(todayStart.getTime() - (days - 1) * 86_400_000);
+  const prevSince = new Date(since.getTime() - days * 86_400_000);
+  const buckets: DayBucket[] = [];
+  for (let i = 0; i < days; i++) {
+    const d = new Date(since.getTime() + i * 86_400_000);
+    buckets.push({
+      key: klDayKey(d),
+      label: d.toLocaleDateString("en-GB", { day: "2-digit", month: "2-digit", timeZone: TZ }),
+    });
+  }
+  // Hand-built so English reads "4 Sep" (en-GB's "Sept" does not match the
+  // design) and Chinese reads "9月4日".
+  const MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  const fmt = (d: Date, withYear: boolean) => {
+    const [y, m, day] = klDayKey(d).split("-").map(Number);
+    return locale.startsWith("zh")
+      ? `${withYear ? `${y}年` : ""}${m}月${day}日`
+      : `${day} ${MON[m - 1]}${withYear ? ` ${y}` : ""}`;
+  };
+  return { days, since, prevSince, buckets, rangeLabel: `${fmt(since, false)} – ${fmt(todayStart, true)}` };
+}
+
+/** Signed change for "vs prev period" chips; null when there is no baseline. */
+export function delta(now: number, prev: number): number | null {
+  if (!Number.isFinite(prev) || prev === 0) return null;
+  return ((now - prev) / prev) * 100;
 }

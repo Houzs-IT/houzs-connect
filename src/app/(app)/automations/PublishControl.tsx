@@ -37,10 +37,16 @@ export interface PublishFacts {
 export function PublishControl({
   facts,
   size = "sm",
+  liveLabel = "Live",
+  draftLabel = "Draft",
 }: {
   facts: PublishFacts;
-  /** "sm" for the list row, "md" for the builder header. */
-  size?: "sm" | "md";
+  /** "sm"/"md" buttons; "toggle" is the list row's Live/Draft switch — it
+   *  opens the same confirmation, it never flips on its own. */
+  size?: "sm" | "md" | "toggle";
+  /** Labels for the toggle variant. */
+  liveLabel?: string;
+  draftLabel?: string;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState<"publish" | "unpublish" | null>(null);
@@ -66,9 +72,39 @@ export function PublishControl({
 
   const pad = size === "md" ? "px-3 py-1.5 text-[12.5px]" : "px-2.5 py-1 text-[11.5px]";
 
+  const trigger =
+    size === "toggle" ? (
+      <button
+        type="button"
+        role="switch"
+        aria-checked={facts.enabled}
+        onClick={() => setOpen(facts.enabled ? "unpublish" : "publish")}
+        className="flex items-center gap-2"
+      >
+        <span
+          className={`h-[22px] w-10 rounded-full p-[2px] transition-colors ${
+            facts.enabled ? "bg-[var(--color-accent)]" : "bg-[var(--color-border-strong)]"
+          }`}
+        >
+          <span
+            className={`block h-[18px] w-[18px] rounded-full bg-white shadow-[0_1px_2px_rgba(17,24,16,0.2)] transition-transform ${
+              facts.enabled ? "translate-x-[18px]" : ""
+            }`}
+          />
+        </span>
+        <span
+          className={`text-[12px] font-semibold ${
+            facts.enabled ? "text-[var(--color-success)]" : "text-[var(--color-faint)]"
+          }`}
+        >
+          {facts.enabled ? liveLabel : draftLabel}
+        </span>
+      </button>
+    ) : null;
+
   return (
     <>
-      <button
+      {trigger ?? <button
         type="button"
         onClick={() => setOpen(facts.enabled ? "unpublish" : "publish")}
         className={
@@ -78,7 +114,7 @@ export function PublishControl({
         }
       >
         {facts.enabled ? "Switch off" : "Publish live"}
-      </button>
+      </button>}
 
       <ActionConfirm
         open={open === "publish"}

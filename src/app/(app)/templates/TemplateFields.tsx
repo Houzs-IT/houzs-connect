@@ -69,13 +69,13 @@ export function sampleLookup(sample: SampleContact | null): Record<string, strin
 }
 
 /** `builtin:full_name` / `field:ref_1` / `literal` / "" — the <select> value. */
-function encodeBinding(b: VarBinding | undefined): string {
+export function encodeBinding(b: VarBinding | undefined): string {
   if (!b) return "";
   if (b.source === "literal") return "literal";
   return `${b.source}:${b.key ?? ""}`;
 }
 
-function decodeBinding(index: number, raw: string, previous?: VarBinding): VarBinding | null {
+export function decodeBinding(index: number, raw: string, previous?: VarBinding): VarBinding | null {
   if (!raw) return null;
   const label = previous?.label;
   if (raw === "literal") {

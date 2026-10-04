@@ -1,129 +1,107 @@
-"use client";
-
 /*
-  Presentational atoms shared by the dashboard's client tab shell and by the
-  server components that stream into it. They live in their own client module
-  so a server section can render `<Card>` / `<BarRow>` without pulling in the
-  whole tab shell.
+  Presentational atoms for the dashboard, in the redesign's card language:
+  16px cards on white with a subtle border, 11px uppercase eyebrows, 20–34px
+  tabular figures. Server-safe (no hooks), so streamed sections render them.
 */
 
-/**
- * Provenance badge. There is no "demo" kind on purpose — every figure on this
- * dashboard is read from the database, and a card with nothing to read says so
- * in words instead of showing an invented number.
- */
-export function Pill({ kind }: { kind: "real" | "derived" }) {
-  const map = {
-    real: { t: "live", c: "var(--color-success)" },
-    derived: { t: "derived", c: "var(--color-faint)" },
-  } as const;
-  const { t, c } = map[kind];
+import { initials, tint } from "@/lib/format";
+
+export const EYEBROW =
+  "text-[11px] font-semibold uppercase tracking-[0.14em] text-[var(--color-muted)]";
+
+export function Card({
+  children,
+  className = "",
+  pad = "px-[22px] py-5",
+}: {
+  children: React.ReactNode;
+  className?: string;
+  pad?: string;
+}) {
   return (
-    <span
-      className="rounded-full px-1.5 py-0.5 text-[10px] font-medium"
-      style={{ background: `color-mix(in srgb, ${c} 14%, transparent)`, color: c }}
-    >
-      {t}
+    <section className={`rounded-[16px] border border-[var(--color-border-subtle)] bg-[var(--color-surface)] ${pad} ${className}`}>
+      {children}
+    </section>
+  );
+}
+
+/** Eyebrow title, optional sub-line and right-hand action. */
+export function CardHead({
+  title,
+  sub,
+  action,
+}: {
+  title: string;
+  sub?: string;
+  action?: React.ReactNode;
+}) {
+  return (
+    <div className="mb-3 flex items-start gap-3">
+      <div className="min-w-0 flex-1">
+        <div className={EYEBROW}>{title}</div>
+        {sub && <div className="mt-1 text-[12px] text-[var(--color-faint)]">{sub}</div>}
+      </div>
+      {action}
+    </div>
+  );
+}
+
+/**
+ * "↗ 1.0 pts" / "↘ 38s" chip on the headline cards — white, petrol text, as in
+ * the design. The arrow carries the direction.
+ */
+export function DeltaChip({ text, up }: { text: string; up: boolean }) {
+  return (
+    <span className="inline-flex items-center gap-1 rounded-full border border-white/80 bg-white/85 px-2 py-px text-[11.5px] font-semibold text-[var(--color-accent-ink)] shadow-[0_1px_2px_rgba(17,24,16,0.06)]">
+      {up ? "↗" : "↘"} {text}
     </span>
   );
 }
 
-export function Stat({
-  label,
-  value,
-  hint,
-}: {
-  label: string;
-  value: React.ReactNode;
-  hint?: string;
-}) {
+/** Plain coloured delta for inline figures ("↘ 1.8%"). */
+export function DeltaText({ pct, goodWhenUp = true }: { pct: number | null; goodWhenUp?: boolean }) {
+  if (pct == null) return null;
+  const up = pct >= 0;
+  const good = up === goodWhenUp;
   return (
-    <div className="animate-rise rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
-      <div className="text-[12px] font-medium text-[var(--color-muted)]">{label}</div>
-      {/* tabular-nums: a KPI that ticks must not shift width digit-to-digit.
-          Same treatment the ERP gives its stat values (frontend/src/pages/
-          FleetHealth.tsx:828). */}
-      <div className="mt-1 text-[26px] font-semibold tabular-nums tracking-tight text-[var(--color-ink)]">
-        {value}
-      </div>
-      {hint && <div className="mt-0.5 text-[11px] text-[var(--color-faint)]">{hint}</div>}
-    </div>
+    <span className={`text-[11.5px] font-semibold ${good ? "text-[var(--color-success)]" : "text-[var(--color-danger)]"}`}>
+      {up ? "↗" : "↘"} {Math.abs(pct).toFixed(1)}%
+    </span>
   );
 }
 
-export function Card({
-  title,
-  meta,
+export function Avatar({ name, size = 28 }: { name: string; size?: number }) {
+  return (
+    <span
+      className="grid shrink-0 place-items-center rounded-full font-semibold text-white"
+      style={{ background: tint(name), width: size, height: size, fontSize: size >= 28 ? 9.5 : 8.5 }}
+    >
+      {initials(name).toUpperCase()}
+    </span>
+  );
+}
+
+export function Empty({ children }: { children: React.ReactNode }) {
+  return <p className="py-2 text-[12.5px] text-[var(--color-faint)]">{children}</p>;
+}
+
+export function Badge({
+  tone,
   children,
 }: {
-  title: string;
-  meta?: React.ReactNode;
+  tone: "success" | "warning" | "danger" | "primary" | "neutral";
   children: React.ReactNode;
 }) {
+  const cls = {
+    success: "bg-[var(--color-success-soft)] text-[var(--color-success)]",
+    warning: "bg-[var(--color-warning-soft)] text-[var(--color-warning)]",
+    danger: "bg-[var(--color-danger-soft)] text-[var(--color-danger)]",
+    primary: "bg-[var(--color-accent-soft)] text-[var(--color-accent-ink)]",
+    neutral: "bg-[var(--color-surface-2)] text-[var(--color-muted)]",
+  }[tone];
   return (
-    <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-5">
-      <div className="mb-4 flex items-center gap-2">
-        <h3 className="text-[13px] font-semibold text-[var(--color-ink)]">{title}</h3>
-        {meta}
-      </div>
+    <span className={`whitespace-nowrap rounded-full px-[7px] py-px text-[10px] font-semibold uppercase tracking-[0.06em] ${cls}`}>
       {children}
-    </div>
-  );
-}
-
-/** Horizontal proportion bar row (spend, funnel, tags). */
-export function BarRow({
-  label,
-  value,
-  pct,
-  color = "var(--color-accent)",
-}: {
-  label: string;
-  value: string;
-  pct: number;
-  color?: string;
-}) {
-  return (
-    <div className="flex items-center gap-3">
-      <span className="w-28 shrink-0 truncate text-[12px] text-[var(--color-muted)]">
-        {label}
-      </span>
-      <div className="h-2 flex-1 overflow-hidden rounded-full bg-[var(--color-surface-2)]">
-        <div
-          className="h-full rounded-full"
-          style={{ width: `${Math.max(2, Math.min(100, pct))}%`, background: color }}
-        />
-      </div>
-      <span className="w-24 shrink-0 text-right font-mono text-[12px] text-[var(--color-ink)]">
-        {value}
-      </span>
-    </div>
-  );
-}
-
-/**
- * What a card shows when there is genuinely nothing to read yet. Never a zero
- * and never a sample figure — an operator has to be able to trust that a number
- * on this page came from the database.
- */
-export function NoData({ children }: { children: React.ReactNode }) {
-  return (
-    <p className="text-[12.5px] leading-relaxed text-[var(--color-muted)]">
-      <span className="font-medium text-[var(--color-ink)]">No data yet.</span>{" "}
-      {children}
-    </p>
-  );
-}
-
-export function Legend({ items }: { items: { name: string; color: string }[] }) {
-  return (
-    <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1">
-      {items.map((i) => (
-        <span key={i.name} className="flex items-center gap-1.5 text-[11px] text-[var(--color-muted)]">
-          <span className="h-2 w-2 rounded-full" style={{ background: i.color }} />
-          {i.name}
-        </span>
-      ))}
-    </div>
+    </span>
   );
 }

@@ -1,7 +1,9 @@
 "use client";
 
 import {
+  createContext,
   useCallback,
+  useContext,
   useEffect,
   useMemo,
   useRef,
@@ -12,6 +14,7 @@ import {
   ReactFlow,
   ReactFlowProvider,
   Background,
+  BackgroundVariant,
   Controls,
   MiniMap,
   Handle,
@@ -55,6 +58,13 @@ import {
   type NodeProbe,
 } from "@/app/(app)/automations/copy";
 import { ActionConfirm } from "@/components/ActionConfirm";
+import type { RunStats } from "@/lib/automation/run-stats";
+
+/** The "Run data" layer: on/off and the last-7-days counts per node. */
+const RunCtx = createContext<{ on: boolean; stats: RunStats | null }>({ on: false, stats: null });
+
+/** Nodes where a run parks and waits on the customer or a clock. */
+const WAIT_TYPES = new Set(["ask_buttons", "collect_input", "delay"]);
 
 // ────────────────────────────── shared shapes ──────────────────────────────
 
@@ -177,69 +187,83 @@ function summarize(d: HcData): string {
 
 // ────────────────────────────── node view ──────────────────────────────
 
-function HcNode({ data, selected }: NodeProps) {
+function HcNode({ id, data, selected }: NodeProps) {
   const d = data as HcData;
   const meta = nodeMeta(d.nodeType);
   const isTrigger = d.nodeType === "trigger";
   const branches = branchesOf(d);
   const sum = summarize(d);
+  const run = useContext(RunCtx);
+  const stat = run.on ? run.stats?.perNode[id] : undefined;
+  // A step customers are parked on is the one to look at first.
+  const stuck = run.on && !!stat?.waiting && WAIT_TYPES.has(d.nodeType);
 
   return (
     <div
-      className="w-56 rounded-xl border bg-[var(--color-surface)] shadow-sm"
+      className="w-[200px] rounded-[10px] border bg-[var(--color-surface)]"
       style={{
-        borderColor: selected ? meta.color : "var(--color-border)",
-        boxShadow: selected ? `0 0 0 2px ${meta.color}40` : undefined,
+        borderColor: selected ? "var(--color-accent)" : stuck ? "var(--color-brand-bright)" : "var(--color-border)",
+        boxShadow: selected
+          ? "0 0 0 3px var(--color-accent-ring), 0 4px 14px -6px rgba(17,24,16,0.18)"
+          : "0 1px 2px rgba(17,24,16,0.06)",
       }}
     >
       {!isTrigger && (
-        <Handle type="target" position={Position.Left} id="in" style={{ background: "#c2c6bd" }} />
+        <Handle type="target" position={Position.Left} id="in" style={{ background: "var(--color-border-strong)" }} />
       )}
-      <div
-        className="flex items-center gap-2 rounded-t-xl px-2.5 py-1.5 text-white"
-        style={{ background: meta.color }}
-      >
-        <span className="grid h-5 w-5 shrink-0 place-items-center rounded bg-white/20 text-[12px] leading-none">
+      <div className="flex items-center gap-2 px-2.5 pt-2.5">
+        <span
+          className="grid h-5 w-5 shrink-0 place-items-center rounded-[5px] text-[11px] leading-none"
+          style={{ background: `${meta.color}22`, color: meta.color }}
+        >
           {meta.glyph}
         </span>
-        <span className="truncate text-[11px] font-semibold uppercase tracking-wide">
+        <span className="min-w-0 flex-1 truncate text-[10.5px] font-semibold uppercase tracking-[0.1em] text-[var(--color-muted)]">
           {meta.label}
         </span>
+        {run.on && (
+          <span
+            title={stat?.waiting ? `${stat.waiting} waiting here now` : undefined}
+            className={`rounded-full px-1.5 text-[10px] font-semibold tabular-nums ${
+              stuck
+                ? "bg-[var(--color-warning-soft)] text-[var(--color-warning)]"
+                : "bg-[var(--color-accent-soft)] text-[var(--color-accent-ink)]"
+            }`}
+          >
+            {stuck ? stat?.waiting : (stat?.visits ?? 0)}
+          </span>
+        )}
       </div>
 
-      <div className="px-2.5 py-2 text-[11.5px] leading-snug text-[var(--color-ink)]">
+      <div className="px-2.5 pb-2.5 pt-1 text-[13px] font-medium leading-snug text-[var(--color-ink)]">
         {sum ? (
-          <span className="line-clamp-3 whitespace-pre-wrap">{sum}</span>
+          <span className="line-clamp-2 whitespace-pre-wrap">{sum}</span>
         ) : (
-          <span className="text-[var(--color-faint)]">
-            {branches ? "" : "Not configured"}
-          </span>
+          <span className="text-[12px] font-normal text-[var(--color-faint)]">{branches ? "" : "Not configured"}</span>
         )}
       </div>
 
       {/* Output handles: one per branch for branching nodes, else a single out. */}
       {branches ? (
-        <div className="border-t border-[var(--color-border)]">
+        <div className="border-t border-[var(--color-border-subtle)]">
           {branches.map((b, i) => (
             <div
               key={b.id}
-              className="relative flex items-center justify-end px-2.5 py-1 text-[10.5px] text-[var(--color-muted)]"
-              style={{
-                borderTop: i === 0 ? undefined : "1px dashed var(--color-border-subtle)",
-              }}
+              className="relative flex items-center justify-end px-2.5 py-1 text-[10.5px] font-medium text-[var(--color-muted)]"
+              style={{ borderTop: i === 0 ? undefined : "1px dashed var(--color-border-subtle)" }}
             >
               <span className="truncate">{b.label}</span>
               <Handle
                 type="source"
                 position={Position.Right}
                 id={b.id}
-                style={{ position: "absolute", right: -6, background: meta.color }}
+                style={{ position: "absolute", right: -6, background: "var(--color-accent)" }}
               />
             </div>
           ))}
         </div>
       ) : (
-        <Handle type="source" position={Position.Right} id="out" style={{ background: meta.color }} />
+        <Handle type="source" position={Position.Right} id="out" style={{ background: "var(--color-accent)" }} />
       )}
     </div>
   );
@@ -379,22 +403,28 @@ function NodePalette({
   const anyResult = CATEGORY_ORDER.some((c) => (grouped[c]?.length ?? 0) > 0);
 
   return (
-    <div className="flex w-56 shrink-0 flex-col border-r border-[var(--color-border)] bg-[var(--color-surface)]">
-      <div className="border-b border-[var(--color-border)] p-2">
-        <input
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-          placeholder="Search node…"
-          className="w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] px-2.5 py-1.5 text-[12px] outline-none focus:border-[var(--color-accent)]"
-        />
+    <div className="flex w-[240px] shrink-0 flex-col border-r border-[var(--color-border)] bg-[var(--color-surface)]">
+      <div className="p-3 pb-2">
+        <label className="flex h-[34px] items-center gap-2 rounded-[8px] border border-[var(--color-border)] bg-[var(--color-surface-2)] px-2.5 focus-within:border-[var(--color-accent)]">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--color-faint)" strokeWidth="1.8" strokeLinecap="round">
+            <circle cx="11" cy="11" r="7" />
+            <path d="m21 21-4.3-4.3" />
+          </svg>
+          <input
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="Search steps"
+            className="w-full bg-transparent text-[12.5px] outline-none placeholder:text-[var(--color-faint)]"
+          />
+        </label>
       </div>
-      <div className="scroll-thin flex-1 overflow-y-auto p-2">
+      <div className="scroll-thin flex-1 overflow-y-auto px-2 pb-3">
         {CATEGORY_ORDER.map((cat) => {
           const items = grouped[cat];
           if (!items || items.length === 0) return null;
           return (
             <div key={cat} className="mb-3">
-              <div className="px-1 pb-1 text-[10px] font-semibold uppercase tracking-wide text-[var(--color-faint)]">
+              <div className="px-2 pb-1.5 pt-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--color-faint)]">
                 {cat}
               </div>
               <div className="flex flex-col gap-0.5">
@@ -405,19 +435,19 @@ function NodePalette({
                     disabled={disabled}
                     title={disabled ? "Exit the snapshot preview to edit this flow." : n.hint}
                     onClick={() => onAdd(n.type)}
-                    className="flex items-start gap-2 rounded-md px-2 py-1.5 text-left hover:bg-[var(--color-surface-2)] disabled:cursor-not-allowed disabled:opacity-50"
+                    className="flex items-center gap-2.5 rounded-[8px] px-2 py-1.5 text-left hover:bg-[var(--color-surface-2)] disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     <span
-                      className="mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded text-[11px] leading-none text-white"
-                      style={{ background: n.color }}
+                      className="grid h-[26px] w-[26px] shrink-0 place-items-center rounded-[7px] text-[12px] leading-none"
+                      style={{ background: `${n.color}22`, color: n.color }}
                     >
                       {n.glyph}
                     </span>
                     <span className="min-w-0">
-                      <span className="block truncate text-[12px] text-[var(--color-ink)]">
+                      <span className="block truncate text-[13px] font-medium text-[var(--color-ink)]">
                         {n.label}
                       </span>
-                      <span className="block truncate text-[10.5px] text-[var(--color-faint)]">
+                      <span className="block truncate text-[11px] text-[var(--color-faint)]">
                         {n.hint}
                       </span>
                     </span>
@@ -576,11 +606,14 @@ interface CanvasProps {
   initialKeywords?: string[];
   automations: Opt[];
   campaigns: Opt[];
+  /** Last-7-days run counts for the "Run data" layer (lib/automation/run-stats.ts). */
+  runStats?: RunStats;
 }
 
 function FlowCanvasInner(props: CanvasProps) {
   const { automationId, graph, automations, campaigns } = props;
   const nodeTypes = useMemo(() => ({ hc: HcNode }), []);
+  const [runOn, setRunOn] = useState(false);
   const edgeTypes = useMemo(() => ({ button: ButtonEdge }), []);
   const updateNodeInternals = useUpdateNodeInternals();
   const { screenToFlowPosition } = useReactFlow();
@@ -797,7 +830,7 @@ function FlowCanvasInner(props: CanvasProps) {
 
       <div className="flex min-w-0 flex-1 flex-col">
         {/* toolbar */}
-        <div className="flex items-center gap-2 border-b border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2">
+        <div className="flex items-center gap-2 border-b border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2.5">
           {/* A status read-out, not a switch — it is shaped like the segmented
               toggles elsewhere in the app, so it says so on hover. Draft/Live is
               decided by which Save button you press. */}
@@ -830,14 +863,31 @@ function FlowCanvasInner(props: CanvasProps) {
           </div>
 
           <div className="ml-auto flex items-center gap-1.5">
-            <span className="mr-1 font-mono text-[10.5px] text-[var(--color-faint)]">
-              {nodes.length} nodes · {edges.length} edges
+            <span className="mr-1 text-[11px] tabular-nums text-[var(--color-faint)]">
+              {nodes.length} steps · {edges.length} links
             </span>
+            {props.runStats && (
+              <button
+                type="button"
+                aria-pressed={runOn}
+                onClick={() => setRunOn((v) => !v)}
+                className={`flex h-[34px] items-center gap-1.5 rounded-[8px] border px-3 text-[12.5px] font-semibold ${
+                  runOn
+                    ? "border-[var(--color-accent)] bg-[var(--color-accent-soft)] text-[var(--color-accent-ink)]"
+                    : "border-[var(--color-border)] text-[var(--color-ink)] hover:bg-[var(--color-surface-2)]"
+                }`}
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
+                  <path d="M4 20V10M10 20V4M16 20v-7M22 20H2" />
+                </svg>
+                Run data
+              </button>
+            )}
             <button
               onClick={() => setHistoryOpen(true)}
-              className="rounded-lg border border-[var(--color-border)] px-3 py-1.5 text-[12.5px] text-[var(--color-ink)] hover:bg-[var(--color-surface-2)]"
+              className="h-[34px] rounded-[8px] border border-[var(--color-border)] px-3 text-[12.5px] font-semibold text-[var(--color-ink)] hover:bg-[var(--color-surface-2)]"
             >
-              History
+              Versions
             </button>
             <button
               type="button"
@@ -853,7 +903,7 @@ function FlowCanvasInner(props: CanvasProps) {
                     ? "Saving…"
                     : undefined
               }
-              className="rounded-lg border border-[var(--color-border)] px-3 py-1.5 text-[12.5px] text-[var(--color-ink)] hover:bg-[var(--color-surface-2)] disabled:cursor-not-allowed disabled:opacity-60"
+              className="h-[34px] rounded-[8px] border border-[var(--color-border)] px-3 text-[12.5px] font-semibold text-[var(--color-ink)] hover:bg-[var(--color-surface-2)] disabled:cursor-not-allowed disabled:opacity-60"
             >
               {pending && saved == null ? "Saving…" : "Save as draft"}
             </button>
@@ -871,7 +921,7 @@ function FlowCanvasInner(props: CanvasProps) {
                     ? "Saving…"
                     : undefined
               }
-              className="rounded-lg bg-[var(--color-accent)] px-3 py-1.5 text-[12.5px] font-medium text-white disabled:cursor-not-allowed disabled:opacity-60"
+              className="h-[34px] rounded-[8px] bg-[var(--color-accent)] px-3.5 text-[12.5px] font-semibold text-white shadow-[var(--shadow-primary)] hover:bg-[var(--color-accent-hi)] disabled:cursor-not-allowed disabled:opacity-60"
             >
               {live ? "Save & keep live" : "Publish live"}
             </button>
@@ -964,7 +1014,30 @@ function FlowCanvasInner(props: CanvasProps) {
           </p>
         </ActionConfirm>
 
-        <div className="relative min-h-0 flex-1">
+        <RunCtx.Provider value={{ on: runOn, stats: props.runStats ?? null }}>
+        <div className="relative min-h-0 flex-1 bg-[var(--color-canvas)]">
+          {runOn && props.runStats && (
+            <div className="absolute right-4 top-4 z-10 w-[240px] rounded-[12px] border border-[var(--color-border-subtle)] bg-[var(--color-surface)] px-4 py-3 shadow-[var(--shadow-popover)]">
+              <div className="flex items-center justify-between">
+                <span className="text-[10.5px] font-semibold uppercase tracking-[0.14em] text-[var(--color-muted)]">Last 7 days</span>
+                <a href="/logs" className="text-[11.5px] font-semibold text-[var(--color-accent)] hover:underline">
+                  Run logs →
+                </a>
+              </div>
+              <div className="mt-2 grid grid-cols-3 gap-2">
+                {[
+                  [props.runStats.started, "Started", "text-[var(--color-ink)]"],
+                  [props.runStats.finished, "Finished", "text-[var(--color-success)]"],
+                  [props.runStats.waiting, "Waiting", "text-[var(--color-brand)]"],
+                ].map(([v, l, c]) => (
+                  <div key={l as string}>
+                    <div className={`text-[22px] font-medium tabular-nums ${c}`}>{v as number}</div>
+                    <div className="text-[11px] text-[var(--color-faint)]">{l as string}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
           <ReactFlow
             nodes={nodes}
             edges={edges}
@@ -981,7 +1054,7 @@ function FlowCanvasInner(props: CanvasProps) {
             fitView
             proOptions={{ hideAttribution: true }}
           >
-            <Background color="#c2c6bd" gap={18} />
+            <Background variant={BackgroundVariant.Dots} color="#c3c9d3" gap={18} size={1.2} />
             <Controls showInteractive={false} />
             <MiniMap pannable zoomable className="!bg-[var(--color-surface-2)]" />
           </ReactFlow>
@@ -995,20 +1068,26 @@ function FlowCanvasInner(props: CanvasProps) {
             />
           )}
         </div>
+        </RunCtx.Provider>
       </div>
 
       {/* inspector */}
       {selectedNode && d && !readOnly && (
-        <div className="scroll-thin w-72 shrink-0 overflow-y-auto border-l border-[var(--color-border)] bg-[var(--color-surface)] p-4">
-          <div className="mb-3 flex items-center gap-2">
+        <div className="scroll-thin w-[300px] shrink-0 overflow-y-auto border-l border-[var(--color-border)] bg-[var(--color-surface)] p-4">
+          <div className="mb-4 flex items-center gap-2.5">
             <span
-              className="grid h-6 w-6 place-items-center rounded text-[12px] text-white"
-              style={{ background: nodeMeta(d.nodeType).color }}
+              className="grid h-8 w-8 place-items-center rounded-[8px] text-[13px]"
+              style={{ background: `${nodeMeta(d.nodeType).color}22`, color: nodeMeta(d.nodeType).color }}
             >
               {nodeMeta(d.nodeType).glyph}
             </span>
-            <span className="text-[12.5px] font-semibold text-[var(--color-ink)]">
-              {nodeMeta(d.nodeType).label}
+            <span className="min-w-0">
+              <span className="block text-[10.5px] font-semibold uppercase tracking-[0.12em] text-[var(--color-faint)]">
+                {nodeMeta(d.nodeType).label}
+              </span>
+              <span className="block truncate text-[14px] font-semibold text-[var(--color-ink)]">
+                {summarize(d) || nodeMeta(d.nodeType).label}
+              </span>
             </span>
           </div>
 
@@ -1022,9 +1101,9 @@ function FlowCanvasInner(props: CanvasProps) {
           {d.nodeType !== "trigger" && (
             <button
               onClick={deleteSelected}
-              className="mt-3 w-full rounded-lg border border-[color-mix(in_srgb,var(--color-danger)_40%,transparent)] px-3 py-1.5 text-[12px] font-medium text-[var(--color-danger)] hover:bg-[color-mix(in_srgb,var(--color-danger)_8%,transparent)]"
+              className="mt-4 h-9 w-full rounded-[8px] bg-[var(--color-danger-soft)] text-[13px] font-semibold text-[var(--color-danger)] hover:brightness-95"
             >
-              Delete node
+              Delete step
             </button>
           )}
         </div>
@@ -1445,8 +1524,8 @@ const inputCls =
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <div className="mb-3">
-      <label className="mb-1 block text-[11px] text-[var(--color-muted)]">{label}</label>
+    <div className="mb-3.5">
+      <label className="mb-1.5 block text-[12px] font-semibold text-[var(--color-ink)]">{label}</label>
       {children}
     </div>
   );
