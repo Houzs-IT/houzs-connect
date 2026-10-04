@@ -12,7 +12,7 @@
 //                       flow content never silently unpublishes a live flow.
 // Unlike seed.ts this is safe to run against a live database; it only writes
 // definitions, so there is no LIVE refusal.
-import { and, asc, eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { scriptDb } from "./_env";
 import { automation, channel, company, form } from "../src/db/schema";
 import { REBUILD_FLOWS, validateGraph, type SeedForm } from "../src/lib/automation/flows";
@@ -41,9 +41,13 @@ async function main() {
   const { db, sql } = scriptDb();
   console.log("Seeding rebuilt WS-A flows…");
 
-  const companies = await db.query.company.findMany({ orderBy: asc(company.createdAt) });
+  // WS-A flows are Houzs's — 2990's sends route to the Houzs number too, and
+  // Hookka (manufacturing) must NOT receive delivery flows. Target Houzs by slug
+  // rather than every company that happens to have a channel.
+  const HOUZS_SLUG = "houzs-century";
+  const companies = await db.query.company.findMany({ where: eq(company.slug, HOUZS_SLUG) });
   if (companies.length === 0) {
-    console.log("No companies in connect.company — nothing to seed.");
+    console.log(`No company with slug "${HOUZS_SLUG}" in connect.company — nothing to seed.`);
     await sql.end();
     return;
   }

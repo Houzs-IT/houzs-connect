@@ -1,0 +1,36 @@
+name: Seed WS-A flows (DRAFT)
+
+# Manual-only. Applies pending migrations, then upserts the rebuilt WS-A
+# conversation flows into connect.automation as DRAFT/disabled for the Houzs
+# company. Idempotent and non-destructive (no wipe, no sends, DRAFT only), so it
+# is safe to re-run. Needs the DATABASE_URL repo secret = the Connect Postgres
+# pooler DSN (private repo, so the secret and logs stay private).
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: seed-flows
+  cancel-in-progress: false
+
+jobs:
+  seed:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - name: Install deps
+        run: pnpm install --frozen-lockfile
+      - name: Apply pending migrations (idempotent)
+        run: pnpm db:migrate
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      - name: Seed WS-A flows (DRAFT, idempotent)
+        run: pnpm db:seed:flows
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
