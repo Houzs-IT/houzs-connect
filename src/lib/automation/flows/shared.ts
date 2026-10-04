@@ -72,6 +72,12 @@ For your order *{ref_1}*, is this the correct desired date?
 
 export const AMEND_SUBMITTED = `Thank you for submitting your desired delivery date! Our system will now review your request and plan accordingly. Once our system has scheduled the trip, we will contact you again to officially confirm the final delivery date.`;
 
+// Quick-reply labels on the opener TEMPLATE. A template tap is reported by the
+// webhook as its payload-or-text, so these double as the edge branch values —
+// keep them identical to the approved template's button labels.
+export const OPENER_CONFIRM_BTN = "Confirm Date";
+export const OPENER_AMEND_BTN = "Amend Date";
+
 // Forms both flows send. `key` is the local handle the graph references; the
 // seed resolves it to the published form row id. `select` options are not yet
 // wired in the form model, so a published Flow renders these as text inputs for
@@ -145,22 +151,31 @@ export function buildTemplateSendGraph(opts: {
  */
 export function buildDeliveryGraph(opts: {
   opening: string;
+  openerTemplate: string;
+  openerParams: string[];
   formIds: Record<string, string>;
 }): FlowGraph {
-  const { opening, formIds } = opts;
+  const { opening, openerTemplate, openerParams, formIds } = opts;
   return {
     nodes: [
       { id: "trigger", type: "trigger", data: {}, x: 40, y: 320 },
       {
+        // Business-initiated first message -> an approved template (the only
+        // thing Meta delivers to open a conversation). LIVE sends via the
+        // template path; DEMO records `opening` + the buttons so the simulator
+        // stays tappable. The run pauses for the Confirm / Amend tap.
         id: "ask_date",
-        type: "ask_buttons",
+        type: "send_template",
         x: 240,
         y: 320,
         data: {
+          templateName: openerTemplate,
+          templateLang: "en",
+          templateParams: openerParams,
           message: opening,
           buttons: [
-            { id: "confirm", label: "Confirm Date" },
-            { id: "amend", label: "Amend Date" },
+            { id: OPENER_CONFIRM_BTN, label: OPENER_CONFIRM_BTN },
+            { id: OPENER_AMEND_BTN, label: OPENER_AMEND_BTN },
           ],
         },
       },
@@ -276,7 +291,7 @@ export function buildDeliveryGraph(opts: {
       { from: "trigger", to: "ask_date" },
 
       // Confirm
-      { from: "ask_date", to: "set_confirm", branch: "confirm" },
+      { from: "ask_date", to: "set_confirm", branch: OPENER_CONFIRM_BTN },
       { from: "set_confirm", to: "set_done" },
       { from: "set_done", to: "tag_sched" },
       { from: "tag_sched", to: "cb_confirm" },
@@ -294,7 +309,7 @@ export function buildDeliveryGraph(opts: {
       { from: "generic_ack", to: "confirm_end" },
 
       // Amend
-      { from: "ask_date", to: "amend_guard", branch: "amend" },
+      { from: "ask_date", to: "amend_guard", branch: OPENER_AMEND_BTN },
       { from: "amend_guard", to: "locked_msg", branch: "locked" },
       { from: "amend_guard", to: "set_amend", branch: "default" },
       { from: "locked_msg", to: "locked_end" },
