@@ -1,8 +1,9 @@
 import Link from "next/link";
-import { attrs, formatPhone, initials, relTime, tint, waIdentifier } from "@/lib/format";
+import { attrs, formatPhone, initials, tint, waIdentifier } from "@/lib/format";
 import { fmt, type Dict } from "@/lib/i18n/dict";
 import { IconClose } from "@/components/icons";
-import { contactDetail } from "./queries";
+import { DeleteContactButton } from "./DeleteContactButton";
+import { contactDetail, shortWhen } from "./queries";
 
 const EYEBROW = "text-[10.5px] font-semibold uppercase tracking-[0.14em] text-[var(--color-faint)]";
 
@@ -18,12 +19,14 @@ export async function ContactDetail({
   closeHref,
   s,
   statusLabel,
+  yesterday,
 }: {
   companyId: string;
   id: string;
   closeHref: string;
   s: Dict["contacts"];
   statusLabel: Record<string, string>;
+  yesterday: string;
 }) {
   const d = await contactDetail(companyId, id);
   if (!d) return null;
@@ -45,6 +48,11 @@ export async function ContactDetail({
     });
   }
   const filled = fields.filter((f) => a[f.key]);
+  // Money fields read as money: "1200" -> "RM 1,200".
+  const show = (key: string, v: string) =>
+    /amount|price|balance|total|deposit/i.test(key) && /^\d+(\.\d+)?$/.test(v)
+      ? `RM ${Number(v).toLocaleString("en-MY", { maximumFractionDigits: 2 })}`
+      : v;
   const latest = convos[0];
 
   return (
@@ -79,6 +87,17 @@ export async function ContactDetail({
         >
           {s.edit}
         </Link>
+        <details className="relative">
+          <summary
+            aria-label={s.more}
+            className="grid h-9 w-9 cursor-pointer list-none place-items-center rounded-[8px] border border-[var(--color-border)] text-[16px] leading-none text-[var(--color-muted)] hover:bg-[var(--color-surface-2)] [&::-webkit-details-marker]:hidden"
+          >
+            ⋮
+          </summary>
+          <div className="absolute right-0 z-30 mt-1 w-44 rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)] p-2 shadow-[var(--shadow-popover)]">
+            <DeleteContactButton contactId={c.id} name={name} />
+          </div>
+        </details>
       </div>
 
       <div className="flex flex-col gap-4 border-t border-[var(--color-border-subtle)] px-4 py-4">
@@ -133,7 +152,7 @@ export async function ContactDetail({
                       <span className="min-w-0">
                         <span className="block truncate text-[12.5px] text-[var(--color-ink)]">{m?.body || "—"}</span>
                         <span className="block text-[11px] text-[var(--color-faint)]">
-                          {[statusLabel[cv.status] ?? cv.status, cv.assignedDepartment?.name, relTime(cv.lastMessageAt)].filter(Boolean).join(" · ")}
+                          {[statusLabel[cv.status] ?? cv.status, cv.assignedDepartment?.name, cv.lastMessageAt ? shortWhen(cv.lastMessageAt, yesterday) : null].filter(Boolean).join(" · ")}
                         </span>
                       </span>
                     </Link>
@@ -157,7 +176,7 @@ export async function ContactDetail({
             {filled.slice(0, 6).map((f) => (
               <div key={f.key} className="min-w-0">
                 <dt className="truncate text-[11px] text-[var(--color-faint)]">{f.name}</dt>
-                <dd className="truncate text-[13px] font-medium text-[var(--color-ink)]">{a[f.key]}</dd>
+                <dd className="truncate text-[13px] font-medium text-[var(--color-ink)]">{show(f.key, a[f.key])}</dd>
               </div>
             ))}
           </dl>

@@ -1,4 +1,4 @@
-import { asc, desc, eq } from "drizzle-orm";
+import { asc, desc, eq, sql } from "drizzle-orm";
 import { getDb } from "@/db/client";
 import { contact, contactField, tag } from "@/db/schema";
 import { PageChrome } from "@/components/PageChrome";
@@ -38,7 +38,10 @@ export default async function ContactsPage({ searchParams }: { searchParams: Pro
 
   const q = one(sp.q);
   const segment = SEGMENTS.find((x) => x === one(sp.segment));
-  const sortCol = one(sp.sort) === "created" ? contact.createdAt : contact.updatedAt;
+  // "Updated" shows the newest message (or the record's own change), so it
+  // sorts on the same thing.
+  const lastActivity = sql`greatest(${contact.updatedAt}, (select max(cv.last_message_at) from connect.conversation cv where cv.contact_id = ${contact.id}))`;
+  const sortCol = one(sp.sort) === "created" ? contact.createdAt : lastActivity;
   const dir = one(sp.dir) === "asc" ? "asc" : "desc";
   const page = Math.max(1, Math.floor(Number(one(sp.page)) || 1));
   const activeId = one(sp.id) || null;
@@ -90,7 +93,7 @@ export default async function ContactsPage({ searchParams }: { searchParams: Pro
       sales: a.sales_person ?? null,
       tags: c.tagLinks.map((l) => ({ id: l.tag.id, name: l.tag.name, color: l.tag.color })),
       last: lm ? { body: lm.body ?? "—", inbound: lm.direction === "IN" } : null,
-      updated: shortWhen(lm?.at ?? c.updatedAt, t.service.yesterday),
+      updated: shortWhen(lm && lm.at > c.updatedAt ? lm.at : c.updatedAt, t.service.yesterday),
       email: c.email,
       source: c.source,
       sourceId: c.sourceId,
@@ -141,6 +144,7 @@ export default async function ContactsPage({ searchParams }: { searchParams: Pro
             closeHref={`/contacts${closeParams.size ? `?${closeParams}` : ""}`}
             s={s}
             statusLabel={t.service.statusLabel}
+            yesterday={t.service.yesterday}
           />
         )}
       </div>

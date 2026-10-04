@@ -54,12 +54,10 @@ export default async function DashboardPage({
   const companyId = me.companyId;
   const props = { companyId, w, s };
 
-  const dateLine = now.toLocaleDateString(locale, {
-    weekday: "long",
-    day: "numeric",
-    month: "long",
-    timeZone: TZ,
-  });
+  // "Friday, 2 October" (en-GB leaves the comma out).
+  const dateLine = now
+    .toLocaleDateString(locale, { weekday: "long", day: "numeric", month: "long", timeZone: TZ })
+    .replace(/^([A-Za-z]+) /, "$1, ");
   const time = now.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", timeZone: TZ });
   const firstName = me.name.split(/[\s_]+/)[0] || me.name;
 

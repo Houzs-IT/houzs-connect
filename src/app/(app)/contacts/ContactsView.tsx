@@ -384,7 +384,7 @@ export function ContactsView({
         )}
 
         <div className="scroll-thin min-h-0 flex-1 overflow-auto">
-          <table className="w-full min-w-[920px] border-collapse text-[13px]">
+          <table className="w-full min-w-[700px] border-collapse [&_th]:whitespace-nowrap text-[13px]">
             <thead className="sticky top-0 z-10 bg-[var(--color-surface)]">
               <tr className="border-b border-[var(--color-border)]">
                 <th className="w-10 px-3">
@@ -437,7 +437,7 @@ export function ContactsView({
                       {on && <span className="absolute inset-y-0 left-0 w-[2px] bg-[var(--color-accent)]" />}
                       <input type="checkbox" aria-label={r.name} checked={sel} onChange={() => toggle(r.id)} className="h-4 w-4 accent-[var(--color-accent)]" />
                     </td>
-                    <td className="px-3 py-2.5">
+                    <td className="max-w-[210px] px-3 py-2.5">
                       <div className="flex items-center gap-2.5">
                         <Avatar name={r.name} blocked={r.blocked} />
                         <div className="min-w-0">
@@ -473,7 +473,7 @@ export function ContactsView({
                         ))}
                       </div>
                     </td>
-                    <td className="max-w-[220px] px-3 py-2.5">
+                    <td className="max-w-[170px] px-3 py-2.5">
                       {r.last ? (
                         <span className="flex items-center gap-1.5 text-[12.5px] text-[var(--color-muted)]">
                           <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${r.last.inbound ? "bg-[var(--color-danger)]" : "bg-[var(--color-success)]"}`} />
