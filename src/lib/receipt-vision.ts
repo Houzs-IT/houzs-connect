@@ -111,6 +111,39 @@ function toBase64(bytes: ArrayBuffer): string {
   return btoa(bin);
 }
 
+/**
+ * fetch, plus a log line when the API answers with an error. The SDK reports a
+ * 400 with an empty body as just "400 status code (no body)", which says
+ * nothing about whether the answer came from Claude's API or from something in
+ * between; the headers (request-id is Anthropic's, cf-ray / server Cloudflare's)
+ * and the raw body do. Never logs the request headers (they carry the key).
+ */
+const loggedFetch: typeof fetch = async (input, init) => {
+  const res = await fetch(input, init);
+  if (!res.ok) {
+    const body = await res
+      .clone()
+      .text()
+      .catch((e) => `<unreadable: ${(e as Error)?.message}>`);
+    const h = (k: string) => res.headers.get(k) ?? "-";
+    const sent = typeof init?.body === "string" ? `${init.body.length}b string` : init?.body ? (init.body as object).constructor?.name ?? typeof init.body : "none";
+    console.warn(
+      "RECEIPT_API_ERROR",
+      JSON.stringify({
+        status: res.status,
+        url: typeof input === "string" ? input : input instanceof URL ? input.href : (input as Request).url,
+        requestId: h("request-id"),
+        cfRay: h("cf-ray"),
+        server: h("server"),
+        contentType: h("content-type"),
+        sent,
+        body: body.slice(0, 600),
+      })
+    );
+  }
+  return res;
+};
+
 export function receiptVisionConfigured(): boolean {
   return !!process.env.ANTHROPIC_API_KEY;
 }
@@ -129,7 +162,7 @@ export async function readReceipt(bytes: ArrayBuffer, mimeType: string): Promise
   if (!file) return { status: "unavailable", error: `cannot read ${mime}` };
 
   try {
-    const client = new Anthropic({ timeout: 60_000, maxRetries: 1 });
+    const client = new Anthropic({ timeout: 60_000, maxRetries: 1, fetch: loggedFetch });
     const response = await client.messages.parse({
       model: MODEL,
       max_tokens: 2048,
