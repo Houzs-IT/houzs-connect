@@ -56,7 +56,7 @@ export async function noticesSince(
       from connect.message m
       join connect.conversation cv on cv.id = m.conversation_id
       join connect.contact ct on ct.id = cv.contact_id
-      where cv.assigned_agent_id = ${me.id} and m.direction = 'IN' and m.created_at > ${since}
+      where cv.assigned_agent_id = ${me.id} and m.direction = 'IN' and m.created_at > ${since.toISOString()}::timestamptz
       order by m.conversation_id, m.created_at desc
       limit 5
     `);
@@ -73,7 +73,7 @@ export async function noticesSince(
       join connect.contact ct on ct.id = cv.contact_id
       where cv.assigned_agent_id = ${me.id} and cv.status <> 'CLOSED'
         and (select max(i.created_at) from connect.message i where i.conversation_id = cv.id and i.direction = 'IN')
-          between ${from} and now() - make_interval(mins => ${SLA_MINUTES})
+          between ${from.toISOString()}::timestamptz and now() - make_interval(mins => ${SLA_MINUTES})
         and coalesce((select max(o.created_at) from connect.message o where o.conversation_id = cv.id and o.direction = 'OUT'), 'epoch')
           < (select max(i.created_at) from connect.message i where i.conversation_id = cv.id and i.direction = 'IN')
       limit 5
@@ -89,7 +89,7 @@ export async function noticesSince(
       from connect.internal_message m
       join connect.internal_channel c on c.id = m.channel_id and c.company_id = ${me.companyId}
       left join connect.member a on a.id = m.author_member_id
-      where m.created_at > ${since} and coalesce(m.author_member_id, '') <> ${me.id}
+      where m.created_at > ${since.toISOString()}::timestamptz and coalesce(m.author_member_id, '') <> ${me.id}
         and (m.mentions ? ${me.id} or m.mentions ? 'channel'
           or (c.kind = 'dm' and exists (select 1 from connect.internal_channel_member x where x.channel_id = c.id and x.member_id = ${me.id})))
       order by m.created_at desc
@@ -109,7 +109,7 @@ export async function noticesSince(
   if (prefs.accessRequest.browser && opts.approver) {
     const rows = await q<{ name: string; department: string | null; created_at: string }>(sql`
       select name, department, created_at from connect.access_request
-      where company_id = ${me.companyId} and created_at > ${since} and status = 'pending_manager'
+      where company_id = ${me.companyId} and created_at > ${since.toISOString()}::timestamptz and status = 'pending_manager'
       limit 5
     `);
     for (const r of rows) {

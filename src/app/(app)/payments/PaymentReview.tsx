@@ -225,15 +225,20 @@ export function PaymentReview({
                   {icon}
                 </span>
                 <span className="w-[86px] shrink-0 text-[12.5px] text-[var(--color-muted)]">{label}</span>
+                <span className="relative flex min-w-0 flex-1">
+                {k === "amount" && (
+                  <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[13px] text-[var(--color-ink)]">RM</span>
+                )}
                 <input
                   value={f[k]}
                   disabled={!open}
                   inputMode={k === "amount" ? "decimal" : undefined}
                   onChange={(e) => set(k, e.target.value)}
-                  className={`h-[36px] min-w-0 flex-1 rounded-[8px] border px-3 text-[13px] text-[var(--color-ink)] outline-none focus:border-[var(--color-accent)] disabled:bg-[var(--color-surface-2)] ${
+                  className={`h-[36px] min-w-0 flex-1 rounded-[8px] border ${k === "amount" ? "pl-10 pr-3" : "px-3"} text-[13px] text-[var(--color-ink)] outline-none focus:border-[var(--color-accent)] disabled:bg-[var(--color-surface-2)] ${
                     missing && open ? "border-[var(--color-pastel-orange-ink)] bg-[var(--color-pastel-orange)]" : "border-[var(--color-border)]"
                   }`}
                 />
+                </span>
               </label>
             );
           })}

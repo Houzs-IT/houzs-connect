@@ -49,7 +49,7 @@ export default async function PaymentsPage({ searchParams }: { searchParams: Pro
   const [kpi, methods, dupRefs, rows] = await Promise.all([
     db
       .select({
-        month: sql<number>`coalesce(sum(${payment.amount}) filter (where ${payment.status} = 'VERIFIED' and ${payment.createdAt} >= ${monthStart()}), 0)`.mapWith(Number),
+        month: sql<number>`coalesce(sum(${payment.amount}) filter (where ${payment.status} = 'VERIFIED' and ${payment.createdAt} >= ${monthStart().toISOString()}::timestamptz), 0)`.mapWith(Number),
         pending: sql<number>`count(*) filter (where ${payment.status} = 'PENDING')`.mapWith(Number),
         verified: sql<number>`count(*) filter (where ${payment.status} = 'VERIFIED')`.mapWith(Number),
         rejected: sql<number>`count(*) filter (where ${payment.status} = 'REJECTED')`.mapWith(Number),
@@ -169,7 +169,7 @@ export default async function PaymentsPage({ searchParams }: { searchParams: Pro
       />
       <PageChrome
         section="payments"
-        page="receipts"
+        crumbs={[{ check: L.toCheck, confirmed: L.confirmed, rejected: L.rejected, all: L.all }[st] ?? L.toCheck]}
         actions={
           <>
           <a

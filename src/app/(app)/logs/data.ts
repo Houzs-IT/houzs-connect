@@ -106,7 +106,8 @@ export async function statusTimeline(waMessageId: string, createdAt: Date): Prom
       from connect.webhook_event w,
         jsonb_path_query(w.payload, '$.entry[*].changes[*].value.statuses[*]') s
       where w.source = 'whatsapp' and w.event_type like 'status%'
-        and w.created_at >= ${createdAt} and w.created_at < ${new Date(createdAt.getTime() + 7 * 86_400_000)}
+        and w.created_at >= ${createdAt.toISOString()}::timestamptz
+        and w.created_at < ${new Date(createdAt.getTime() + 7 * 86_400_000).toISOString()}::timestamptz
         and s->>'id' = ${waMessageId}
       order by (s->>'timestamp')::bigint
     `)) as unknown as { status: string; ts: string; code: string | null; title: string | null; detail: string | null }[];
