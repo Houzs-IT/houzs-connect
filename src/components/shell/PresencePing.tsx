@@ -13,7 +13,7 @@ export function PresencePing() {
     let timer: ReturnType<typeof setInterval> | null = null;
     const start = () => {
       if (timer) return;
-      timer = setInterval(() => void pingPresence().catch(() => {}), 60_000);
+      timer = setInterval(() => void pingPresence(window.location.pathname).catch(() => {}), 60_000);
     };
     const stop = () => {
       if (timer) clearInterval(timer);
@@ -22,7 +22,7 @@ export function PresencePing() {
     const onVisibility = () => {
       if (document.hidden) stop();
       else {
-        void pingPresence().catch(() => {});
+        void pingPresence(window.location.pathname).catch(() => {});
         start();
       }
     };
