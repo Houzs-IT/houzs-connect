@@ -117,6 +117,16 @@ export const NODE_CATALOG: NodeCatalogEntry[] = [
     hint: "Send a WhatsApp Flow form; wait for the submission",
   },
   {
+    type: "send_template",
+    label: "Send Template Message",
+    category: "Messaging",
+    color: "#0f766e",
+    glyph: "❏",
+    keywords: ["template", "approved", "hsm", "open", "business initiated", "whatsapp template"],
+    hint: "Send an approved template; required to open a conversation",
+    branching: true,
+  },
+  {
     type: "ai_agent_reply",
     label: "AI Agent Reply",
     category: "Messaging",

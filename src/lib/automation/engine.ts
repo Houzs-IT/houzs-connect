@@ -142,6 +142,32 @@ async function execNode(
       return { pause: "text" };
     }
 
+    case "send_template": {
+      // An approved WhatsApp template — the only thing Meta will deliver to OPEN a
+      // conversation (outside the 24h customer-service window), so every business-
+      // initiated first message uses this. transport sends via the template path in
+      // LIVE and records `message` so the inbox shows the sentence; templateParams
+      // fill the body's {{1}}, {{2}}, … in order. With buttons (the template's quick
+      // replies) the run pauses for the tap and edges branch on the button id, just
+      // like ask_buttons; without them it is a one-shot send like send_text.
+      const params = (d.templateParams ?? []).map((p) => interpolate(String(p), varCtx));
+      const awaiting = !!(d.buttons && d.buttons.length > 0);
+      await sendOutbound(ctx.conversationId, interpolate(d.message ?? "", varCtx), {
+        isBot: true,
+        ...(d.templateName
+          ? { template: { name: d.templateName, lang: d.templateLang, params } }
+          : {}),
+        ...(awaiting ? { buttons: d.buttons } : {}),
+      });
+      await logStep(ctx.runId, {
+        node: node.id,
+        type: node.type,
+        template: d.templateName,
+        ...(awaiting ? { awaiting: "button" } : {}),
+      });
+      return awaiting ? { pause: "button" } : { next: nextNodeId(ctx.graph, node.id) };
+    }
+
     case "send_form": {
       // Send a Meta WhatsApp Flow form. d.formId points at a houzs-connect form
       // whose PUBLISHED meta flow id is what's actually sent; flow_token = the run
