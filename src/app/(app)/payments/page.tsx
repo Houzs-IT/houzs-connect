@@ -6,7 +6,7 @@ import { PageChrome } from "@/components/PageChrome";
 import { SecondaryMenu } from "@/components/shell/SecondaryMenu";
 import { IconSearch } from "@/components/icons";
 import { getCurrentMember } from "@/lib/current-member";
-import { initials, tint } from "@/lib/format";
+import { displayName, initials, tint } from "@/lib/format";
 import { getDict } from "@/lib/i18n/server";
 import { shortWhen } from "@/app/(app)/contacts/queries";
 import { PaymentReview } from "./PaymentReview";
@@ -274,7 +274,7 @@ export default async function PaymentsPage({ searchParams }: { searchParams: Pro
                 )}
                 {shown.map((r) => {
                   const on = r.id === selected?.id;
-                  const who = r.name || r.phone;
+                  const who = displayName(r.name, r.phone);
                   const c = tint(r.phone);
                   const badge =
                     r.status === "PENDING"

@@ -21,3 +21,9 @@ WHATSAPP_VERIFY_TOKEN=""     # any secret; must match Meta's webhook config
 # WHATSAPP_MODE=DEMO and refuse every call otherwise.
 ERP_WEBHOOK_SECRET=""
 DRIVER_WEBHOOK_SECRET=""
+
+# Reading payment slips: a customer's image becomes a payment to check only when
+# Claude finds a paid amount on it (src/lib/receipt-vision.ts). Set as a Worker
+# secret: `wrangler secret put ANTHROPIC_API_KEY`. Left empty, every image becomes
+# a blank payment to check, as before.
+ANTHROPIC_API_KEY=

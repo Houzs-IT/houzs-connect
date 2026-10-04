@@ -1,3 +1,4 @@
+import { intakeReceipt } from "@/lib/receipt-intake";
 import { NextRequest, NextResponse } from "next/server";
 import { eq, sql } from "drizzle-orm";
 import { getDb } from "@/db/client";
@@ -5,7 +6,6 @@ import { ensureContactColumns } from "@/db/ensure";
 import {
   contact as contactTable,
   message as messageTable,
-  payment as paymentTable,
   webhookEvent,
 } from "@/db/schema";
 import { attrs } from "@/lib/format";
@@ -281,23 +281,15 @@ export async function POST(req: NextRequest) {
         });
 
         if (isMedia) {
-          // A customer sending an image is, in this business, almost always a
-          // payment slip — that is the whole balance-collection flow. We cannot
-          // read the amount off it: runOcr() parses TEXT, and what arrives here
-          // is a Graph API media id. Rather than drop it (which is what used to
-          // happen — the image became an empty text message and no payment row
-          // was ever created), record a PENDING payment carrying the media id so
-          // it surfaces on /payments for a human to verify.
-          await db.insert(paymentTable).values({
+          // An image may be a payment slip — or a poster, a product photo, a
+          // chat screenshot. Claude reads it and only a picture showing a paid
+          // amount becomes a payment to check (lib/receipt-intake.ts).
+          await intakeReceipt({
             contactId: contact.id,
             conversationId: convo.id,
-            amount: null,
-            method: null,
-            referenceNo: null,
             orderRef: (attrs(contact.attributes).ref_1 as string) ?? null,
-            receiptMediaUrl: media?.id ? `whatsapp-media:${media.id}` : null,
-            ocrRawText: media?.caption ?? null,
-            status: "PENDING",
+            mediaId: media?.id ?? null,
+            caption: media?.caption ?? null,
           });
         }
 
