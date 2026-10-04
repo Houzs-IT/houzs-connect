@@ -41,6 +41,13 @@ async function main() {
   const { db, sql } = scriptDb();
   console.log("Seeding rebuilt WS-A flows…");
 
+  // Ensure form.meta_flow_id exists (migration 0009). The Drizzle migrate runner
+  // can't create its tracking table in the connect schema (owned by
+  // houzs_connect), so apply this one column here — idempotently, as the owner
+  // role we inherit. Drizzle selects all form columns, so without it the form
+  // upsert's query references a column that isn't there yet.
+  await sql`ALTER TABLE connect.form ADD COLUMN IF NOT EXISTS meta_flow_id text`;
+
   // WS-A flows are Houzs's — 2990's sends route to the Houzs number too, and
   // Hookka (manufacturing) must NOT receive delivery flows. Target Houzs by slug
   // rather than every company that happens to have a channel.
