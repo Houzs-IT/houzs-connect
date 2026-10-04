@@ -1,5 +1,5 @@
 import { Fragment } from "react";
-import { clockTime, stamp } from "@/lib/format";
+import { clockTime, mediaCaption, stamp } from "@/lib/format";
 import { IconCheck } from "@/components/icons";
 import { isLive } from "@/lib/whatsapp/cloud-api";
 import { getDict, getLang } from "@/lib/i18n/server";
@@ -208,13 +208,7 @@ export async function Thread({
           : null;
         // The body of a media message is its caption plus a placeholder
         // ("[attachment]" in, "[image] name.jpg" out) — show the caption only.
-        const text = media
-          ? (m.body ?? "")
-              .split("\n")
-              .filter((l) => l.trim() !== "[attachment]" && !/^\[(image|document)\] /.test(l.trim()))
-              .join("\n")
-              .trim()
-          : m.body;
+        const text = media ? mediaCaption(m.body) : m.body;
         return (
           <Fragment key={m.id}>
             {sep}

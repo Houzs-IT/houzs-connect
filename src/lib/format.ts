@@ -42,6 +42,19 @@ export function clockTime(d?: Date | string | null): string {
   });
 }
 
+/**
+ * The caption of a picture / file message. Its body is the caption plus a
+ * placeholder — "[attachment]" from the inbound webhook, "[image] name.jpg" /
+ * "[document] name.pdf" for one we sent — and only the caption is real text.
+ */
+export function mediaCaption(body: string | null | undefined): string {
+  return (body ?? "")
+    .split("\n")
+    .filter((l) => l.trim() !== "[attachment]" && !/^\[(image|document)\] /.test(l.trim()))
+    .join("\n")
+    .trim();
+}
+
 /** A contact's name, or their number written properly when the "name" is empty or just digits. */
 export function displayName(name: string | null | undefined, phone: string): string {
   const n = (name ?? "").trim();
