@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { useShell } from "@/components/shell/ShellProvider";
-import { formatPhone, initials, tint } from "@/lib/format";
+import { displayName, formatPhone, initials, tint } from "@/lib/format";
 import { fmt } from "@/lib/i18n/dict";
 import { reviewPayment, updatePaymentFields } from "./actions";
 import { money } from "./util";
@@ -60,7 +60,7 @@ export function PaymentReview({
   const [pending, start] = useTransition();
   const [turn, setTurn] = useState(0);
   const [imgFailed, setImgFailed] = useState(false);
-  const who = p.name || formatPhone(p.phone);
+  const who = displayName(p.name, p.phone);
   const c = tint(p.phone);
 
   const set = (k: keyof typeof f, v: string) => {

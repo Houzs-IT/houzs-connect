@@ -40,6 +40,12 @@ export function clockTime(d?: Date | string | null): string {
   });
 }
 
+/** A contact's name, or their number written properly when the "name" is empty or just digits. */
+export function displayName(name: string | null | undefined, phone: string): string {
+  const n = (name ?? "").trim();
+  return n && !/^\+?[\d\s-]+$/.test(n) ? n : formatPhone(phone);
+}
+
 /** Inbox list stamp: clock time today, "Yesterday", then dd/mm. */
 export function listTime(d?: Date | string | null, yesterday = "Yesterday"): string {
   if (!d) return "";
