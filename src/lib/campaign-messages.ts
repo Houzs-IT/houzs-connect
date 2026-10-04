@@ -2,7 +2,7 @@ import { sql } from "drizzle-orm";
 import { getDb, type DB } from "@/db/client";
 
 /*
-  Which campaign sent a message: connect.message.campaign_id (migration 0010).
+  Which campaign sent a message: connect.message.campaign_id (migration 0011).
 
   Written right after each campaign send (campaigns/actions.ts) and read here
   for the list's sent / read / replied bar and the campaign detail page. Like
@@ -110,7 +110,7 @@ export async function campaignCounts(ids: string[]): Promise<Map<string, Campaig
       });
     }
   } catch {
-    // Column not there yet (before migration 0010).
+    // Column not there yet (before migration 0011).
   }
   return out;
 }

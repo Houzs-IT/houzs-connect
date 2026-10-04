@@ -2,7 +2,7 @@ import { and, desc, eq, ne, sql } from "drizzle-orm";
 import { getDb, type DB } from "@/db/client";
 import { conversation, message } from "@/db/schema";
 import type { FlowButton } from "@/lib/automation/types";
-import { isLive, sendButtons, sendTemplate, sendText, type SendOutcome } from "./cloud-api";
+import { isLive, sendButtons, sendFlow, sendTemplate, sendText, type SendOutcome } from "./cloud-api";
 import type { AttachmentKind } from "./media-limits";
 import {
   mediaConfig,
@@ -76,6 +76,18 @@ interface OutboundOptions {
    * buttons, which keep their own payload.
    */
   payload?: Record<string, unknown>;
+  /**
+   * Send an interactive WhatsApp Flow (a Meta form) instead of text / buttons.
+   * `flowId` must be a PUBLISHED Meta Flow id; `flowToken` correlates the
+   * customer's submission back to the waiting automation run (we pass the run id).
+   */
+  flow?: {
+    flowId: string;
+    flowToken: string;
+    cta: string;
+    screen: string;
+    data?: Record<string, unknown>;
+  };
 }
 
 /** Send an outbound message on a conversation (DEMO: just record it). */
@@ -117,21 +129,24 @@ export async function sendOutbound(
   const blocked = await blockedReason(db, conversationId);
   if (blocked) return null;
   const interactive = !!(opts.buttons && opts.buttons.length > 0);
+  const flowSend = !!opts.flow;
   const [msg] = await db
     .insert(message)
     .values({
       conversationId,
       direction: "OUT",
-      type: opts.type ?? (opts.template ? "TEMPLATE" : interactive ? "INTERACTIVE" : "TEXT"),
+      type: opts.type ?? (opts.template ? "TEMPLATE" : interactive || flowSend ? "INTERACTIVE" : "TEXT"),
       body,
       isBot: opts.isBot ?? true,
       sentByMemberId: opts.sentByMemberId ?? null,
       status: "SENT",
       // A template send keeps its name, language and parameters, so System
       // Logs can send exactly the same message again after a failure.
-      interactivePayload: interactive
-        ? { kind: "buttons", buttons: opts.buttons }
-        : (opts.payload ?? (opts.template ? { kind: "template", template: opts.template } : null)),
+      interactivePayload: flowSend
+        ? { kind: "flow", cta: opts.flow!.cta, flowToken: opts.flow!.flowToken }
+        : interactive
+          ? { kind: "buttons", buttons: opts.buttons }
+          : (opts.payload ?? (opts.template ? { kind: "template", template: opts.template } : null)),
     })
     .returning();
   await db
@@ -175,9 +190,11 @@ export async function sendOutbound(
             outcome,
             from
           )
-        : interactive
-          ? await sendButtons(convo.contact.phone, body, opts.buttons ?? [], outcome, from)
-          : await sendText(convo.contact.phone, body, outcome, from);
+        : opts.flow
+          ? await sendFlow(convo.contact.phone, body, opts.flow, outcome, from)
+          : interactive
+            ? await sendButtons(convo.contact.phone, body, opts.buttons ?? [], outcome, from)
+            : await sendText(convo.contact.phone, body, outcome, from);
       // No id back means Meta refused it (bad template, closed window, bad
       // number). The row must say so — a message that reads SENT in the inbox
       // while the customer got nothing is worse than no message at all.

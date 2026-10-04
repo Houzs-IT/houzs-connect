@@ -7,6 +7,7 @@ import { getDb } from "@/db/client";
 import { form as formTable, formResponse as formResponseTable } from "@/db/schema";
 import { getCurrentMember } from "@/lib/current-member";
 import { normaliseFields, parseFieldLines, type FormField } from "./fields";
+import { isFlowsConfigured, publishFlow } from "@/lib/whatsapp/flows";
 
 /**
  * A signed-in member, and the form must belong to their company.
@@ -82,10 +83,25 @@ export async function updateForm(
 export async function setFormStatus(formId: string, published: boolean) {
   const auth = await authorizeForm(formId);
   if (!auth) return { ok: false as const, error: "not found" };
-  await auth.db
-    .update(formTable)
-    .set({ status: published ? "published" : "draft" })
-    .where(eq(formTable.id, formId));
+
+  // Publishing: when Flows is configured (LIVE + a WABA id), create + publish a
+  // Meta WhatsApp Flow from the form's fields and store its id, so the send_form
+  // node can send it. In DEMO (or without a WABA id) publishing just flips the
+  // status, and send_form stays a no-op (metaFlowId null) — nothing breaks.
+  if (published && isFlowsConfigured()) {
+    const res = await publishFlow(auth.form);
+    if (!res.ok) return { ok: false as const, error: res.error };
+    await auth.db
+      .update(formTable)
+      .set({ status: "published", metaFlowId: res.flowId })
+      .where(eq(formTable.id, formId));
+  } else {
+    await auth.db
+      .update(formTable)
+      .set({ status: published ? "published" : "draft" })
+      .where(eq(formTable.id, formId));
+  }
+
   revalidatePath("/forms");
   revalidatePath(`/forms/${formId}`);
   return { ok: true as const, published };

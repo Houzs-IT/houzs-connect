@@ -2,7 +2,7 @@
 //
 // Same reason as the other ensure* modules: deploys land before
 // `pnpm db:migrate`, and Internal is a whole page that would otherwise error
-// until someone runs it. Migration 0011 is the real record; this runs the same
+// until someone runs it. Migration 0012 is the real record; this runs the same
 // statements, all IF NOT EXISTS.
 
 import { sql } from "drizzle-orm";

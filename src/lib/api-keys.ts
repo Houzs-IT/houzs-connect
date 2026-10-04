@@ -4,7 +4,7 @@ import { getDb } from "@/db/client";
 import { ensureSettingsExtras } from "@/db/ensure-settings-extras";
 
 /*
-  API keys for other systems (connect.api_key, migration 0013). The key is
+  API keys for other systems (connect.api_key, migration 0014). The key is
   shown once when created; only its SHA-256 is stored, plus the first
   characters so a list can tell keys apart. A request authenticates with
   `Authorization: Bearer hc_…` and acts as the key's company.

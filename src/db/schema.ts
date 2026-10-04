@@ -30,7 +30,7 @@ export const connect = pgSchema("connect");
 // ─────────────────────────── Enums ───────────────────────────
 
 export const roleEnum = connect.enum("Role", [
-  // Added by migration 0012: every permission, plus final approval of access
+  // Added by migration 0013: every permission, plus final approval of access
   // requests and control of roles, billing and channels.
   "SUPER_ADMIN",
   "OWNER",
@@ -136,7 +136,7 @@ export const member = connect.table(
     concurrencyLimit: integer("concurrency_limit").notNull().default(0),
     managerId: text("manager_id"),
     departmentId: text("department_id"),
-    // NOTE: connect.member also has `last_seen_at` (migration 0009). It is left
+    // NOTE: connect.member also has `last_seen_at` (migration 0010). It is left
     // out of this definition on purpose and read/written by lib/presence.ts —
     // see the note there.
     // ERP org sync: the ERP users.id this member mirrors, and a soft-delete flag
@@ -301,7 +301,7 @@ export const message = connect.table(
     isBot: boolean("is_bot").notNull().default(false),
     waMessageId: text("wa_message_id"),
     interactivePayload: jsonb("interactive_payload"),
-    // NOTE: connect.message also has `campaign_id` (migration 0010), left out
+    // NOTE: connect.message also has `campaign_id` (migration 0011), left out
     // of this definition on purpose — see src/lib/campaign-messages.ts.
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -498,7 +498,7 @@ export const campaign = connect.table(
 );
 
 // ─────────────────────────── Internal chat ───────────────────────────
-// Staff-to-staff channels and direct messages (migration 0011, also
+// Staff-to-staff channels and direct messages (migration 0012, also
 // self-applied by db/ensure-internal.ts).
 
 export const internalChannel = connect.table(
@@ -632,6 +632,8 @@ export const form = connect.table(
     name: text("name").notNull(),
     status: text("status").notNull().default("draft"),
     fields: jsonb("fields"),
+    // The published Meta WhatsApp Flow id this form maps to; null until published.
+    metaFlowId: text("meta_flow_id"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({ companyIdx: index("form_company_idx").on(t.companyId) })

@@ -246,6 +246,54 @@ export async function sendButtons(
   }, out, from);
 }
 
+/**
+ * Send an interactive WhatsApp Flow — a Meta "form". `flowId` is a PUBLISHED
+ * Meta Flow id; `flowToken` correlates the customer's submission back to the
+ * waiting automation run; `cta` is the button label that opens the form.
+ * Docs: https://developers.facebook.com/docs/whatsapp/flows/reference/flowsapi
+ */
+export async function sendFlow(
+  to: string,
+  body: string,
+  flow: {
+    flowId: string;
+    flowToken: string;
+    cta: string;
+    screen: string;
+    data?: Record<string, unknown>;
+  },
+  out?: SendOutcome,
+  from?: string
+): Promise<string | null> {
+  if (!isLive()) return null;
+  return post(
+    {
+      to,
+      type: "interactive",
+      interactive: {
+        type: "flow",
+        body: { text: body },
+        action: {
+          name: "flow",
+          parameters: {
+            flow_message_version: "3",
+            flow_id: flow.flowId,
+            flow_token: flow.flowToken,
+            flow_cta: flow.cta,
+            flow_action: "navigate",
+            flow_action_payload: {
+              screen: flow.screen,
+              ...(flow.data ? { data: flow.data } : {}),
+            },
+          },
+        },
+      },
+    },
+    out,
+    from
+  );
+}
+
 /** Send an approved template message. */
 export async function sendTemplate(
   to: string,

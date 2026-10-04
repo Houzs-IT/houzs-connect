@@ -68,7 +68,6 @@ export const NODE_CATALOG: NodeCatalogEntry[] = [
     glyph: "↪",
     keywords: ["goto", "handoff", "chain", "another automation"],
     hint: "Hand the contact to another automation",
-    stub: true,
   },
   {
     type: "delay",
@@ -107,6 +106,15 @@ export const NODE_CATALOG: NodeCatalogEntry[] = [
     glyph: "⌨",
     keywords: ["ask", "prompt", "capture", "input", "reply", "question"],
     hint: "Ask, then save the reply to an attribute",
+  },
+  {
+    type: "send_form",
+    label: "Send Form (WhatsApp Flow)",
+    category: "Messaging",
+    color: "#2a6f97",
+    glyph: "▦",
+    keywords: ["form", "flow", "collect", "fields", "property details", "whatsapp flow"],
+    hint: "Send a WhatsApp Flow form; wait for the submission",
   },
   {
     type: "ai_agent_reply",

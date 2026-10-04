@@ -2,7 +2,7 @@ import { sql } from "drizzle-orm";
 import { getDb, type DB } from "@/db/client";
 
 /*
-  Online status: connect.member.last_seen_at (migration 0009).
+  Online status: connect.member.last_seen_at (migration 0010).
 
   Written when a signed-in member renders any page under (app) and by a
   once-a-minute heartbeat from an open, visible tab (PresencePing). Someone is
@@ -68,7 +68,7 @@ export async function companyPresence(companyId: string): Promise<Seen[]> {
       return { id: r.id, name: r.name, lastSeen, online: !!lastSeen && now - lastSeen.getTime() < ONLINE_WINDOW_MS };
     });
   } catch {
-    // Before migration 0009: no column yet, so nobody is known to be online.
+    // Before migration 0010: no column yet, so nobody is known to be online.
     const rows = (await db.execute(sql`
       SELECT "id", "name" FROM "connect"."member"
       WHERE "company_id" = ${companyId} AND "active" = true ORDER BY "name"

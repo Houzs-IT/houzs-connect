@@ -6,7 +6,7 @@ import { ensureAccessTables } from "@/db/ensure-access";
   Access requests from the sign-in page. Two steps: a department manager
   vouches for the person (pending_manager → pending_final), then a Super Admin
   picks the role and companies (→ approved), and that creates the member rows.
-  Either step can reject. Stored in connect.access_request (migration 0012).
+  Either step can reject. Stored in connect.access_request (migration 0013).
 */
 
 export type AccessRequest = {

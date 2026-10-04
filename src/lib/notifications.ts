@@ -5,7 +5,7 @@ import { SLA_MINUTES } from "@/lib/sla";
 
 /*
   What can reach a person, and their choice per kind (connect.notification_pref,
-  migration 0013). Browser alerts are shown by the open app (NotifyPoller);
+  migration 0014). Browser alerts are shown by the open app (NotifyPoller);
   email needs a mail service Connect does not have yet, so it is stored but
   not sent.
 */

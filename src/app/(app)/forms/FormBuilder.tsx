@@ -110,7 +110,10 @@ export function FormBuilder({
 
   const toggle = () =>
     start(async () => {
-      await setFormStatus(id, !published);
+      // Putting a form in use publishes it to Meta as a WhatsApp Flow when
+      // Flows is configured; Meta's refusal comes back here and is shown.
+      const res = await setFormStatus(id, !published);
+      if (!res.ok) return setMsg({ ok: false, text: res.error ?? "Could not change this form." });
       router.refresh();
     });
 

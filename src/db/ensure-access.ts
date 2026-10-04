@@ -1,7 +1,7 @@
 // SUPER_ADMIN, role_permission and access_request, self-applied at runtime.
 //
 // Same reason as the other ensure* modules: deploys land before
-// `pnpm db:migrate`. Migration 0012 is the record; these are its statements,
+// `pnpm db:migrate`. Migration 0013 is the record; these are its statements,
 // all IF NOT EXISTS.
 
 import { sql } from "drizzle-orm";

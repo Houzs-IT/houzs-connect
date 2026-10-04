@@ -6,7 +6,7 @@ import { ensureAccessTables } from "@/db/ensure-access";
 /*
   What each role may do. The defaults below are the redesign's starting
   matrix; a company can change any cell on Settings → Roles & permissions, and
-  those choices live in connect.role_permission (migration 0012). SUPER_ADMIN
+  those choices live in connect.role_permission (migration 0013). SUPER_ADMIN
   always has everything — nobody can lock the last key-holder out.
 */
 

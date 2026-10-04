@@ -72,7 +72,13 @@ interface WaValue {
     // media id to fetch from the Graph API (plus an optional caption).
     image?: { id?: string; mime_type?: string; caption?: string };
     document?: { id?: string; mime_type?: string; filename?: string; caption?: string };
-    interactive?: { button_reply?: { id: string; title: string }; list_reply?: { id: string; title: string } };
+    interactive?: {
+      button_reply?: { id: string; title: string };
+      list_reply?: { id: string; title: string };
+      // A WhatsApp Flow (form) submission: response_json is a JSON string of the
+      // collected { field_key: value } pairs.
+      nfm_reply?: { response_json?: string; name?: string };
+    };
   }>;
   statuses?: Array<{ id: string; status: string }>;
 }
@@ -224,22 +230,43 @@ export async function POST(req: NextRequest) {
         const convo = await getOrCreateConversation(channel.id, contact.id);
 
         const buttonId = m.interactive?.button_reply?.id ?? m.interactive?.list_reply?.id;
+        // A WhatsApp Flow (form) submission arrives as interactive.nfm_reply with
+        // the collected fields JSON-encoded in response_json.
+        const flowReply = m.interactive?.nfm_reply;
+        const flowFields: Record<string, string> | null = flowReply?.response_json
+          ? (() => {
+              try {
+                const obj = JSON.parse(flowReply.response_json!) as Record<string, unknown>;
+                const out: Record<string, string> = {};
+                for (const [k, v] of Object.entries(obj)) {
+                  if (k === "flow_token") continue; // Meta's bookkeeping, not a field
+                  if (v != null) out[k] = String(v);
+                }
+                return out;
+              } catch {
+                return null;
+              }
+            })()
+          : null;
         const media = m.image ?? m.document;
         const isMedia = m.type === "image" || m.type === "document";
         const text =
           m.text?.body ??
           m.interactive?.button_reply?.title ??
           m.interactive?.list_reply?.title ??
+          (flowFields ? "[form submitted]" : null) ??
           media?.caption ??
           (isMedia ? "[attachment]" : "");
 
         const inbound = await recordInbound(convo.id, text, {
-          type: isMedia ? (m.type === "document" ? "DOCUMENT" : "IMAGE") : buttonId ? "INTERACTIVE" : "TEXT",
-          interactivePayload: buttonId
-            ? { tapped: buttonId }
-            : media?.id
-              ? { mediaId: media.id, mimeType: media.mime_type }
-              : undefined,
+          type: isMedia ? (m.type === "document" ? "DOCUMENT" : "IMAGE") : buttonId || flowFields ? "INTERACTIVE" : "TEXT",
+          interactivePayload: flowFields
+            ? { kind: "flow_reply", fields: flowFields }
+            : buttonId
+              ? { tapped: buttonId }
+              : media?.id
+                ? { mediaId: media.id, mimeType: media.mime_type }
+                : undefined,
         });
 
         if (isMedia) {
@@ -263,7 +290,10 @@ export async function POST(req: NextRequest) {
           });
         }
 
-        const flows = await handleInboundMessage(contact.id, buttonId ? { buttonId } : { text });
+        const flows = await handleInboundMessage(
+          contact.id,
+          flowFields ? { flow: { fields: flowFields } } : buttonId ? { buttonId } : { text }
+        );
 
         // The company's welcome / away message — only when no automation took
         // this message, so a greeting never lands in the middle of a flow that is

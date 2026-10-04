@@ -1,7 +1,7 @@
 // notification_pref and api_key, self-applied at runtime.
 //
 // Same reason as the other ensure* modules: deploys land before
-// `pnpm db:migrate`. Migration 0013 is the record; these are its statements.
+// `pnpm db:migrate`. Migration 0014 is the record; these are its statements.
 
 import { sql } from "drizzle-orm";
 import type { DB } from "./client";
