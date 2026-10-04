@@ -79,6 +79,11 @@ interface WaValue {
       // collected { field_key: value } pairs.
       nfm_reply?: { response_json?: string; name?: string };
     };
+    // A quick-reply button tapped on an approved TEMPLATE arrives top-level with
+    // type "button" — NOT as interactive.button_reply. Without this, Confirm /
+    // Amend taps on a delivery/amend opener (the only way those first messages can
+    // be sent business-initiated) are dropped and the run never resumes.
+    button?: { payload?: string; text?: string };
   }>;
   statuses?: Array<{ id: string; status: string }>;
 }
@@ -229,7 +234,12 @@ export async function POST(req: NextRequest) {
           .returning();
         const convo = await getOrCreateConversation(channel.id, contact.id);
 
-        const buttonId = m.interactive?.button_reply?.id ?? m.interactive?.list_reply?.id;
+        // An interactive reply's id, or a template quick-reply's payload (its
+        // text if no payload was set — an empty payload falls through to it).
+        const buttonId =
+          m.interactive?.button_reply?.id ??
+          m.interactive?.list_reply?.id ??
+          (m.button?.payload || m.button?.text);
         // A WhatsApp Flow (form) submission arrives as interactive.nfm_reply with
         // the collected fields JSON-encoded in response_json.
         const flowReply = m.interactive?.nfm_reply;
@@ -254,6 +264,7 @@ export async function POST(req: NextRequest) {
           m.text?.body ??
           m.interactive?.button_reply?.title ??
           m.interactive?.list_reply?.title ??
+          m.button?.text ??
           (flowFields ? "[form submitted]" : null) ??
           media?.caption ??
           (isMedia ? "[attachment]" : "");

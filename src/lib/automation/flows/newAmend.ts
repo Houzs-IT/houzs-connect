@@ -34,5 +34,11 @@ export const newAmendFlow: SeedFlow = {
   triggerType: "WEBHOOK",
   triggerConfig: { source: "erp", event: "reschedule" },
   forms: SHARED_FORMS,
-  build: (formIds) => buildDeliveryGraph({ opening: OPENING, formIds }),
+  build: (formIds) =>
+    buildDeliveryGraph({
+      opening: OPENING,
+      openerTemplate: "hc_order_amend_follow_up_1_order",
+      openerParams: ["{full_name}", "{ref_1}", "{delivery_date_1}", "{brand_1}"],
+      formIds,
+    }),
 };
