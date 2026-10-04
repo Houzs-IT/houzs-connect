@@ -5,6 +5,7 @@ import { isLive } from "@/lib/whatsapp/cloud-api";
 import { getDict, getLang } from "@/lib/i18n/server";
 import { fmt } from "@/lib/i18n/dict";
 import { demoTap } from "@/app/actions";
+import { ChatMedia } from "./ChatMedia";
 
 /**
  * Which day a message belongs to, in Malaysian time.
@@ -197,6 +198,23 @@ export async function Thread({
         const out = m.direction === "OUT";
         const payload = (m.interactivePayload as Buttons | null) ?? null;
         const buttons = payload?.buttons ?? [];
+        // A picture or file: the inbound webhook stores { mediaId, mimeType },
+        // an attachment we sent stores { kind: "media", mediaId, fileName }.
+        const media = (m.type === "IMAGE" || m.type === "DOCUMENT") && typeof (payload as { mediaId?: unknown } | null)?.mediaId === "string"
+          ? {
+              kind: m.type as "IMAGE" | "DOCUMENT",
+              fileName: ((payload as { fileName?: unknown }).fileName as string | undefined) ?? null,
+            }
+          : null;
+        // The body of a media message is its caption plus a placeholder
+        // ("[attachment]" in, "[image] name.jpg" out) — show the caption only.
+        const text = media
+          ? (m.body ?? "")
+              .split("\n")
+              .filter((l) => l.trim() !== "[attachment]" && !/^\[(image|document)\] /.test(l.trim()))
+              .join("\n")
+              .trim()
+          : m.body;
         return (
           <Fragment key={m.id}>
             {sep}
@@ -209,7 +227,18 @@ export async function Thread({
                       : "rounded-[14px_14px_14px_4px] bg-[var(--color-in)] text-[var(--color-ink)] shadow-[0_0_0_1px_var(--color-border),0_1px_2px_rgba(0,0,0,0.05)]"
                   }`}
                 >
-                  <p className="whitespace-pre-wrap">{m.body}</p>
+                  {media && (
+                    <div className={text ? "mb-1.5" : ""}>
+                      <ChatMedia
+                        src={`/inbox/${conversationId}/media/${m.id}`}
+                        kind={media.kind}
+                        fileName={media.fileName}
+                        goneLabel={s.mediaGone}
+                        openLabel={s.mediaOpen}
+                      />
+                    </div>
+                  )}
+                  {text && <p className="whitespace-pre-wrap">{text}</p>}
                 </div>
 
                 {/* Quick-reply buttons. On DEMO these are tappable so one person
