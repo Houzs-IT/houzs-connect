@@ -1,26 +1,38 @@
 "use server";
 
 import { getCurrentMember } from "@/lib/current-member";
-import { companyPresence, touchPresence } from "@/lib/presence";
+import { ONLINE_WINDOW_MS, recentPresence, touchPresence } from "@/lib/presence";
 
-/** Heartbeat from an open Connect tab — keeps the member "online". */
-export async function pingPresence(): Promise<void> {
+/** Heartbeat from an open Connect tab — keeps the member "online", and notes
+ *  the page it is on (pathname only) for the who's-online panel. */
+export async function pingPresence(path?: string): Promise<void> {
   const me = await getCurrentMember();
-  if (me) await touchPresence(me.id);
+  if (!me) return;
+  const ok = typeof path === "string" && path.startsWith("/") && !path.startsWith("//") && path.length <= 300;
+  await touchPresence(me.id, ok ? path : null);
 }
 
-export type TeamPresence = { id: string; name: string; online: boolean; lastSeen: string | null; me: boolean }[];
+export type PresenceMember = { id: string; name: string; role: string; lastSeen: string; lastPath: string | null };
+export type TeamPresence = { active: PresenceMember[]; away: PresenceMember[] };
 
-/** Who in this company is in Connect right now, for the top bar. */
+/**
+ * Who else in this company is in Connect: active (seen in the last 2 minutes)
+ * and away (2–15 minutes). You are left out, as in the ERP.
+ */
 export async function teamPresence(): Promise<TeamPresence> {
   const me = await getCurrentMember();
-  if (!me) return [];
-  const people = await companyPresence(me.companyId);
-  return people.map((p) => ({
+  if (!me) return { active: [], away: [] };
+  const now = Date.now();
+  const people = (await recentPresence(me.companyId)).filter((p) => p.id !== me.id);
+  const toMember = (p: (typeof people)[number]): PresenceMember => ({
     id: p.id,
     name: p.name,
-    online: p.online,
-    lastSeen: p.lastSeen ? p.lastSeen.toISOString() : null,
-    me: p.id === me.id,
-  }));
+    role: p.role,
+    lastSeen: p.lastSeen.toISOString(),
+    lastPath: p.lastPath,
+  });
+  return {
+    active: people.filter((p) => now - p.lastSeen.getTime() < ONLINE_WINDOW_MS).map(toMember),
+    away: people.filter((p) => now - p.lastSeen.getTime() >= ONLINE_WINDOW_MS).map(toMember),
+  };
 }

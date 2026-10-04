@@ -73,9 +73,9 @@ export function Topbar({
 
       <div className={`${center ? "md:ml-0" : ""} ml-auto flex items-center gap-2`}>
         <CompanySwitcher companies={companies} className="hidden md:block" />
-        <OnlinePeople className="hidden lg:block" />
         <LangToggle className="hidden md:flex" />
         {actions}
+        <OnlinePeople className="hidden md:block" />
         <NotifyBell />
         <UserMenu
           current={{ name: current.name, role: current.role, department: current.department?.name }}

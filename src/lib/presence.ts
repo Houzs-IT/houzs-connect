@@ -17,6 +17,8 @@ import { getDb, type DB } from "@/db/client";
 
 /** Online = seen within this many ms. Two heartbeats' worth. */
 export const ONLINE_WINDOW_MS = 2 * 60_000;
+/** Quiet longer than ONLINE_WINDOW_MS but less than this = "away"; past it, gone (as in the ERP). */
+export const AWAY_WINDOW_MS = 15 * 60_000;
 /** Don't rewrite the stamp more often than this. */
 const WRITE_EVERY_S = 45;
 
@@ -27,6 +29,8 @@ function ensureColumn(db: DB): Promise<void> {
   if (!ensured) {
     ensured = db
       .execute(sql`ALTER TABLE "connect"."member" ADD COLUMN IF NOT EXISTS "last_seen_at" timestamp with time zone`)
+      // The page a tab was last on, so "who's online" can say where (and link there).
+      .then(() => db.execute(sql`ALTER TABLE "connect"."member" ADD COLUMN IF NOT EXISTS "last_path" text`))
       .then(() => undefined)
       .catch((e) => {
         ensured = null; // never cache a failure
@@ -36,15 +40,21 @@ function ensureColumn(db: DB): Promise<void> {
   return ensured;
 }
 
-/** Stamp this member as seen now. Never throws — presence must not break a page. */
-export async function touchPresence(memberId: string): Promise<void> {
+/**
+ * Stamp this member as seen now, and (from the heartbeat) the page they are on.
+ * Never throws — presence must not break a page.
+ */
+export async function touchPresence(memberId: string, path: string | null = null): Promise<void> {
   try {
     const db = getDb();
     await ensureColumn(db);
     await db.execute(sql`
-      UPDATE "connect"."member" SET "last_seen_at" = now()
+      UPDATE "connect"."member"
+      SET "last_seen_at" = now(), "last_path" = COALESCE(${path}, "last_path")
       WHERE "id" = ${memberId}
-        AND ("last_seen_at" IS NULL OR "last_seen_at" < now() - make_interval(secs => ${WRITE_EVERY_S}))
+        AND ("last_seen_at" IS NULL
+          OR "last_seen_at" < now() - make_interval(secs => ${WRITE_EVERY_S})
+          OR (${path}::text IS NOT NULL AND "last_path" IS DISTINCT FROM ${path}))
     `);
   } catch {
     // Column missing and not creatable (no privilege), or a transient error.
@@ -74,5 +84,28 @@ export async function companyPresence(companyId: string): Promise<Seen[]> {
       WHERE "company_id" = ${companyId} AND "active" = true ORDER BY "name"
     `)) as unknown as { id: string; name: string }[];
     return rows.map((r) => ({ id: r.id, name: r.name, lastSeen: null, online: false }));
+  }
+}
+
+export type Active = { id: string; name: string; role: string; lastSeen: Date; lastPath: string | null };
+
+/**
+ * People of a company seen in the last 15 minutes, newest first — the ERP's
+ * "who's online" list. Split into active / away by the caller.
+ */
+export async function recentPresence(companyId: string): Promise<Active[]> {
+  try {
+    const db = getDb();
+    await ensureColumn(db);
+    const since = new Date(Date.now() - AWAY_WINDOW_MS).toISOString();
+    const rows = (await db.execute(sql`
+      SELECT "id", "name", "role"::text AS "role", "last_seen_at", "last_path" FROM "connect"."member"
+      WHERE "company_id" = ${companyId} AND "active" = true
+        AND "last_seen_at" >= ${since}::timestamptz
+      ORDER BY "last_seen_at" DESC
+    `)) as unknown as { id: string; name: string; role: string; last_seen_at: string | Date; last_path: string | null }[];
+    return rows.map((r) => ({ id: r.id, name: r.name, role: r.role, lastSeen: new Date(r.last_seen_at), lastPath: r.last_path }));
+  } catch {
+    return [];
   }
 }
