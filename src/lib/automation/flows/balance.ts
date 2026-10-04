@@ -6,8 +6,8 @@ import { BALANCE } from "./shared";
  *
  * Distinct from the balance step inside New Delivery: the ERP fires this (by
  * name, trigger WEBHOOK) to chase an unpaid balance on its own, e.g. days after
- * a delivery was confirmed. Same copy and the same per-company {bank_block} /
- * {balance_due} variables (shared.ts) — no account number in source.
+ * a delivery was confirmed. Same copy and the same per-company {bank_block} +
+ * {amount} variables (shared.ts) — no account number in source.
  */
 export const balanceReminderFlow: SeedFlow = {
   key: "balance_reminder",

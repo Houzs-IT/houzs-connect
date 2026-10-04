@@ -42,8 +42,8 @@ export const reminder1Flow = templateFlow({
   description: "First delivery-scheduling reminder (manual): hc_order_reminder_1, full_name + order ref.",
   event: "reminder_1",
   templateName: "hc_order_reminder_1",
-  params: ["{full_name}", "{reference_no}"],
-  message: `Hi {full_name} 👋 Just a friendly reminder from Houzs Century about your order *{reference_no}* — your delivery details are ready, and we'd love to share them with you. Whenever you have a moment, simply reply to this message and we'll send your delivery date and driver information right away. Thank you!`,
+  params: ["{full_name}", "{ref_1}"],
+  message: `Hi {full_name} 👋 Just a friendly reminder from Houzs Century about your order *{ref_1}* — your delivery details are ready, and we'd love to share them with you. Whenever you have a moment, simply reply to this message and we'll send your delivery date and driver information right away. Thank you!`,
 });
 
 export const reminder2Flow = templateFlow({
@@ -52,8 +52,8 @@ export const reminder2Flow = templateFlow({
   description: "Second delivery-scheduling reminder (manual): hc_order_reminder_2, full_name + order ref.",
   event: "reminder_2",
   templateName: "hc_order_reminder_2",
-  params: ["{full_name}", "{reference_no}"],
-  message: `Hi {full_name} 👋 A gentle follow-up from Houzs Century about your order *{reference_no}* — we're still holding your delivery details and would love to help get it scheduled. Whenever you have a moment, simply reply to this message and we'll share your delivery date and keep you updated right here on WhatsApp. Thank you!`,
+  params: ["{full_name}", "{ref_1}"],
+  message: `Hi {full_name} 👋 A gentle follow-up from Houzs Century about your order *{ref_1}* — we're still holding your delivery details and would love to help get it scheduled. Whenever you have a moment, simply reply to this message and we'll share your delivery date and keep you updated right here on WhatsApp. Thank you!`,
 });
 
 export const reminder3Flow = templateFlow({
@@ -62,8 +62,8 @@ export const reminder3Flow = templateFlow({
   description: "Final delivery-scheduling reminder (manual): hc_order_reminder_3, full_name + order ref.",
   event: "reminder_3",
   templateName: "hc_order_reminder_3",
-  params: ["{full_name}", "{reference_no}"],
-  message: `Hi {full_name} 👋 One last friendly reminder from Houzs Century about your order *{reference_no}*. We've been trying to reach you to arrange delivery. So we can keep your preferred slot, please reply to this message with a quick confirmation. If we don't hear back, we may need to release the slot and reschedule — but just message us anytime and we'll sort it out together. Thank you!`,
+  params: ["{full_name}", "{ref_1}"],
+  message: `Hi {full_name} 👋 One last friendly reminder from Houzs Century about your order *{ref_1}*. We've been trying to reach you to arrange delivery. So we can keep your preferred slot, please reply to this message with a quick confirmation. If we don't hear back, we may need to release the slot and reschedule — but just message us anytime and we'll sort it out together. Thank you!`,
 });
 
 export const driverInfoFlow = templateFlow({
@@ -102,6 +102,6 @@ export const deliveryCompletedFlow = templateFlow({
   description: "Delivered-confirmation thank-you (delivery_completed_thanks): full_name + order ref.",
   event: "delivery_completed",
   templateName: "delivery_completed_thanks",
-  params: ["{full_name}", "{reference_no}"],
-  message: `Hi {full_name}, This is a confirmation that your order {reference_no} was successfully delivered today. Thank you for your understanding and for purchasing our products. We sincerely appreciate your support.`,
+  params: ["{full_name}", "{ref_1}"],
+  message: `Hi {full_name}, This is a confirmation that your order {ref_1} was successfully delivered today. Thank you for your understanding and for purchasing our products. We sincerely appreciate your support.`,
 });

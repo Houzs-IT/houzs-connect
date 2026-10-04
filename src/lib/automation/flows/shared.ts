@@ -25,7 +25,7 @@ Kindly complete the payment so we can proceed with your delivery as planned.
 
 {bank_block}
 
-💵 Amount Due: RM {balance_due}
+💵 Amount Due: RM {amount}
 
 Please send the payment slip here once done — we'll verify and secure your delivery slot right away 🚚`;
 
@@ -197,7 +197,7 @@ export function buildDeliveryGraph(opts: {
         type: "criteria_router",
         x: 1580,
         y: 120,
-        data: { rules: [{ branch: "has_balance", field: "balance_due", op: "set" }] },
+        data: { rules: [{ branch: "has_balance", field: "amount", op: "set" }] },
       },
       { id: "bal_msg", type: "send_text", x: 1800, y: 40, data: { message: BALANCE } },
       { id: "tag_balance", type: "add_tag", x: 2020, y: 40, data: { tag: "balance collection" } },
