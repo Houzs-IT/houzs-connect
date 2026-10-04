@@ -1,0 +1,45 @@
+name: Send test delivery message
+
+# Manual. Triggers the "New Delivery Follow-up" flow for ONE phone number (yours,
+# for testing) through Connect's ERP webhook, so you receive the real WhatsApp
+# template + Confirm / Amend buttons. Sends to exactly the number you type — no
+# customer data involved. Needs the CONNECT_WEBHOOK_KEY repo secret (same value
+# as the workers' CONNECT_WEBHOOK_KEY).
+on:
+  workflow_dispatch:
+    inputs:
+      phone:
+        description: "WhatsApp number, digits only with country code (e.g. 60123456789)"
+        required: true
+      name:
+        description: "Name to greet in the message"
+        required: false
+        default: "Test"
+
+concurrency:
+  group: send-test
+  cancel-in-progress: false
+
+jobs:
+  send:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger New Delivery Follow-up for one number
+        env:
+          CONNECT_WEBHOOK_KEY: ${{ secrets.CONNECT_WEBHOOK_KEY }}
+          PHONE: ${{ inputs.phone }}
+          NAME: ${{ inputs.name }}
+        run: |
+          payload=$(printf '{"phone":"%s","name":"%s","automation":"New Delivery Follow-up","attributes":{"ref_1":"HC-SO-TEST01","delivery_date_1":"2026/10/15","brand_1":"SlumberLand","order_total":"1"}}' "$PHONE" "$NAME")
+          echo "POST https://chat.houzscentury.com/api/webhooks/erp  (phone=$PHONE)"
+          code=$(curl -sS -o /tmp/resp.json -w '%{http_code}' -X POST "https://chat.houzscentury.com/api/webhooks/erp" \
+            -H "content-type: application/json" \
+            -H "X-Connect-Key: $CONNECT_WEBHOOK_KEY" \
+            --data "$payload")
+          echo "HTTP $code"
+          echo "Response:"; cat /tmp/resp.json || true; echo
+          if [ "$code" != "200" ]; then
+            echo "::error::webhook returned $code (401 = CONNECT_WEBHOOK_KEY mismatch; 400 = bad request)"
+            exit 1
+          fi
+          echo "OK — check WhatsApp on $PHONE for the template + Confirm/Amend buttons."
