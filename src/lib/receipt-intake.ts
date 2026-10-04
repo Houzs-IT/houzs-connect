@@ -2,7 +2,7 @@ import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { getDb } from "@/db/client";
 import { payment as paymentTable } from "@/db/schema";
 import { downloadMedia } from "@/lib/whatsapp/download";
-import { paidBy, readingNote, readReceipt } from "@/lib/receipt-vision";
+import { paidBy, readingNote, readReceipt, receiptVisionConfigured } from "@/lib/receipt-vision";
 
 /*
   An image or document a customer sent: does it become a payment to check?
@@ -37,7 +37,7 @@ async function intake(p: Intake): Promise<void> {
       status: "PENDING",
     });
 
-  if (!p.mediaId) {
+  if (!p.mediaId || !receiptVisionConfigured()) {
     await blank();
     return;
   }

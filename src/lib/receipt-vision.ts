@@ -148,6 +148,7 @@ const loggedFetch: typeof fetch = async (input, init) => {
         server: h("server"),
         contentType: h("content-type"),
         sent,
+        key: keyShape(),
         body: body.slice(0, 600),
       })
     );
@@ -155,12 +156,20 @@ const loggedFetch: typeof fetch = async (input, init) => {
   return res;
 };
 
+/** Switched off until RECEIPT_AI=on (paused 2026-10-04: live calls failed). */
 export function receiptVisionConfigured(): boolean {
-  return !!process.env.ANTHROPIC_API_KEY;
+  return process.env.RECEIPT_AI === "on" && !!process.env.ANTHROPIC_API_KEY?.trim();
+}
+
+/** What the key looks like, never the key: catches a pasted space or line break. */
+function keyShape(): string {
+  const raw = process.env.ANTHROPIC_API_KEY ?? "";
+  const trimmed = raw.trim();
+  return `len=${raw.length} trimmedLen=${trimmed.length} sk-ant=${trimmed.startsWith("sk-ant-")} innerWhitespace=${/\s/.test(trimmed)}`;
 }
 
 export async function readReceipt(bytes: ArrayBuffer, mimeType: string): Promise<ReceiptResult> {
-  if (!receiptVisionConfigured()) return { status: "unavailable", error: "ANTHROPIC_API_KEY is not set" };
+  if (!receiptVisionConfigured()) return { status: "unavailable", error: "receipt reading is off (RECEIPT_AI) or ANTHROPIC_API_KEY is not set" };
   const mime = mimeType.split(";")[0].trim().toLowerCase();
   const data = toBase64(bytes);
   const file =
@@ -173,7 +182,12 @@ export async function readReceipt(bytes: ArrayBuffer, mimeType: string): Promise
   if (!file) return { status: "unavailable", error: `cannot read ${mime}` };
 
   try {
-    const client = new Anthropic({ timeout: 60_000, maxRetries: 1, fetch: loggedFetch });
+    const client = new Anthropic({
+      apiKey: process.env.ANTHROPIC_API_KEY?.trim(),
+      timeout: 60_000,
+      maxRetries: 1,
+      fetch: loggedFetch,
+    });
     const response = await client.messages.parse({
       model: MODEL,
       max_tokens: 2048,
