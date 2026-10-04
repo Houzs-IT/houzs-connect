@@ -118,8 +118,19 @@ function toBase64(bytes: ArrayBuffer): string {
  * between; the headers (request-id is Anthropic's, cf-ray / server Cloudflare's)
  * and the raw body do. Never logs the request headers (they carry the key).
  */
+/**
+ * The runtime's own fetch, not Next.js's patched one. Inside the Connect Worker
+ * every call through Next's fetch wrapper (which rebuilds the request for its
+ * data cache) came back as a bare 400 — no body, no headers, so it never
+ * reached api.anthropic.com — while the same SDK call on the plain Workers
+ * runtime got a real answer. Next keeps the unpatched fetch on
+ * `_nextOriginalFetch`; fall back to the global one if it ever goes away.
+ */
+const rawFetch = (): typeof fetch =>
+  (globalThis.fetch as typeof fetch & { _nextOriginalFetch?: typeof fetch })._nextOriginalFetch ?? globalThis.fetch;
+
 const loggedFetch: typeof fetch = async (input, init) => {
-  const res = await fetch(input, init);
+  const res = await rawFetch()(input, init);
   if (!res.ok) {
     const body = await res
       .clone()
