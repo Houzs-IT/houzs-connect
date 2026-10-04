@@ -30,8 +30,8 @@ jobs:
           cache: pnpm
       - name: Install deps
         run: pnpm install --frozen-lockfile
-      - name: Show DB target (host/port only, no password)
-        run: node -e "const u=new URL(process.env.DATABASE_URL);console.log('DB host =',u.hostname,'| port =',u.port)"
+      - name: Show DB target (user + password LENGTH only, never the password)
+        run: node -e "try{const u=new URL(process.env.DATABASE_URL);console.log('host=',u.hostname,'| port=',u.port,'| user=',u.username,'| passlen=',decodeURIComponent(u.password||'').length)}catch(e){console.log('DATABASE_URL did not parse as a URL:',e.message)}"
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
       - name: Apply pending migrations (idempotent)
