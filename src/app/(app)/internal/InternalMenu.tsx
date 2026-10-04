@@ -53,8 +53,8 @@ export async function InternalMenu({ mobile = false }: { mobile?: boolean }) {
         </form>
 
         {group(L.channels)}
-        {side.channels.map((c) => (
-          <NavLink key={c.id} href={`/internal/${c.id}`}>
+        {side.channels.map((c, i) => (
+          <NavLink key={c.id} href={`/internal/${c.id}`} fallback={i === 0}>
             <span className="text-[var(--color-faint)]">#</span>
             <span className={`min-w-0 flex-1 truncate ${c.unread ? "font-semibold" : ""}`}>{c.name}</span>
             <Badge n={c.unread} />

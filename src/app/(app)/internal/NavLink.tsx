@@ -4,11 +4,20 @@ import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 
 /** A menu row that lights up while its channel (and thread, if given) is open. */
-export function NavLink({ href, children }: { href: string; children: React.ReactNode }) {
+export function NavLink({
+  href,
+  children,
+  fallback = false,
+}: {
+  href: string;
+  children: React.ReactNode;
+  /** Also lit on bare /internal, which shows this channel. */
+  fallback?: boolean;
+}) {
   const path = usePathname();
   const t = useSearchParams().get("t");
   const [p, q] = href.split("?");
-  const on = path === p && (!q || q === `t=${t}`);
+  const on = (path === p && (!q || q === `t=${t}`)) || (fallback && path === "/internal");
   return (
     <Link
       href={href}
