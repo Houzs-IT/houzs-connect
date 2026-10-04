@@ -106,6 +106,11 @@ export default async function AutomationsPage({
 
   const runsByAutomation = new Map(runCounts.map((r) => [r.automationId, r.n]));
 
+  const t = await getDict();
+  const rel = (d: Date) => {
+    const r = relTime(d);
+    return /^\d+[mhd]$/.test(r) ? fmt(t.autos.ago, { t: r }) : r;
+  };
   const cards: AutomationCardData[] = rows.map((a) => {
     const probes = Array.isArray(a.probes) ? a.probes : [];
     const note = parseImportNote(a.description);
@@ -125,7 +130,7 @@ export default async function AutomationsPage({
       nodeCount: a.nodeCount,
       edgeCount: a.edgeCount,
       runCount: runsByAutomation.get(a.id) ?? 0,
-      updatedLabel: relTime(a.updatedAt),
+      updatedLabel: rel(a.updatedAt),
       messageSteps: sends.messageSteps,
       apiSteps: sends.apiSteps,
       gaps: findFlowGaps(probes),
@@ -146,9 +151,9 @@ export default async function AutomationsPage({
     if (q && !c.name.toLowerCase().includes(q)) return false;
     return true;
   });
-  const t = await getDict();
   const L = t.autos;
-  const byTrigger = new Map<string, number>();
+  // The everyday triggers are always listed, the rest only when used.
+  const byTrigger = new Map<string, number>(["ACTION_CALLBACK", "NEW_INCOMING_MESSAGE", "TAG_ADDED"].map((k) => [k, 0]));
   for (const c of cards) byTrigger.set(c.triggerLabel, (byTrigger.get(c.triggerLabel) ?? 0) + 1);
   const cols =
     "grid-cols-[minmax(0,2.4fr)_minmax(0,1.7fr)_minmax(0,1.1fr)_minmax(0,0.8fr)_minmax(0,0.9fr)_36px]";

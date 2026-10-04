@@ -8,6 +8,7 @@ import {
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
   useTransition,
 } from "react";
 import {
@@ -15,8 +16,6 @@ import {
   ReactFlowProvider,
   Background,
   BackgroundVariant,
-  Controls,
-  MiniMap,
   Handle,
   Position,
   addEdge,
@@ -24,6 +23,8 @@ import {
   useEdgesState,
   useUpdateNodeInternals,
   useReactFlow,
+  useNodesData,
+  useViewport,
   BaseEdge,
   EdgeLabelRenderer,
   getBezierPath,
@@ -34,6 +35,7 @@ import {
   type EdgeProps,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
+import { createPortal } from "react-dom";
 import {
   type CriteriaRule,
   type FlowGraph,
@@ -135,7 +137,7 @@ function branchesOf(d: HcData): { id: string; label: string }[] | null {
     const btns = d.buttons ?? [];
     return [
       ...btns.map((b) => ({ id: b.id, label: b.label || b.id })),
-      { id: "default", label: "Fallback" },
+      { id: "default", label: "No reply" },
     ];
   }
   return null;
@@ -191,12 +193,14 @@ function HcNode({ id, data, selected }: NodeProps) {
   const d = data as HcData;
   const meta = nodeMeta(d.nodeType);
   const isTrigger = d.nodeType === "trigger";
+  const isEnd = d.nodeType === "end";
   const branches = branchesOf(d);
   const sum = summarize(d);
   const run = useContext(RunCtx);
   const stat = run.on ? run.stats?.perNode[id] : undefined;
   // A step customers are parked on is the one to look at first.
   const stuck = run.on && !!stat?.waiting && WAIT_TYPES.has(d.nodeType);
+  const handle = { width: 8, height: 8, border: "2px solid var(--color-surface)" };
 
   return (
     <div
@@ -205,11 +209,13 @@ function HcNode({ id, data, selected }: NodeProps) {
         borderColor: selected ? "var(--color-accent)" : stuck ? "var(--color-brand-bright)" : "var(--color-border)",
         boxShadow: selected
           ? "0 0 0 3px var(--color-accent-ring), 0 4px 14px -6px rgba(17,24,16,0.18)"
-          : "0 1px 2px rgba(17,24,16,0.06)",
+          : stuck
+            ? "0 0 0 3px color-mix(in srgb, var(--color-brand-bright) 18%, transparent)"
+            : "0 1px 2px rgba(17,24,16,0.06)",
       }}
     >
       {!isTrigger && (
-        <Handle type="target" position={Position.Left} id="in" style={{ background: "var(--color-border-strong)" }} />
+        <Handle type="target" position={Position.Top} id="in" style={{ ...handle, background: "var(--color-border-strong)" }} />
       )}
       <div className="flex items-center gap-2 px-2.5 pt-2.5">
         <span
@@ -236,34 +242,28 @@ function HcNode({ id, data, selected }: NodeProps) {
       </div>
 
       <div className="px-2.5 pb-2.5 pt-1 text-[13px] font-medium leading-snug text-[var(--color-ink)]">
-        {sum ? (
-          <span className="line-clamp-2 whitespace-pre-wrap">{sum}</span>
+        {sum || isEnd ? (
+          <span className="block truncate">{sum || meta.label}</span>
         ) : (
-          <span className="text-[12px] font-normal text-[var(--color-faint)]">{branches ? "" : "Not configured"}</span>
+          <span className="text-[12px] font-normal text-[var(--color-faint)]">Not configured</span>
         )}
       </div>
 
-      {/* Output handles: one per branch for branching nodes, else a single out. */}
-      {branches ? (
-        <div className="border-t border-[var(--color-border-subtle)]">
-          {branches.map((b, i) => (
-            <div
-              key={b.id}
-              className="relative flex items-center justify-end px-2.5 py-1 text-[10.5px] font-medium text-[var(--color-muted)]"
-              style={{ borderTop: i === 0 ? undefined : "1px dashed var(--color-border-subtle)" }}
-            >
-              <span className="truncate">{b.label}</span>
-              <Handle
-                type="source"
-                position={Position.Right}
-                id={b.id}
-                style={{ position: "absolute", right: -6, background: "var(--color-accent)" }}
-              />
-            </div>
-          ))}
-        </div>
+      {/* Outputs along the bottom edge: one per branch (the line carries the
+          branch name), else a single out. */}
+      {isEnd ? null : branches ? (
+        branches.map((b, i) => (
+          <Handle
+            key={b.id}
+            type="source"
+            position={Position.Bottom}
+            id={b.id}
+            title={b.label}
+            style={{ ...handle, left: `${((i + 1) / (branches.length + 1)) * 100}%`, background: "var(--color-accent)" }}
+          />
+        ))
       ) : (
-        <Handle type="source" position={Position.Right} id="out" style={{ background: "var(--color-accent)" }} />
+        <Handle type="source" position={Position.Bottom} id="out" style={{ ...handle, background: "var(--color-accent)" }} />
       )}
     </div>
   );
@@ -276,6 +276,8 @@ const edgeCtxRef: { current: EdgeCtx } = { current: { onDelete: () => {} } };
 
 function ButtonEdge({
   id,
+  source,
+  sourceHandleId,
   sourceX,
   sourceY,
   targetX,
@@ -283,6 +285,7 @@ function ButtonEdge({
   sourcePosition,
   targetPosition,
   markerEnd,
+  selected,
 }: EdgeProps) {
   const [path, labelX, labelY] = getBezierPath({
     sourceX,
@@ -292,26 +295,57 @@ function ButtonEdge({
     sourcePosition,
     targetPosition,
   });
+  // A branch's name rides on its line, the way the flow reads top-down.
+  const src = useNodesData(source);
+  const branch = src ? branchesOf(src.data as HcData)?.find((b) => b.id === sourceHandleId) : undefined;
+  const label = branch?.label;
+  const fallback = sourceHandleId === "default";
   return (
     <>
-      <BaseEdge id={id} path={path} markerEnd={markerEnd} style={{ stroke: "#c2c6bd" }} />
+      <BaseEdge
+        id={id}
+        path={path}
+        markerEnd={markerEnd}
+        style={{
+          stroke: fallback ? "var(--color-border-strong)" : "var(--color-accent)",
+          strokeWidth: selected ? 3 : 2.2,
+          strokeDasharray: fallback ? "5 5" : undefined,
+        }}
+      />
       <EdgeLabelRenderer>
-        <button
-          type="button"
-          onClick={(e) => {
-            e.stopPropagation();
-            edgeCtxRef.current.onDelete(id);
-          }}
-          className="nodrag nopan grid h-4 w-4 place-items-center rounded-full border border-[var(--color-border-strong)] bg-[var(--color-surface)] text-[10px] leading-none text-[var(--color-faint)] shadow-sm hover:border-[var(--color-danger)] hover:text-[var(--color-danger)]"
+        <div
+          className="nodrag nopan flex items-center gap-1"
           style={{
             position: "absolute",
             transform: `translate(-50%, -50%) translate(${labelX}px,${labelY}px)`,
             pointerEvents: "all",
           }}
-          aria-label="Delete connection"
         >
-          ×
-        </button>
+          {label && (
+            <span
+              className={`whitespace-nowrap rounded-full border px-2 py-px text-[10.5px] font-semibold ${
+                fallback
+                  ? "border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--color-muted)]"
+                  : "border-[color-mix(in_srgb,var(--color-success)_30%,transparent)] bg-[var(--color-success-soft)] text-[var(--color-success)]"
+              }`}
+            >
+              {label}
+            </span>
+          )}
+          {selected && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                edgeCtxRef.current.onDelete(id);
+              }}
+              className="grid h-4 w-4 place-items-center rounded-full border border-[var(--color-border-strong)] bg-[var(--color-surface)] text-[10px] leading-none text-[var(--color-faint)] shadow-sm hover:border-[var(--color-danger)] hover:text-[var(--color-danger)]"
+              aria-label="Delete connection"
+            >
+              ×
+            </button>
+          )}
+        </div>
       </EdgeLabelRenderer>
     </>
   );
@@ -349,14 +383,73 @@ function toFlow(
       sourceHandle,
       targetHandle: "in",
       type: "button",
-      animated: true,
     };
   });
+  // Flows saved before the top-down builder were laid out left to right; set
+  // them out again once, top to bottom. Saving keeps the new positions.
+  if (graph.layout !== "tb") layoutTopDown(nodes, graph.edges);
   return { nodes, edges };
+}
+
+const COL_W = 228;
+const ROW_H = 110;
+
+/**
+ * Top-down positions: each step one row below its deepest parent, and each
+ * branch's steps in their own column under the step that opened it.
+ */
+function layoutTopDown(nodes: Node[], edges: FlowGraph["edges"]) {
+  if (nodes.length === 0) return;
+  const out = new Map<string, string[]>();
+  for (const e of edges) out.set(e.from, [...(out.get(e.from) ?? []), e.to]);
+  const root = nodes.find((n) => (n.data as HcData).nodeType === "trigger")?.id ?? nodes[0].id;
+
+  // Rows: longest path from the trigger, ignoring loops back up.
+  const depth = new Map<string, number>();
+  const onPath = new Set<string>();
+  const walk = (id: string, dpt: number) => {
+    if (onPath.has(id) || (depth.get(id) ?? -1) >= dpt) return;
+    depth.set(id, dpt);
+    onPath.add(id);
+    for (const c of out.get(id) ?? []) walk(c, dpt + 1);
+    onPath.delete(id);
+  };
+  walk(root, 0);
+
+  // Columns: the first parent to reach a step owns it; a leaf takes the next
+  // free column and a parent sits over the middle of its children.
+  const col = new Map<string, number>();
+  let next = 0;
+  const place = (id: string): number => {
+    const known = col.get(id);
+    if (known != null) return known;
+    col.set(id, -1);
+    const kids = (out.get(id) ?? []).filter((c) => !col.has(c) && (depth.get(c) ?? 0) > (depth.get(id) ?? 0));
+    const xs = kids.map(place).filter((x) => x >= 0);
+    const x = xs.length ? (Math.min(...xs) + Math.max(...xs)) / 2 : next++;
+    col.set(id, x);
+    return x;
+  };
+  place(root);
+
+  // Steps the trigger never reaches go in rows of four underneath.
+  const bottom = Math.max(0, ...depth.values()) + 2;
+  let stray = 0;
+  for (const n of nodes) {
+    const x = col.get(n.id);
+    const y = depth.get(n.id);
+    if (x == null || x < 0 || y == null) {
+      n.position = { x: (stray % 4) * COL_W, y: (bottom + Math.floor(stray / 4)) * ROW_H };
+      stray++;
+    } else {
+      n.position = { x: x * COL_W, y: y * ROW_H };
+    }
+  }
 }
 
 function fromFlow(nodes: Node[], edges: Edge[]): FlowGraph {
   return {
+    layout: "tb",
     nodes: nodes.map((n) => {
       const { nodeType, ...rest } = n.data as HcData;
       return {
@@ -376,6 +469,8 @@ function fromFlow(nodes: Node[], edges: Edge[]): FlowGraph {
 }
 
 // ────────────────────────────── palette ──────────────────────────────
+
+const CATEGORY_NAME: Partial<Record<NodeCategory, string>> = { "Customer Interaction": "Customer" };
 
 function NodePalette({
   onAdd,
@@ -425,7 +520,7 @@ function NodePalette({
           return (
             <div key={cat} className="mb-3">
               <div className="px-2 pb-1.5 pt-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--color-faint)]">
-                {cat}
+                {CATEGORY_NAME[cat] ?? cat}
               </div>
               <div className="flex flex-col gap-0.5">
                 {items.map((n) => (
@@ -593,6 +688,32 @@ function HistoryDialog({
   );
 }
 
+// ────────────────────────────── zoom bar ──────────────────────────────
+
+/** The header slots never change once the page is on screen. */
+const noSubscribe = () => () => {};
+
+function ZoomBar() {
+  const { zoomIn, zoomOut, fitView } = useReactFlow();
+  const { zoom } = useViewport();
+  const btn = "grid h-8 w-8 place-items-center text-[15px] text-[var(--color-muted)] hover:text-[var(--color-ink)]";
+  return (
+    <div className="absolute bottom-4 left-4 z-10 flex items-center rounded-[10px] border border-[var(--color-border)] bg-[var(--color-surface)] px-1 shadow-[0_1px_2px_rgba(17,24,16,0.06)]">
+      <button type="button" aria-label="Zoom out" onClick={() => zoomOut()} className={btn}>
+        –
+      </button>
+      <span className="w-12 text-center text-[12px] font-semibold tabular-nums text-[var(--color-ink)]">{Math.round(zoom * 100)}%</span>
+      <button type="button" aria-label="Zoom in" onClick={() => zoomIn()} className={btn}>
+        +
+      </button>
+      <span className="mx-1 h-4 w-px bg-[var(--color-border)]" />
+      <button type="button" onClick={() => fitView({ padding: 0.15 })} className="px-2 text-[12px] font-semibold text-[var(--color-ink)]">
+        Fit
+      </button>
+    </div>
+  );
+}
+
 // ────────────────────────────── canvas ──────────────────────────────
 
 interface CanvasProps {
@@ -608,12 +729,14 @@ interface CanvasProps {
   campaigns: Opt[];
   /** Last-7-days run counts for the "Run data" layer (lib/automation/run-stats.ts). */
   runStats?: RunStats;
+  /** Saved version; the next publish is this + 1. */
+  version?: number;
 }
 
 function FlowCanvasInner(props: CanvasProps) {
   const { automationId, graph, automations, campaigns } = props;
   const nodeTypes = useMemo(() => ({ hc: HcNode }), []);
-  const [runOn, setRunOn] = useState(false);
+  const [runOn, setRunOn] = useState(!!props.runStats);
   const edgeTypes = useMemo(() => ({ button: ButtonEdge }), []);
   const updateNodeInternals = useUpdateNodeInternals();
   const { screenToFlowPosition } = useReactFlow();
@@ -636,10 +759,16 @@ function FlowCanvasInner(props: CanvasProps) {
   const [live, setLive] = useState(props.initialEnabled);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [preview, setPreview] = useState<number | null>(null);
-  const [confirm, setConfirm] = useState<"publish" | "unpublish" | null>(null);
+  const [confirm, setConfirm] = useState<"publish" | null>(null);
   const preSnapshot = useRef<{ nodes: Node[]; edges: Edge[] } | null>(null);
 
   const readOnly = preview != null;
+
+  // The buttons live in the page header (see automations/[id]/page.tsx).
+  const slots = {
+    run: useSyncExternalStore(noSubscribe, () => document.getElementById("flow-run-slot"), () => null),
+    save: useSyncExternalStore(noSubscribe, () => document.getElementById("flow-save-slot"), () => null),
+  };
 
   // What this flow will do to real people, counted off the canvas as it stands
   // right now — the publish confirmation is only useful if it describes the
@@ -689,7 +818,7 @@ function FlowCanvasInner(props: CanvasProps) {
 
   const onConnect = useCallback(
     (c: Connection) => {
-      setEdges((eds) => addEdge({ ...c, type: "button", animated: true }, eds));
+      setEdges((eds) => addEdge({ ...c, type: "button" }, eds));
       setSaved(null);
     },
     [setEdges]
@@ -756,6 +885,24 @@ function FlowCanvasInner(props: CanvasProps) {
     setSelected(null);
     setSaved(null);
   }, [selected, readOnly, setNodes, setEdges]);
+
+  const duplicateSelected = useCallback(() => {
+    const src = nodes.find((n) => n.id === selected);
+    if (!src || readOnly) return;
+    const t = (src.data as HcData).nodeType;
+    const id = `n_${t}_${Math.random().toString(36).slice(2, 8)}`;
+    setNodes((nds) => [
+      ...nds,
+      {
+        id,
+        type: "hc",
+        position: { x: src.position.x + 24, y: src.position.y + 24 },
+        data: structuredClone(src.data),
+      },
+    ]);
+    setSelected(id);
+    setSaved(null);
+  }, [nodes, selected, readOnly, setNodes]);
 
   const doSave = useCallback(
     (publish: boolean) => {
@@ -829,104 +976,70 @@ function FlowCanvasInner(props: CanvasProps) {
       )}
 
       <div className="flex min-w-0 flex-1 flex-col">
-        {/* toolbar */}
-        <div className="flex items-center gap-2 border-b border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2.5">
-          {/* A status read-out, not a switch — it is shaped like the segmented
-              toggles elsewhere in the app, so it says so on hover. Draft/Live is
-              decided by which Save button you press. */}
-          <div
-            title={
-              live
-                ? "This automation is live. Use “Save as draft” to take it off."
-                : "This automation is a draft. Use “Publish live” to switch it on."
-            }
-            className="flex overflow-hidden rounded-full border border-[var(--color-border)] text-[11.5px]"
-          >
-            <span
-              className={`px-2.5 py-1 ${
-                live
-                  ? "text-[var(--color-faint)]"
-                  : "bg-[var(--color-surface-2)] font-medium text-[var(--color-ink)]"
+        {slots.run &&
+          props.runStats &&
+          createPortal(
+            <button
+              type="button"
+              aria-pressed={runOn}
+              onClick={() => setRunOn((v) => !v)}
+              className={`flex h-[34px] items-center gap-1.5 rounded-[8px] border px-3 text-[12.5px] font-semibold ${
+                runOn
+                  ? "border-[var(--color-accent)] bg-[var(--color-accent-soft)] text-[var(--color-accent-ink)]"
+                  : "border-[var(--color-border)] text-[var(--color-ink)] hover:bg-[var(--color-surface-2)]"
               }`}
             >
-              Draft
-            </span>
-            <span
-              className={`px-2.5 py-1 ${
-                live
-                  ? "bg-[color-mix(in_srgb,var(--color-success)_16%,transparent)] font-medium text-[var(--color-success)]"
-                  : "text-[var(--color-faint)]"
-              }`}
-            >
-              Live
-            </span>
-          </div>
-
-          <div className="ml-auto flex items-center gap-1.5">
-            <span className="mr-1 text-[11px] tabular-nums text-[var(--color-faint)]">
-              {nodes.length} steps · {edges.length} links
-            </span>
-            {props.runStats && (
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
+                <path d="M4 20V10M10 20V4M16 20v-7M22 20H2" />
+              </svg>
+              Run data
+            </button>,
+            slots.run
+          )}
+        {slots.save &&
+          createPortal(
+            <>
+              <button
+                onClick={() => setHistoryOpen(true)}
+                className="h-[34px] rounded-[8px] border border-[var(--color-border)] px-3 text-[12.5px] font-semibold text-[var(--color-ink)] hover:bg-[var(--color-surface-2)]"
+              >
+                Versions
+              </button>
+              {/* A draft can be saved as it is; a live flow is only ever saved
+                  live (saving it as a draft would switch it off — the list's
+                  switch does that, on purpose). */}
+              {!live && (
+                <button
+                  type="button"
+                  onClick={() => doSave(false)}
+                  disabled={pending || readOnly}
+                  title={readOnly ? "You are previewing an old snapshot — exit the preview to edit and save." : undefined}
+                  className="h-[34px] rounded-[8px] border border-[var(--color-border)] px-3 text-[12.5px] font-semibold text-[var(--color-ink)] hover:bg-[var(--color-surface-2)] disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {pending && saved == null ? "Saving…" : "Save draft"}
+                </button>
+              )}
               <button
                 type="button"
-                aria-pressed={runOn}
-                onClick={() => setRunOn((v) => !v)}
-                className={`flex h-[34px] items-center gap-1.5 rounded-[8px] border px-3 text-[12.5px] font-semibold ${
-                  runOn
-                    ? "border-[var(--color-accent)] bg-[var(--color-accent-soft)] text-[var(--color-accent-ink)]"
-                    : "border-[var(--color-border)] text-[var(--color-ink)] hover:bg-[var(--color-surface-2)]"
-                }`}
+                // Draft → Live is the moment real customers start receiving these
+                // messages. Re-saving an already-live flow does not change that,
+                // so only the transition is gated.
+                onClick={() => (live ? doSave(true) : setConfirm("publish"))}
+                disabled={pending || readOnly}
+                title={
+                  readOnly
+                    ? "You are previewing an old snapshot — exit the preview to edit and publish."
+                    : pending
+                      ? "Saving…"
+                      : undefined
+                }
+                className="h-[34px] rounded-[8px] bg-[var(--color-accent)] px-3.5 text-[12.5px] font-semibold text-white shadow-[var(--shadow-primary)] hover:bg-[var(--color-accent-hi)] disabled:cursor-not-allowed disabled:opacity-60"
               >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
-                  <path d="M4 20V10M10 20V4M16 20v-7M22 20H2" />
-                </svg>
-                Run data
+                {pending ? "Saving…" : `Publish v${(props.version ?? 0) + 1}`}
               </button>
-            )}
-            <button
-              onClick={() => setHistoryOpen(true)}
-              className="h-[34px] rounded-[8px] border border-[var(--color-border)] px-3 text-[12.5px] font-semibold text-[var(--color-ink)] hover:bg-[var(--color-surface-2)]"
-            >
-              Versions
-            </button>
-            <button
-              type="button"
-              // "Save as draft" on a LIVE automation silently switched it off —
-              // saveAutomationGraph writes enabled:false for publish:false. That
-              // is a customer-visible change, so it asks first.
-              onClick={() => (live ? setConfirm("unpublish") : doSave(false))}
-              disabled={pending || readOnly}
-              title={
-                readOnly
-                  ? "You are previewing an old snapshot — exit the preview to edit and save."
-                  : pending
-                    ? "Saving…"
-                    : undefined
-              }
-              className="h-[34px] rounded-[8px] border border-[var(--color-border)] px-3 text-[12.5px] font-semibold text-[var(--color-ink)] hover:bg-[var(--color-surface-2)] disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {pending && saved == null ? "Saving…" : "Save as draft"}
-            </button>
-            <button
-              type="button"
-              // Draft → Live is the moment real customers start receiving these
-              // messages. Re-saving an already-live flow does not change that,
-              // so only the transition is gated.
-              onClick={() => (live ? doSave(true) : setConfirm("publish"))}
-              disabled={pending || readOnly}
-              title={
-                readOnly
-                  ? "You are previewing an old snapshot — exit the preview to edit and publish."
-                  : pending
-                    ? "Saving…"
-                    : undefined
-              }
-              className="h-[34px] rounded-[8px] bg-[var(--color-accent)] px-3.5 text-[12.5px] font-semibold text-white shadow-[var(--shadow-primary)] hover:bg-[var(--color-accent-hi)] disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {live ? "Save & keep live" : "Publish live"}
-            </button>
-          </div>
-        </div>
+            </>,
+            slots.save
+          )}
 
         {preview != null && (
           <div className="flex items-center gap-3 border-b border-[var(--color-border)] bg-[var(--color-brand-soft)] px-3 py-1.5 text-[11.5px] text-[var(--color-brand-ink)]">
@@ -940,11 +1053,6 @@ function FlowCanvasInner(props: CanvasProps) {
           </div>
         )}
 
-        {saved && (
-          <div className="border-b border-[var(--color-border)] bg-[var(--color-accent-soft)] px-3 py-1 text-[11px] text-[var(--color-accent-ink)]">
-            Saved {saved === "live" ? "and published live" : "as draft"} · snapshot added to history.
-          </div>
-        )}
 
         {/* Draft → Live sends real WhatsApp messages to real customers, so the
             transition names the trigger and counts what the flow will do. */}
@@ -991,31 +1099,14 @@ function FlowCanvasInner(props: CanvasProps) {
           )}
         </ActionConfirm>
 
-        <ActionConfirm
-          open={confirm === "unpublish"}
-          title="Saving as a draft switches this automation off"
-          confirmLabel="Save as draft and switch off"
-          busyLabel="Saving…"
-          busy={pending}
-          danger
-          onCancel={() => setConfirm(null)}
-          onConfirm={() => {
-            setConfirm(null);
-            doSave(false);
-          }}
-        >
-          <p>
-            This automation is live right now. Saving it as a draft also stops it
-            running {sentence}, and customers stop receiving its messages.
-          </p>
-          <p className="mt-2">
-            To keep your edits live instead, press Cancel and use “Save &amp; keep
-            live”.
-          </p>
-        </ActionConfirm>
 
         <RunCtx.Provider value={{ on: runOn, stats: props.runStats ?? null }}>
         <div className="relative min-h-0 flex-1 bg-[var(--color-canvas)]">
+          {saved && (
+            <div className="absolute left-1/2 top-4 z-10 -translate-x-1/2 rounded-full bg-[var(--color-ink)] px-3 py-1 text-[11.5px] font-medium text-white shadow-[var(--shadow-popover)]">
+              Saved {saved === "live" ? "and published live" : "as draft"} · snapshot added to history
+            </div>
+          )}
           {runOn && props.runStats && (
             <div className="absolute right-4 top-4 z-10 w-[240px] rounded-[12px] border border-[var(--color-border-subtle)] bg-[var(--color-surface)] px-4 py-3 shadow-[var(--shadow-popover)]">
               <div className="flex items-center justify-between">
@@ -1036,6 +1127,11 @@ function FlowCanvasInner(props: CanvasProps) {
                   </div>
                 ))}
               </div>
+              {props.runStats.waiting > 0 && (
+                <p className="mt-2 border-t border-[var(--color-border-subtle)] pt-2 text-[11.5px] leading-snug text-[var(--color-muted)]">
+                  {props.runStats.waiting} {props.runStats.waiting === 1 ? "customer is" : "customers are"} waiting on a step right now.
+                </p>
+              )}
             </div>
           )}
           <ReactFlow
@@ -1055,9 +1151,12 @@ function FlowCanvasInner(props: CanvasProps) {
             proOptions={{ hideAttribution: true }}
           >
             <Background variant={BackgroundVariant.Dots} color="#c3c9d3" gap={18} size={1.2} />
-            <Controls showInteractive={false} />
-            <MiniMap pannable zoomable className="!bg-[var(--color-surface-2)]" />
           </ReactFlow>
+          <ZoomBar />
+          <span className="absolute bottom-4 right-4 z-10 flex items-center gap-1.5 rounded-full border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-1.5 text-[11.5px] text-[var(--color-muted)] shadow-[0_1px_2px_rgba(17,24,16,0.06)]">
+            <span className={`h-1.5 w-1.5 rounded-full ${gapCount ? "bg-[var(--color-warning)]" : "bg-[var(--color-success)]"}`} />
+            {gapCount ? `${gapCount} step${gapCount === 1 ? "" : "s"} need checking` : "All steps configured"}
+          </span>
 
           {historyOpen && (
             <HistoryDialog
@@ -1073,7 +1172,8 @@ function FlowCanvasInner(props: CanvasProps) {
 
       {/* inspector */}
       {selectedNode && d && !readOnly && (
-        <div className="scroll-thin w-[300px] shrink-0 overflow-y-auto border-l border-[var(--color-border)] bg-[var(--color-surface)] p-4">
+        <div className="flex w-[300px] shrink-0 flex-col border-l border-[var(--color-border)] bg-[var(--color-surface)]">
+          <div className="scroll-thin min-h-0 flex-1 overflow-y-auto p-4">
           <div className="mb-4 flex items-center gap-2.5">
             <span
               className="grid h-8 w-8 place-items-center rounded-[8px] text-[13px]"
@@ -1098,13 +1198,22 @@ function FlowCanvasInner(props: CanvasProps) {
             campaigns={campaigns}
           />
 
+          </div>
           {d.nodeType !== "trigger" && (
-            <button
-              onClick={deleteSelected}
-              className="mt-4 h-9 w-full rounded-[8px] bg-[var(--color-danger-soft)] text-[13px] font-semibold text-[var(--color-danger)] hover:brightness-95"
-            >
-              Delete step
-            </button>
+            <div className="flex gap-2 border-t border-[var(--color-border-subtle)] p-4">
+              <button
+                onClick={duplicateSelected}
+                className="h-9 flex-1 rounded-[8px] border border-[var(--color-border)] text-[13px] font-semibold text-[var(--color-ink)] hover:bg-[var(--color-surface-2)]"
+              >
+                Duplicate
+              </button>
+              <button
+                onClick={deleteSelected}
+                className="h-9 flex-1 rounded-[8px] bg-[var(--color-danger-soft)] text-[13px] font-semibold text-[var(--color-danger)] hover:brightness-95"
+              >
+                Delete
+              </button>
+            </div>
           )}
         </div>
       )}
