@@ -479,7 +479,7 @@ function Row({
           {unread && <UnreadBadge n={c.unread} />}
         </div>
         {c.orderRef && (
-          <div className="mt-[3px] flex">
+          <div className="mt-[3px] hidden md:flex">
             <span className="flex items-center gap-[5px] whitespace-nowrap rounded-[6px] border border-[var(--color-border)] bg-[var(--color-surface)] px-[7px] py-px text-[10.5px]">
               <span className="font-semibold text-[var(--color-brand)]">{c.orderRef}</span>
               {c.deliveryDate && (
@@ -504,7 +504,7 @@ function Row({
           {(c.agent || c.department) && (
             <span
               title={c.agent ?? undefined}
-              className="ml-auto flex min-w-0 items-center gap-1 overflow-hidden whitespace-nowrap text-[10.5px] text-[var(--color-faint)]"
+              className="ml-auto hidden min-w-0 items-center gap-1 overflow-hidden whitespace-nowrap text-[10.5px] text-[var(--color-faint)] md:flex"
             >
               {c.agent && <Avatar name={c.agent} size={16} />}
               <span className="truncate">{c.department ?? c.agent}</span>

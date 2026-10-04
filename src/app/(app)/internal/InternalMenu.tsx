@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { getCurrentMember } from "@/lib/current-member";
 import { getDict } from "@/lib/i18n/server";
 import { companyPresence } from "@/lib/presence";
@@ -29,6 +30,76 @@ export async function InternalMenu({ mobile = false }: { mobile?: boolean }) {
   const [side, people] = await Promise.all([sidebar(me.companyId, me.id), companyPresence(me.companyId)]);
   const online = new Map(people.map((p) => [p.id, p.online]));
   const others = people.filter((p) => p.id !== me.id).map((p) => ({ id: p.id, name: p.name, online: p.online }));
+
+  // "Houzs Century_Azza" -> "Azza", "Peter Lim" -> "Peter".
+  const short = (n: string) => (n.split("_").pop() ?? n).split(" ")[0];
+  const preview = (by: string | null, body: string | null) => (body ? `${by ? `${short(by)}: ` : ""}${body}` : "");
+
+  if (mobile) {
+    const head = (title: string) => (
+      <div className="px-4 pb-1.5 pt-4 text-[10.5px] font-semibold uppercase tracking-[0.16em] text-[var(--color-faint)]">{title}</div>
+    );
+    const row = (href: string, icon: React.ReactNode, name: string, sub: string, n: number) => (
+      <Link key={href} href={href} className="flex items-center gap-3 border-b border-[var(--color-border-subtle)] bg-[var(--color-surface)] px-4 py-3">
+        {icon}
+        <span className="min-w-0 flex-1">
+          <span className={`block truncate text-[14.5px] text-[var(--color-ink)] ${n ? "font-bold" : "font-semibold"}`}>{name}</span>
+          {sub && <span className="block truncate text-[13px] text-[var(--color-muted)]">{sub}</span>}
+        </span>
+        <Badge n={n} />
+      </Link>
+    );
+    return (
+      <div className="flex w-full flex-col bg-[var(--color-surface)]">
+        <div className="flex h-14 shrink-0 items-center gap-2 pl-4 pr-3">
+          <span className="flex-1 text-[19px] font-bold text-[var(--color-ink)]">{L.title}</span>
+          <Link href="/internal/search" aria-label={L.search} className="grid h-10 w-10 place-items-center text-[18px] text-[var(--color-ink)]">
+            ⌕
+          </Link>
+          <NewChat people={others} />
+        </div>
+        <nav className="flex min-h-0 flex-1 flex-col overflow-y-auto pb-4">
+          {head(L.channels)}
+          {side.channels.map((c) =>
+            row(
+              `/internal/${c.id}`,
+              <span className="grid h-10 w-10 shrink-0 place-items-center rounded-[10px] border border-[var(--color-border)] bg-[var(--color-surface-2)] text-[16px] font-semibold text-[var(--color-ink)]">#</span>,
+              c.name,
+              preview(c.lastBy, c.lastBody),
+              c.unread
+            )
+          )}
+          {head(L.dms)}
+          {side.dms.map((d) =>
+            row(
+              `/internal/${d.id}`,
+              <span className="relative shrink-0">
+                <Avatar name={d.otherName} size={40} />
+                <span
+                  className={`absolute bottom-0 right-0 h-2.5 w-2.5 rounded-full border-2 border-white ${
+                    online.get(d.otherId) ? "bg-[var(--color-success)]" : "bg-[var(--color-border-strong)]"
+                  }`}
+                />
+              </span>,
+              d.otherName,
+              preview(null, d.lastBody),
+              d.unread
+            )
+          )}
+          {side.discussions.length > 0 && head(L.discussions)}
+          {side.discussions.map((d) =>
+            row(
+              `/internal/${d.channelId}?t=${d.messageId}`,
+              <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-[var(--color-accent-soft)] text-[14px] text-[var(--color-accent)]">◌</span>,
+              d.orderRef ? `${d.name} · ${d.orderRef}` : d.name,
+              "",
+              0
+            )
+          )}
+        </nav>
+      </div>
+    );
+  }
 
   const group = (title: string) => (
     <div className="px-2 pb-1 pt-3 text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--color-faint)]">{title}</div>

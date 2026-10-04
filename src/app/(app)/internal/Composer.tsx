@@ -41,6 +41,7 @@ export function Composer({
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
   const area = useRef<HTMLTextAreaElement>(null);
+  const phoneArea = useRef<HTMLTextAreaElement>(null);
 
   // "@Na" → the colleagues whose name starts with "Na".
   const at = /@([^@\n]*)$/.exec(body);
@@ -150,7 +151,48 @@ export function Composer({
         </div>
       )}
 
-      <div className="rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)] focus-within:border-[var(--color-accent)] focus-within:shadow-[0_0_0_3px_var(--color-accent-ring)]">
+      {/* Phone: "@", a pill and a round send, like the design. Linking a
+          conversation stays a desktop thing. */}
+      {!thread && (
+        <div className="flex items-center gap-2 md:hidden">
+          <button
+            type="button"
+            aria-label={L.mention}
+            onClick={() => {
+              setBody((b) => `${b}${b && !b.endsWith(" ") ? " " : ""}@`);
+              setPicker("mention");
+              phoneArea.current?.focus();
+            }}
+            className="grid h-11 w-9 shrink-0 place-items-center text-[18px] text-[var(--color-ink)]"
+          >
+            @
+          </button>
+          <textarea
+            ref={phoneArea}
+            rows={1}
+            value={body}
+            onChange={(e) => {
+              setBody(e.target.value);
+              if (picker === "mention") setPicker("none");
+            }}
+            placeholder={L.msgShort}
+            className="min-h-[44px] min-w-0 flex-1 resize-none rounded-[22px] border border-[var(--color-border)] bg-[var(--color-surface-2)] px-4 py-[11px] text-[14px] text-[var(--color-ink)] outline-none placeholder:text-[var(--color-faint)]"
+          />
+          <button
+            type="button"
+            aria-label={L.send}
+            disabled={pending || (!body.trim() && !convo)}
+            onClick={send}
+            className="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-[var(--color-accent)] text-[16px] text-white shadow-[var(--shadow-primary)] disabled:opacity-40"
+          >
+            ➤
+          </button>
+        </div>
+      )}
+
+      <div
+        className={`${thread ? "" : "hidden md:block"} rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)] focus-within:border-[var(--color-accent)] focus-within:shadow-[0_0_0_3px_var(--color-accent-ring)]`}
+      >
         {convo && (
           <div className="mx-3 mt-2.5 flex items-center gap-2 rounded-[8px] bg-[var(--color-surface-2)] px-2.5 py-1.5 text-[12.5px]">
             <span className="min-w-0 flex-1 truncate text-[var(--color-ink)]">

@@ -258,7 +258,10 @@ export default async function ConversationPage({
                 departments={departments.map((d) => ({ id: d.id, name: d.name }))}
               />
             </div>
-            <ResolveButton conversationId={convo.id} closed={convo.status === "CLOSED"} />
+            {/* A phone keeps the header to name + menu, like the design. */}
+            <div className="hidden md:block">
+              <ResolveButton conversationId={convo.id} closed={convo.status === "CLOSED"} />
+            </div>
             {/* The panel (and its menu) is hidden below xl; keep the actions. */}
             <div className="xl:hidden">
               <ConversationMenu conversationId={convo.id} />
@@ -266,13 +269,31 @@ export default async function ConversationPage({
           </div>
         </div>
 
+        {/* Phone: the running automation as one line under the header (the
+            contact panel that shows it on a desktop is not on screen). */}
+        {(automation || orderRef) && (
+          <div className="flex shrink-0 items-center gap-2 border-b border-[var(--color-border-subtle)] bg-[var(--color-surface)] px-4 py-2 text-[12px] text-[var(--color-muted)] md:hidden">
+            {automation && (
+              <span className="min-w-0 flex-1 truncate">
+                ⌥ {automation.name} ·{" "}
+                {s.runStatus[automation.status === "waiting" && automation.waitingFor ? `waiting_${automation.waitingFor}` : automation.status] ??
+                  automation.status}
+              </span>
+            )}
+            {orderRef && <span className="ml-auto shrink-0 font-semibold text-[var(--color-brand)]">{orderRef}</span>}
+          </div>
+        )}
         <Thread items={items} conversationId={convo.id} />
         {/* The DEMO simulators are for driving a flow with no real WhatsApp
             attached. On LIVE they were still rendered — a thread showing
             "LIVE · sending via WhatsApp" in the sidebar and a "Send as customer"
             box under it, whose server actions demoOnly() already refuses. An
             operator reading that can only conclude the inbox is faking traffic. */}
-        {!isLive() && <DemoReplyBar conversationId={convo.id} />}
+        {!isLive() && (
+          <div className="hidden md:block">
+            <DemoReplyBar conversationId={convo.id} />
+          </div>
+        )}
         <Composer
           conversationId={convo.id}
           // The expiry, not a boolean: comparing it to the clock is the client's

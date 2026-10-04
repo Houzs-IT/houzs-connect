@@ -73,7 +73,8 @@ export function MobileTabBar({ unread }: { unread?: number }) {
     return () => document.removeEventListener("keydown", onKey);
   }, [open]);
 
-  if (/^\/inbox\/[^/]+/.test(path)) return null;
+  // A chat (customer or internal) takes the whole phone screen.
+  if (/^\/(inbox|internal)\/[^/]+/.test(path) && !path.startsWith("/internal/search")) return null;
 
   const tabs: Tab[] = [
     { href: "/inbox", label: t.tab.inbox, Icon: IconInbox, match: ["/inbox"], badge: unread },

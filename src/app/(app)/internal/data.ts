@@ -67,8 +67,8 @@ export async function ensureInternal(companyId: string, memberId: string): Promi
 /** Companies already checked by this worker. */
 const seeded = new Set<string>();
 
-export type SideChannel = { id: string; name: string; topic: string | null; unread: number };
-export type SideDm = { id: string; otherId: string; otherName: string; unread: number };
+export type SideChannel = { id: string; name: string; topic: string | null; unread: number; lastBy: string | null; lastBody: string | null };
+export type SideDm = { id: string; otherId: string; otherName: string; unread: number; lastBy: string | null; lastBody: string | null };
 export type SideDiscussion = { conversationId: string; name: string; orderRef: string | null; channelId: string; messageId: string };
 
 /** Unread = top-level (or also-in-channel) messages from others since I last read it. */
@@ -79,17 +79,26 @@ const unread = (meId: string) => sql`(
     and m.created_at > coalesce(cm.last_read_at, now() - interval '7 days')
 )`;
 
+/** The newest top-level message in channel c: who and what (the phone list previews it). */
+const last = sql`(
+  select json_build_object('by', a.name, 'body', m.body) from connect.internal_message m
+  left join connect.member a on a.id = m.author_member_id
+  where m.channel_id = c.id and (m.parent_id is null or m.also_in_channel)
+  order by m.created_at desc limit 1
+)`;
+type Last = { by: string | null; body: string | null } | null;
+
 export async function sidebar(companyId: string, meId: string) {
   const [channels, dms, discussions] = await Promise.all([
-    rows<{ id: string; name: string; topic: string | null; unread: number }>(sql`
-      select c.id, c.name, c.topic, ${unread(meId)} as unread
+    rows<{ id: string; name: string; topic: string | null; unread: number; last: Last }>(sql`
+      select c.id, c.name, c.topic, ${unread(meId)} as unread, ${last} as last
       from connect.internal_channel c
       left join connect.internal_channel_member cm on cm.channel_id = c.id and cm.member_id = ${meId}
       where c.company_id = ${companyId} and c.kind = 'channel'
       order by (c.name = 'general'), c.created_at, c.name
     `),
-    rows<{ id: string; other_id: string; other_name: string; unread: number }>(sql`
-      select c.id, o.member_id as other_id, mo.name as other_name, ${unread(meId)} as unread
+    rows<{ id: string; other_id: string; other_name: string; unread: number; last: Last }>(sql`
+      select c.id, o.member_id as other_id, mo.name as other_name, ${unread(meId)} as unread, ${last} as last
       from connect.internal_channel c
       join connect.internal_channel_member cm on cm.channel_id = c.id and cm.member_id = ${meId}
       join connect.internal_channel_member o on o.channel_id = c.id and o.member_id <> ${meId}
@@ -110,8 +119,22 @@ export async function sidebar(companyId: string, meId: string) {
     `),
   ]);
   return {
-    channels: channels as SideChannel[],
-    dms: dms.map((d) => ({ id: d.id, otherId: d.other_id, otherName: d.other_name, unread: d.unread })) as SideDm[],
+    channels: channels.map((c) => ({
+      id: c.id,
+      name: c.name,
+      topic: c.topic,
+      unread: c.unread,
+      lastBy: c.last?.by ?? null,
+      lastBody: c.last?.body ?? null,
+    })) as SideChannel[],
+    dms: dms.map((d) => ({
+      id: d.id,
+      otherId: d.other_id,
+      otherName: d.other_name,
+      unread: d.unread,
+      lastBy: d.last?.by ?? null,
+      lastBody: d.last?.body ?? null,
+    })) as SideDm[],
     discussions: discussions.map((d) => ({
       conversationId: d.conversation_id,
       name: d.name || d.phone,

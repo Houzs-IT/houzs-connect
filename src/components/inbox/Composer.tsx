@@ -84,6 +84,12 @@ function renderPreview(body: string, params: string[]): string {
   return body.replace(/\{\{\s*(\d+)\s*\}\}/g, (_m, n) => params[Number(n) - 1] || `{{${n}}}`);
 }
 
+const subscribeNarrow = (fn: () => void) => {
+  const mq = window.matchMedia("(max-width: 767px)");
+  mq.addEventListener("change", fn);
+  return () => mq.removeEventListener("change", fn);
+};
+
 export function Composer({
   conversationId,
   windowExpiresAt = null,
@@ -113,6 +119,9 @@ export function Composer({
     return () => clearInterval(id);
   }, [windowExpiresAt]);
   const [kind, setKind] = useState<"reply" | "note">("reply");
+  // Phone layout: the tool row is behind "+", and the placeholder is short.
+  const [tools, setTools] = useState(false);
+  const isPhone = useSyncExternalStore(subscribeNarrow, () => window.matchMedia("(max-width: 767px)").matches, () => false);
   const [panel, setPanel] = useState<
     null | "quick" | "template" | "emoji" | "attach" | "contact" | "voice"
   >(null);
@@ -803,18 +812,29 @@ export function Composer({
           setDraft("");
           formRef.current?.reset();
         }}
-        className={`flex flex-col rounded-[12px] border shadow-card ${
+        // Phone: "+", a pill input and a round send on one line; the tools
+        // open under it from "+". Desktop: the full card.
+        className={`flex flex-wrap items-center gap-2 md:flex-col md:flex-nowrap md:items-stretch md:gap-0 md:rounded-[12px] md:border md:shadow-card ${
           note
-            ? "border-[rgba(110,77,18,0.4)] bg-[color-mix(in_srgb,var(--color-warning-soft)_55%,white)]"
-            : "border-[var(--color-border-strong)] bg-[var(--color-surface)]"
+            ? "md:border-[rgba(110,77,18,0.4)] md:bg-[color-mix(in_srgb,var(--color-warning-soft)_55%,white)]"
+            : "md:border-[var(--color-border-strong)] md:bg-[var(--color-surface)]"
         }`}
       >
+        <button
+          type="button"
+          aria-label={s.moreTools}
+          aria-expanded={tools}
+          onClick={() => setTools((v) => !v)}
+          className="grid h-11 w-9 shrink-0 place-items-center text-[22px] leading-none text-[var(--color-ink)] md:hidden"
+        >
+          {tools ? "×" : "+"}
+        </button>
         <input type="hidden" name="conversationId" value={conversationId} />
         <input type="hidden" name="kind" value={kind} />
 
         {/* type="button" is load-bearing: inside a form an untyped button
             defaults to submit. */}
-        <div className="flex items-center gap-4 px-3 pt-2 text-[12px] font-semibold">
+        <div className="hidden items-center gap-4 px-3 pt-2 text-[12px] font-semibold md:flex">
           {(["reply", "note"] as const).map((k) => (
             <button
               key={k}
@@ -847,8 +867,8 @@ export function Composer({
             setDraft(v);
           }}
           disabled={!windowOpen && !note}
-          placeholder={note ? s.noteMsg : windowOpen ? s.typeMsg : s.closedMsg}
-          className="max-h-40 min-h-[42px] resize-none bg-transparent px-3 pb-1 pt-2 text-[13.5px] text-[var(--color-ink)] outline-none placeholder:text-[var(--color-faint)] disabled:cursor-not-allowed"
+          placeholder={note ? s.noteMsg : windowOpen ? (isPhone ? s.msgShort : s.typeMsg) : s.closedMsg}
+          className="max-h-40 min-h-[44px] min-w-0 flex-1 resize-none rounded-[22px] border border-[var(--color-border)] bg-[var(--color-surface-2)] px-4 py-[11px] text-[14px] text-[var(--color-ink)] outline-none placeholder:text-[var(--color-faint)] disabled:cursor-not-allowed md:min-h-[42px] md:flex-none md:rounded-none md:border-0 md:bg-transparent md:px-3 md:pb-1 md:pt-2 md:text-[13.5px]"
           onKeyDown={(e) => {
             if (e.key === "Enter" && !e.shiftKey) {
               e.preventDefault();
@@ -857,7 +877,18 @@ export function Composer({
           }}
         />
 
-        <div className="flex items-center gap-0.5 border-t border-[var(--color-border-subtle)] px-2 py-1.5">
+        <button
+          type="submit"
+          aria-label={s.send}
+          disabled={!windowOpen && !note}
+          className="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-[var(--color-accent)] text-white shadow-[var(--shadow-primary)] disabled:opacity-40 md:hidden"
+        >
+          <IconSend width={18} height={18} />
+        </button>
+
+        <div
+          className={`${tools ? "flex" : "hidden"} order-last basis-full items-center gap-0.5 border-t border-[var(--color-border-subtle)] px-2 py-1.5 md:order-none md:flex md:basis-auto`}
+        >
           <Tool label={s.tQuick} onClick={() => void openQuick()} showText>
             <IconBolt width={15} height={15} />
           </Tool>
@@ -888,7 +919,7 @@ export function Composer({
             type="submit"
             disabled={!windowOpen && !note}
             title={!windowOpen && !note ? s.closedMsg : undefined}
-            className="ml-auto flex h-8 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-[8px] bg-[var(--color-accent)] px-3 text-[12.5px] font-semibold text-white shadow-[var(--shadow-primary)] transition-colors hover:bg-[var(--color-accent-hi)] disabled:cursor-not-allowed disabled:opacity-40 disabled:shadow-none"
+            className="ml-auto hidden h-8 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-[8px] bg-[var(--color-accent)] px-3 md:flex text-[12.5px] font-semibold text-white shadow-[var(--shadow-primary)] transition-colors hover:bg-[var(--color-accent-hi)] disabled:cursor-not-allowed disabled:opacity-40 disabled:shadow-none"
           >
             <IconSend width={14} height={14} />
             {s.send}

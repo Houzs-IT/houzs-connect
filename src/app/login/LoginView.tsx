@@ -85,7 +85,7 @@ export function LoginView({ openRequest = false }: { openRequest?: boolean }) {
       <div className="auth-drift pointer-events-none absolute left-[8%] top-[18%] h-[520px] w-[520px] rounded-full bg-[radial-gradient(circle,rgba(56,160,184,0.22),transparent_70%)] blur-[90px]" />
       <div className="auth-drift2 pointer-events-none absolute bottom-[0%] right-[10%] h-[460px] w-[460px] rounded-full bg-[radial-gradient(circle,rgba(30,111,128,0.30),transparent_70%)] blur-[110px]" />
       {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img src={WORDMARK} alt="" aria-hidden draggable={false} style={WHITE} className="pointer-events-none absolute -bottom-10 -left-8 w-[480px] max-w-[64vw] opacity-[0.05]" />
+      <img src={WORDMARK} alt="" aria-hidden draggable={false} style={WHITE} className="pointer-events-none absolute -bottom-10 hidden md:block -left-8 w-[480px] max-w-[64vw] opacity-[0.05]" />
 
       {/* Language */}
       <div className="absolute right-4 top-4 z-20 flex rounded-full border border-white/20 bg-white/5 p-0.5 md:right-8 md:top-6">
