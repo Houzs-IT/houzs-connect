@@ -331,6 +331,18 @@ export async function handleInboundMessage(
   input: { buttonId?: string; text?: string; flow?: { fields: Record<string, string> } }
 ) {
   const db = getDb();
+  // Persist the tapped button so a NEW_INCOMING_MESSAGE guard (the Delivery Lock)
+  // can branch on what the customer pressed — resumeRun doesn't store it, and a
+  // late Amend tap after confirmation starts no waiting run to carry it.
+  if (input.buttonId) {
+    const c = await db.query.contact.findFirst({ where: eq(contactTable.id, contactId) });
+    if (c) {
+      await db
+        .update(contactTable)
+        .set({ attributes: { ...attrs(c.attributes), last_button: input.buttonId } })
+        .where(eq(contactTable.id, contactId));
+    }
+  }
   const resumed = await handleCustomerReply(contactId, input);
   if (resumed > 0) return { resumed, started: 0 };
 
