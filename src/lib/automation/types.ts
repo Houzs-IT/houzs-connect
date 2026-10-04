@@ -6,6 +6,7 @@ export type NodeType =
   | "ask_buttons" // interactive buttons; run pauses awaiting a tap
   | "collect_input" // pauses awaiting a free-text reply, saves to an attribute
   | "send_form" // send a Meta WhatsApp Flow form; pauses awaiting the submission
+  | "send_template" // send an approved WhatsApp template (required to OPEN a conversation); with buttons it pauses like ask_buttons
   | "ai_agent_reply" // generate + send an AI reply to the last customer message
   | "criteria_router" // branch on a contact attribute
   | "jump_to_automation" // hand the contact off to another automation
@@ -114,6 +115,13 @@ export interface FlowNode {
     formId?: string;
     flowCta?: string;
     flowScreen?: string;
+    // send_template — an approved WhatsApp template. templateParams fill the
+    // body's {{1}}, {{2}}, … IN ORDER (each interpolated like a message). `message`
+    // holds the human-readable body stored on the row / shown in DEMO; `buttons`,
+    // when the template has quick replies, make the run pause for the tap.
+    templateName?: string;
+    templateLang?: string;
+    templateParams?: string[];
     [k: string]: unknown;
   };
   // canvas position (builder)

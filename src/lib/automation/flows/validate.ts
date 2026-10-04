@@ -36,15 +36,24 @@ export function validateGraph(graph: FlowGraph): string[] {
     const branches = outBranches(n.id);
 
     // A button the customer can tap must lead somewhere: the engine resumes on
-    // the button id, matched against an edge branch of the same value.
-    if (n.type === "ask_buttons") {
+    // the button id, matched against an edge branch of the same value. Both
+    // ask_buttons and a send_template with quick replies pause for a tap.
+    if (n.type === "ask_buttons" || n.type === "send_template") {
       const buttons = n.data?.buttons ?? [];
-      if (buttons.length === 0) problems.push(`ask_buttons "${n.id}" has no buttons`);
+      if (n.type === "ask_buttons" && buttons.length === 0) {
+        problems.push(`ask_buttons "${n.id}" has no buttons`);
+      }
       for (const b of buttons) {
         if (!branches.includes(b.id)) {
-          problems.push(`ask_buttons "${n.id}" button "${b.id}" has no outgoing edge`);
+          problems.push(`${n.type} "${n.id}" button "${b.id}" has no outgoing edge`);
         }
       }
+    }
+
+    // A template node whose template was never named sends free text, which Meta
+    // refuses for a business-initiated open — catch it at authoring time.
+    if (n.type === "send_template" && !n.data?.templateName) {
+      problems.push(`send_template "${n.id}" has no templateName`);
     }
 
     // Every router rule branch must have an edge, and a router needs a default
