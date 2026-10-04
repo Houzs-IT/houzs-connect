@@ -2,7 +2,7 @@ import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { getDb } from "@/db/client";
 import { payment as paymentTable } from "@/db/schema";
 import { downloadMedia } from "@/lib/whatsapp/download";
-import { readReceipt } from "@/lib/receipt-vision";
+import { paidBy, readingNote, readReceipt } from "@/lib/receipt-vision";
 
 /*
   An image or document a customer sent: does it become a payment to check?
@@ -59,12 +59,13 @@ async function intake(p: Intake): Promise<void> {
     contactId: p.contactId,
     conversationId: p.conversationId,
     amount: r.amount,
-    currency: r.currency ?? "MYR",
-    method: r.bank,
-    referenceNo: r.reference,
+    currency: "MYR",
+    method: paidBy(r),
+    // A card slip's approval code is its reference; a transfer has its own.
+    referenceNo: r.method === "Card" ? (r.approvalCode ?? r.reference) : (r.reference ?? r.approvalCode),
     orderRef: p.orderRef,
     receiptMediaUrl: `whatsapp-media:${p.mediaId}`,
-    ocrRawText: [p.caption, r.paidAt && `Paid ${r.paidAt}`, r.recipient && `To ${r.recipient}`].filter(Boolean).join(" · ") || null,
+    ocrRawText: [p.caption, readingNote(r)].filter(Boolean).join(" · ") || null,
     status: "PENDING",
   });
 }

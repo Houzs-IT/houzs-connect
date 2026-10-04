@@ -6,8 +6,17 @@ import { jsonSchemaOutputFormat } from "@anthropic-ai/sdk/helpers/json-schema";
 
   Customers send all kinds of pictures — posters, product photos, screenshots
   of chats. Only a picture that shows money changing hands should become a
-  payment to check, so Claude looks at it and says whether it is a receipt and
-  what it reads: amount, bank / wallet, reference, date.
+  payment to check, so Claude looks at it, says whether it is a receipt, and
+  reads it.
+
+  The reading rules are the Houzs ERP's (backend/src/scm/routes/scan-payment.ts,
+  the Payments panel's receipt OCR), so Connect records a payment the way the
+  ERP does: three methods (Card / Online / Cash); a card-terminal slip — EPP
+  included — is Card with the HOST bank and the tenure ("One Shot" when none is
+  printed); DuitNow / transfer / Touch 'n Go / cheque is Online with its type;
+  the date is the one printed on the slip, never today. Connect is not
+  connected to the ERP, so the values are fixed lists here rather than the
+  ERP's live dropdowns.
 
   Needs ANTHROPIC_API_KEY as a Worker secret. Without it (or when the call
   fails) the answer is "unavailable" and the caller keeps the old behaviour —
@@ -15,35 +24,80 @@ import { jsonSchemaOutputFormat } from "@anthropic-ai/sdk/helpers/json-schema";
   outage.
 */
 
+const MODEL = "claude-sonnet-5-5";
+
+const METHODS = ["Card", "Online", "Cash", "None"] as const;
+const ONLINE_TYPES = ["DuitNow", "Bank Transfer", "TNG", "Cheque", "None"] as const;
+
 const SCHEMA = {
   type: "object",
   properties: {
-    is_receipt: {
-      type: "boolean",
-      description: "True only for proof of a payment: bank transfer slip, DuitNow/e-wallet receipt, deposit slip, card receipt.",
+    is_receipt: { type: "boolean", description: "True only for proof that money was paid." },
+    method: { type: "string", enum: [...METHODS], description: "Card, Online or Cash; None when not a receipt." },
+    online_type: { type: "string", enum: [...ONLINE_TYPES], description: "For Online only; None otherwise." },
+    bank: {
+      type: ["string", "null"],
+      description:
+        "Card: the HOST / acquirer bank as printed (Maybank, CIMB, Public Bank, Hong Leong, RHB, AEON…). Online: the paying bank if printed. Null otherwise.",
     },
-    amount: {
-      type: ["number", "null"],
-      description: "The amount paid, as a number without currency or thousands separators. Null when no paid amount is visible.",
+    installment_months: {
+      type: ["integer", "null"],
+      description: "Card only: the printed tenure in months; 0 = One Shot (no tenure printed). Null for Online / Cash.",
     },
-    currency: { type: ["string", "null"], description: "ISO code, e.g. MYR." },
-    bank: { type: ["string", "null"], description: "Bank or wallet, e.g. Maybank, CIMB, Touch 'n Go, DuitNow." },
-    reference: { type: ["string", "null"], description: "Transaction / reference number as printed." },
-    paid_at: { type: ["string", "null"], description: "Date and time as printed on the slip." },
+    approval_code: { type: ["string", "null"], description: "Card approval / auth code, bare digits/letters." },
+    reference: { type: ["string", "null"], description: "Transfer / DuitNow reference or transaction id as printed." },
+    amount: { type: ["number", "null"], description: "The printed TOTAL charged, as a number in RM. Never a monthly repayment." },
+    paid_at: { type: ["string", "null"], description: "The printed transaction date as YYYY-MM-DD (two-digit years are 20YY)." },
     recipient: { type: ["string", "null"], description: "Who received the money, as printed." },
+    uncertain: { type: ["string", "null"], description: "Anything smudged or ambiguous the person checking should look at." },
   },
-  required: ["is_receipt", "amount", "currency", "bank", "reference", "paid_at", "recipient"],
+  required: [
+    "is_receipt",
+    "method",
+    "online_type",
+    "bank",
+    "installment_months",
+    "approval_code",
+    "reference",
+    "amount",
+    "paid_at",
+    "recipient",
+    "uncertain",
+  ],
   additionalProperties: false,
 } as const;
 
+const PROMPT = `A customer of Houzs Century, a Malaysian furniture retailer, sent this picture in WhatsApp.
+
+FIRST decide whether it is proof that the customer PAID money: a bank card-terminal slip (Maybank / CIMB / Public Bank / Hong Leong / RHB / AEON terminal), an EPP / instalment approval slip, a DuitNow / bank-transfer / Touch 'n Go confirmation, a cheque, or a cash receipt. Posters, product or room photos, chat screenshots, quotations and invoices that only show an amount OWED are NOT receipts: is_receipt = false, method = "None", everything else null / "None".
+
+For a receipt, read EXACTLY what is printed. Do not correct, reconcile or recompute any figure, and never derive a total the receipt does not print (not from a monthly repayment × tenure, not from line items). A field that is not printed is null — never guess.
+
+METHOD — exactly three:
+1. Any CARD-TERMINAL receipt — a normal swipe ("SALE" / "APPROVED") or an EPP / instalment approval (a "TENURE", "06 MONTHS", "6 MTHS", "MONTHLY REPAYMENT" line, the words EPP / EASY PAYMENT PLAN / INSTALMENT / ANSURAN / IPP) → method "Card".
+   • bank = the HOST / acquirer / terminal bank ("Host: MBB" → Maybank; Public Bank; CIMB; Hong Leong for HLB; RHB; an AEON terminal → AEON).
+   • installment_months = the printed tenure ("TENURE 06 MONTHS" → 6, "IPP 12" → 12). No month count printed → 0 (One Shot) — even when it says EPP / INSTALMENT with no number. Never default to 12.
+   • approval_code = the APPROVAL CODE / APPR / AUTH CODE / KOD KELULUSAN, bare ("APPROVAL CODE 073496" → "073496").
+2. DUITNOW / BANK TRANSFER (IBG, instant transfer) / TOUCH 'N GO / E-WALLET / CHEQUE → method "Online", online_type DuitNow / Bank Transfer / TNG / Cheque. installment_months = null. reference = the transfer reference or transaction id.
+3. CASH receipt → method "Cash".
+
+amount = the charged TOTAL / CARD TOTAL / AMOUNT / JUMLAH / SALE AMOUNT ("RM 4,600.00" → 4600). For EPP it is the full financed total, NOT the monthly repayment.
+paid_at = the receipt's own printed date ("DATE 22/06/26 14:03" → "2026-06-22"). It is often days in the past; never use today's date.
+When something is smudged or two readings are equally plausible, give your best reading and say what is unsure in "uncertain".`;
+
 export type ReceiptReading = {
   isReceipt: boolean;
-  amount: number | null;
-  currency: string | null;
+  method: "Card" | "Online" | "Cash" | null;
+  onlineType: "DuitNow" | "Bank Transfer" | "TNG" | "Cheque" | null;
   bank: string | null;
+  /** 0 = One Shot. */
+  installmentMonths: number | null;
+  approvalCode: string | null;
   reference: string | null;
+  amount: number | null;
   paidAt: string | null;
   recipient: string | null;
+  uncertain: string | null;
 };
 
 export type ReceiptResult = { status: "read"; reading: ReceiptReading } | { status: "unavailable"; error: string };
@@ -77,43 +131,60 @@ export async function readReceipt(bytes: ArrayBuffer, mimeType: string): Promise
   try {
     const client = new Anthropic({ timeout: 60_000, maxRetries: 1 });
     const response = await client.messages.parse({
-      model: "claude-opus-5-5",
+      model: MODEL,
       max_tokens: 2048,
       output_config: { effort: "low", format: jsonSchemaOutputFormat(SCHEMA) },
-      messages: [
-        {
-          role: "user",
-          content: [
-            file,
-            {
-              type: "text",
-              text:
-                "A customer of a Malaysian furniture company sent this in WhatsApp. Is it proof that they paid money " +
-                "(bank transfer slip, DuitNow / e-wallet receipt, deposit slip, card receipt)? If yes, read the amount " +
-                "paid and the other details exactly as printed. Posters, product photos, chat screenshots and invoices " +
-                "that only show an amount owed are not receipts.",
-            },
-          ],
-        },
-      ],
+      messages: [{ role: "user", content: [file, { type: "text", text: PROMPT }] }],
     });
     if (response.stop_reason === "refusal") return { status: "unavailable", error: "declined" };
     const out = response.parsed_output;
     if (!out) return { status: "unavailable", error: "no structured answer" };
+    const method = out.method === "None" ? null : out.method;
     return {
       status: "read",
       reading: {
-        isReceipt: out.is_receipt,
-        amount: typeof out.amount === "number" && Number.isFinite(out.amount) && out.amount > 0 ? out.amount : null,
-        currency: out.currency,
+        isReceipt: out.is_receipt && method != null,
+        method,
+        onlineType: method === "Online" && out.online_type !== "None" ? out.online_type : null,
         bank: out.bank,
+        installmentMonths:
+          method === "Card" && typeof out.installment_months === "number" && out.installment_months >= 0 ? out.installment_months : null,
+        approvalCode: out.approval_code,
         reference: out.reference,
-        paidAt: out.paid_at,
+        amount: typeof out.amount === "number" && Number.isFinite(out.amount) && out.amount > 0 ? out.amount : null,
+        paidAt: out.paid_at && /^\d{4}-\d{2}-\d{2}$/.test(out.paid_at) ? out.paid_at : null,
         recipient: out.recipient,
+        uncertain: out.uncertain,
       },
     };
   } catch (e) {
     if (e instanceof Anthropic.APIError) return { status: "unavailable", error: `Claude API ${e.status ?? ""} ${e.message}` };
     return { status: "unavailable", error: (e as Error)?.message ?? String(e) };
   }
+}
+
+/**
+ * "Paid by" as the Payments page shows it: the bank for a card slip, the
+ * transfer type for Online (DuitNow, TNG …), "Cash".
+ */
+export function paidBy(r: ReceiptReading): string | null {
+  if (r.method === "Card") return r.bank;
+  if (r.method === "Online") return r.onlineType ?? r.bank;
+  if (r.method === "Cash") return "Cash";
+  return null;
+}
+
+/** One line for the person checking: what was read beyond amount / reference. */
+export function readingNote(r: ReceiptReading): string | null {
+  const parts = [
+    r.method === "Card" && "Card",
+    r.method === "Card" && r.bank && `host ${r.bank}`,
+    r.method === "Card" && r.installmentMonths != null && (r.installmentMonths === 0 ? "One Shot" : `${r.installmentMonths} months`),
+    r.method === "Card" && r.approvalCode && `approval ${r.approvalCode}`,
+    r.method === "Online" && r.bank && `from ${r.bank}`,
+    r.paidAt && `paid ${r.paidAt}`,
+    r.recipient && `to ${r.recipient}`,
+    r.uncertain && `check: ${r.uncertain}`,
+  ].filter(Boolean);
+  return parts.length ? parts.join(" · ") : null;
 }
