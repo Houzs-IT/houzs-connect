@@ -133,7 +133,7 @@ export function PaymentReview({
         )}
       </div>
 
-      <div className="scroll-thin grid min-h-0 flex-1 gap-4 overflow-y-auto p-4 xl:grid-cols-2">
+      <div className="scroll-thin grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)] gap-4 overflow-y-auto p-4 xl:grid-cols-2">
         <div className="flex flex-col">
           <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.1em] text-[var(--color-faint)]">{L.receipt}</div>
           {p.hasImage && !imgFailed ? (

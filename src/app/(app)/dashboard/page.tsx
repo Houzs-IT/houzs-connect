@@ -115,18 +115,27 @@ export default async function DashboardPage({
           <h1 className="text-[24px] font-medium tracking-[-0.02em] text-[var(--color-ink)] md:text-[28px]">
             {fmt(s.welcome, { name: firstName })}
           </h1>
-          <div className="mt-1 text-[12.5px] text-[var(--color-faint)]">
+          <div className="mt-1 hidden text-[12.5px] text-[var(--color-faint)] md:block">
             {dateLine} · {s.signedInAs} <b className="font-semibold text-[var(--color-muted)]">{me.name}</b>
           </div>
-        </div>
-          <div className="flex items-center gap-2">
+          <div className="mt-1 text-[12.5px] text-[var(--color-faint)] md:hidden">{fmt(s.updated, { time })}</div>
+          <div className="mt-3 flex flex-wrap items-center gap-2 md:hidden">
+            {tab !== "live" && <PeriodPicker value={w.days} range={w.rangeLabel} />}
             <Suspense fallback={null}>
               <Presence companyId={companyId} s={s} />
             </Suspense>
-            <LangToggle pill className="hidden md:flex" />
+          </div>
+        </div>
+          <div className="flex items-center gap-2">
+            <span className="hidden md:contents">
+              <Suspense fallback={null}>
+                <Presence companyId={companyId} s={s} />
+              </Suspense>
+            </span>
+            <LangToggle pill />
             <a
               href={`/dashboard/export?period=${w.days}`}
-              className="flex h-[38px] items-center gap-1.5 whitespace-nowrap rounded-[8px] border border-[var(--color-border)] bg-[var(--color-surface)] px-3.5 text-[12.5px] font-semibold text-[var(--color-ink)] hover:border-[var(--color-border-strong)] hover:bg-[var(--color-surface-2)]"
+              className="hidden h-[38px] md:flex items-center gap-1.5 whitespace-nowrap rounded-[8px] border border-[var(--color-border)] bg-[var(--color-surface)] px-3.5 text-[12.5px] font-semibold text-[var(--color-ink)] hover:border-[var(--color-border-strong)] hover:bg-[var(--color-surface-2)]"
             >
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M12 3v12M7 10l5 5 5-5M5 21h14" />
@@ -138,7 +147,7 @@ export default async function DashboardPage({
 
         {/* Tabs · period · updated */}
         <div className="flex flex-wrap items-center gap-2.5">
-          <nav className="mr-2 flex rounded-[10px] border border-[var(--color-border)] bg-[var(--color-surface)] p-[3px]">
+          <nav className="flex w-full rounded-[10px] border border-[var(--color-border)] bg-[var(--color-surface)] p-[3px] md:mr-2 md:w-auto">
             {tabs.map((tb) => {
               const on = tb.key === tab;
               return (
@@ -147,7 +156,7 @@ export default async function DashboardPage({
                   href={tabHref(tb.key)}
                   scroll={false}
                   aria-current={on ? "page" : undefined}
-                  className={`flex items-center gap-1.5 whitespace-nowrap rounded-[8px] px-3.5 py-1.5 text-[12.5px] font-semibold transition-colors ${
+                  className={`flex flex-1 items-center justify-center gap-1.5 whitespace-nowrap rounded-[8px] px-3.5 py-1.5 md:flex-none text-[12.5px] font-semibold transition-colors ${
                     on
                       ? "bg-[var(--color-accent)] text-white shadow-[var(--shadow-primary)]"
                       : "text-[var(--color-ink)] hover:bg-[var(--color-surface-2)]"
@@ -163,16 +172,21 @@ export default async function DashboardPage({
               );
             })}
           </nav>
-          {tab !== "live" && <PeriodPicker value={w.days} range={w.rangeLabel} />}
-          <span className="ml-auto text-[12px] text-[var(--color-faint)]">{fmt(s.updated, { time })}</span>
+          <span className="hidden md:contents">
+            {tab !== "live" && <PeriodPicker value={w.days} range={w.rangeLabel} />}
+          </span>
+          <span className="ml-auto hidden text-[12px] text-[var(--color-faint)] md:inline">{fmt(s.updated, { time })}</span>
         </div>
 
         {tab === "overview" && (
-          <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_380px]">
-            <div className="grid gap-4 md:grid-cols-2 xl:col-span-2">
-              <Suspense fallback={<ReplyRateSkeleton />}>
-                <ReplyRateCards {...props} />
-              </Suspense>
+          <div className="grid grid-cols-[minmax(0,1fr)] items-start gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_380px]">
+            <div className="grid grid-cols-[minmax(0,1fr)] gap-4 md:grid-cols-2 xl:col-span-2">
+              {/* Two small tiles side by side on a phone. */}
+              <div className="grid grid-cols-2 gap-3 md:contents">
+                <Suspense fallback={<ReplyRateSkeleton />}>
+                  <ReplyRateCards {...props} />
+                </Suspense>
+              </div>
               <div className="md:row-span-2">
                 <Suspense fallback={<CardSkeleton h={470} />}>
                   <FollowUpCard {...props} />

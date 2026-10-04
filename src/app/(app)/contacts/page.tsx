@@ -7,6 +7,7 @@ import { attrs, formatPhone, waIdentifier } from "@/lib/format";
 import { getDict } from "@/lib/i18n/server";
 import { ensureContactColumns, normalisePhone } from "./actions";
 import { ContactDetail } from "./ContactDetail";
+import { PhoneList } from "./PhoneList";
 import { ContactsView, type ContactRow } from "./ContactsView";
 import { HeaderActions } from "./HeaderActions";
 import {
@@ -123,6 +124,8 @@ export default async function ContactsPage({ searchParams }: { searchParams: Pro
       }
     >
       <div className="flex h-full min-h-0">
+        {!activeId && <PhoneList companyId={me.companyId} rows={rows} q={q} segment={segment} s={s} />}
+        <div className={`${activeId ? "flex" : "hidden md:flex"} min-w-0 flex-1`}>
         <ContactsView
           rows={rows}
           total={total}
@@ -137,6 +140,7 @@ export default async function ContactsPage({ searchParams }: { searchParams: Pro
           duplicates={dups}
           activeId={activeId}
         />
+        </div>
         {activeId && (
           <ContactDetail
             companyId={me.companyId}

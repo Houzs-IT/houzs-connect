@@ -34,6 +34,7 @@ export async function PageChrome({
     <div className="flex min-w-0 flex-1 flex-col">
       <Topbar
         crumbs={[t.nav[section], ...(page ? [t.page[page]] : []), ...crumbs]}
+        mobileTitle={section === "settings" ? undefined : t.nav[section]}
         actions={actions}
         center={center}
         current={me}
