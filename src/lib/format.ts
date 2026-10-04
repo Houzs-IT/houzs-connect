@@ -1,5 +1,7 @@
 export function initials(name?: string | null): string {
   if (!name) return "?";
+  // A number stands in for the name: its first two digits ("60"), not "+1".
+  if (/^\+?[\d\s-]+$/.test(name.trim())) return name.replace(/\D/g, "").slice(0, 2) || "?";
   const parts = name.replace(/[_-]+/g, " ").trim().split(/\s+/);
   return (parts[0]?.[0] ?? "") + (parts[1]?.[0] ?? "");
 }
