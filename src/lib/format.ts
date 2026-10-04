@@ -58,6 +58,20 @@ export function shortDay(v?: string | null): string {
   return m ? `${m[3].padStart(2, "0")}/${m[2].padStart(2, "0")}` : v;
 }
 
+/** How long ago, in the unit people say it: minutes, hours, days, weeks, months. */
+export function agoParts(d: Date | string): { unit: "now" | "m" | "h" | "d" | "w" | "mo"; n: number } {
+  const date = typeof d === "string" ? new Date(d) : d;
+  const min = Math.floor((Date.now() - date.getTime()) / 60000);
+  if (min < 1) return { unit: "now", n: 0 };
+  if (min < 60) return { unit: "m", n: min };
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return { unit: "h", n: hr };
+  const day = Math.floor(hr / 24);
+  if (day < 7) return { unit: "d", n: day };
+  if (day < 30) return { unit: "w", n: Math.floor(day / 7) };
+  return { unit: "mo", n: Math.floor(day / 30) };
+}
+
 /** Date + time, for a message older than today. */
 export function stamp(d?: Date | string | null): string {
   if (!d) return "";

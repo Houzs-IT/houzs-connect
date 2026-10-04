@@ -6,7 +6,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useRef, useState, useTransition } from "react";
+import { useRef, useState, useSyncExternalStore, useTransition } from "react";
 import { useShell } from "@/components/shell/ShellProvider";
 import { isBound, positionalSlots, resolveBinding, type VarBinding } from "@/lib/automation/vars";
 import { fmt } from "@/lib/i18n/dict";
@@ -53,6 +53,47 @@ function Counter({ v, max }: { v: string; max: number }) {
   );
 }
 
+/*
+  "Save draft" keeps an unsubmitted template in this browser only: Meta has no
+  drafts, and a half-written template is nobody else's business. A new
+  template offers to pick it back up.
+*/
+const DRAFT_KEY = "hc.templateDraft";
+type Draft = { name: string; language: string; category: TemplateCategory; header: string; body: string; footer: string; buttons: string[] };
+let draftVersion = 0;
+const draftListeners = new Set<() => void>();
+const subscribeDraft = (fn: () => void) => {
+  draftListeners.add(fn);
+  return () => draftListeners.delete(fn);
+};
+let draftCache: { v: number; raw: string | null } = { v: -1, raw: null };
+function readDraftRaw(): string | null {
+  if (draftCache.v !== draftVersion) {
+    let raw: string | null = null;
+    try {
+      raw = localStorage.getItem(DRAFT_KEY);
+    } catch {}
+    draftCache = { v: draftVersion, raw };
+  }
+  return draftCache.raw;
+}
+function parseDraft(raw: string | null): Draft | null {
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw) as Draft;
+  } catch {
+    return null;
+  }
+}
+function writeDraft(d: Draft | null) {
+  try {
+    if (d) localStorage.setItem(DRAFT_KEY, JSON.stringify(d));
+    else localStorage.removeItem(DRAFT_KEY);
+  } catch {}
+  draftVersion++;
+  draftListeners.forEach((fn) => fn());
+}
+
 export function TemplateEditor({
   existing,
   fields,
@@ -86,6 +127,25 @@ export function TemplateEditor({
   const [copied, setCopied] = useState(false);
   const [pending, start] = useTransition();
   const area = useRef<HTMLTextAreaElement>(null);
+  const [savedDraft, setSavedDraft] = useState(false);
+  const draftRaw = useSyncExternalStore(subscribeDraft, readDraftRaw, () => null);
+  const draft = !existing && !body ? parseDraft(draftRaw) : null;
+
+  function saveDraft() {
+    writeDraft({ name, language, category, header: headerOn ? header : "", body, footer, buttons });
+    setSavedDraft(true);
+    setTimeout(() => setSavedDraft(false), 1600);
+  }
+  function resumeDraft(d: Draft) {
+    setName(d.name);
+    setLanguage(d.language);
+    setCategory(d.category);
+    setHeaderOn(!!d.header);
+    setHeader(d.header);
+    setBody(d.body);
+    setFooter(d.footer);
+    setButtons(d.buttons);
+  }
 
   const sample = samples[sampleIdx] ?? null;
   const lookup = sampleLookup(sample);
@@ -186,6 +246,7 @@ export function TemplateEditor({
         if (!res.ok) return setNote({ ok: false, text: res.error ?? "Meta refused the template." });
         setNote({ ok: true, text: fmt(L.submitted, { name: nameClean, status: res.status ?? "PENDING" }) });
       }
+      if (!existing) writeDraft(null);
       router.push("/templates");
       router.refresh();
     });
@@ -243,6 +304,11 @@ export function TemplateEditor({
             </svg>
             {copied ? L.copied : L.copyCurl}
           </button>
+          {!existing && (
+            <button type="button" className={btn2} disabled={pending || !body.trim()} onClick={saveDraft}>
+              {savedDraft ? L.draftSaved : L.saveDraft}
+            </button>
+          )}
           <button type="button" className={btn1} disabled={pending || !!blocker || !!blocked} title={blocker ?? blocked ?? undefined} onClick={submit}>
             {pending ? L.submitting : editing ? L.resubmit : L.submit}
           </button>
@@ -250,6 +316,17 @@ export function TemplateEditor({
       </header>
 
       <div className="scroll-thin min-h-0 flex-1 overflow-y-auto">
+        {draft && (
+          <div className="mx-4 mt-4 flex items-center gap-3 rounded-[10px] border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-2.5 text-[12.5px] text-[var(--color-ink)]">
+            <span className="min-w-0 flex-1 truncate">{fmt(L.draftFound, { name: draft.name || L.newTemplate })}</span>
+            <button type="button" className={btn2} onClick={() => resumeDraft(draft)}>
+              {L.resumeDraft}
+            </button>
+            <button type="button" className="text-[12px] text-[var(--color-muted)] hover:text-[var(--color-ink)]" onClick={() => writeDraft(null)}>
+              {L.discardDraft}
+            </button>
+          </div>
+        )}
         <div className="flex flex-col gap-4 p-4 xl:flex-row xl:items-start">
           {/* ── Copy ── */}
           <section className={`${card} flex min-w-0 flex-1 flex-col gap-4 p-4 xl:max-w-[580px]`}>

@@ -1,12 +1,13 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { and, count, desc, eq } from "drizzle-orm";
+import { and, asc, count, desc, eq, sql } from "drizzle-orm";
 import { getDb } from "@/db/client";
 import { contact as contactTable, form, formResponse } from "@/db/schema";
 import { PageChrome } from "@/components/PageChrome";
-import { relTime, stamp } from "@/lib/format";
+import { stamp } from "@/lib/format";
 import { getCurrentMember } from "@/lib/current-member";
 import { fmt } from "@/lib/i18n/dict";
+import { agoLabel } from "@/lib/i18n/ago";
 import { getDict } from "@/lib/i18n/server";
 import { createForm } from "./actions";
 import { FormBuilder } from "./FormBuilder";
@@ -32,7 +33,7 @@ export default async function FormsPage({ searchParams }: { searchParams: Promis
   // Response counts in Postgres, joined through `form` so another company's
   // answers can never land in this map.
   const [rows, responseCounts] = await Promise.all([
-    db.query.form.findMany({ where: eq(form.companyId, me.companyId), orderBy: desc(form.createdAt) }),
+    db.query.form.findMany({ where: eq(form.companyId, me.companyId), orderBy: [sql`(${form.status} = 'published') desc`, asc(form.createdAt)] }),
     db
       .select({ formId: formResponse.formId, n: count() })
       .from(formResponse)
@@ -198,7 +199,7 @@ export default async function FormsPage({ searchParams }: { searchParams: Promis
             initialFields={selected.questions}
             published={selected.status === "published"}
             responses={selected.responses}
-            sub={`${fmt(L.questionsN, { n: selected.questions.length })} · ${fmt(L.made, { when: relTime(selected.createdAt) })}`}
+            sub={`${fmt(L.questionsN, { n: selected.questions.length })} · ${fmt(L.made, { when: agoLabel(t, selected.createdAt) })}`}
             answersHref={href({ f: selected.id, tab: "answers" })}
           />
         )}
