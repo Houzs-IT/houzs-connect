@@ -1,6 +1,7 @@
 import Link from "next/link";
 import type { CompanyChoice } from "@/lib/companies";
 import { CompanySwitcher, LangToggle, MenuExpandButton, UserMenu } from "./shell/TopbarControls";
+import { OnlinePeople } from "./shell/OnlinePeople";
 import { NotifyBell } from "./shell/NotifyBell";
 
 export type Crumb = string | { label: string; href: string };
@@ -72,6 +73,7 @@ export function Topbar({
 
       <div className={`${center ? "md:ml-0" : ""} ml-auto flex items-center gap-2`}>
         <CompanySwitcher companies={companies} className="hidden md:block" />
+        <OnlinePeople className="hidden lg:block" />
         <LangToggle className="hidden md:flex" />
         {actions}
         <NotifyBell />
