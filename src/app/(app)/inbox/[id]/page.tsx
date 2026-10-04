@@ -125,7 +125,9 @@ export default async function ConversationPage({
 
   // Flow milestones since the oldest message on screen, and the customer's
   // current flow for the panel — both read from automation_run.
-  const since = messages[0]?.createdAt ?? convo.createdAt;
+  // The whole history is on screen when it fits, so flow starts before the
+  // first message (the trigger) still show.
+  const since = convo.messages.length < THREAD_LIMIT ? new Date(0) : (messages[0]?.createdAt ?? convo.createdAt);
   const [automationEvents, automation] = await Promise.all([
     getAutomationEvents(convo.contact.id, since),
     getAutomationProgress(convo.contact.id),

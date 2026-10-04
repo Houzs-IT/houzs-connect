@@ -50,6 +50,7 @@ export function TopbarSkeleton({
       </div>
       <div className="ml-auto flex items-center gap-2">
         <LangToggle className="hidden md:flex" />
+        <Skel className="h-[34px] w-[34px] rounded-[8px]" />
         <div className="flex items-center gap-2 py-1 pl-1 pr-1.5">
           <Skel className="h-8 w-8 rounded-full" />
           <div className="hidden leading-tight sm:block">

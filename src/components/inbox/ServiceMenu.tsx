@@ -6,6 +6,7 @@ import { ensureConversationMemberTable } from "@/db/ensure-conversation-member";
 import { conversationCompanyWhere, conversationVisibilityWhere, getVisibility } from "@/lib/access";
 import type { CurrentMember } from "@/lib/current-member";
 import { getDict } from "@/lib/i18n/server";
+import { formatPhone } from "@/lib/format";
 import { SecondaryMenu } from "@/components/shell/SecondaryMenu";
 import { can } from "@/lib/permissions";
 
@@ -133,7 +134,7 @@ export async function ServiceMenu({ me }: { me: CurrentMember }) {
             {live ? "LIVE · WhatsApp" : "DEMO · WhatsApp"}
           </div>
           {co?.name && <div className="truncate text-[var(--color-muted)]">{co.name}</div>}
-          {number && <div className="font-mono text-[var(--color-faint)]">{number}</div>}
+          {number && <div className="tabular-nums text-[var(--color-faint)]">{formatPhone(number)}</div>}
         </div>
       }
     />

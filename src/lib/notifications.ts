@@ -39,10 +39,14 @@ export type Notice = { kind: NotifyKind; title: string; body: string; href: stri
 export async function noticesSince(
   me: { id: string; companyId: string },
   since: Date,
-  opts: { approver: boolean }
+  opts: { approver: boolean; all?: boolean }
 ): Promise<Notice[]> {
   const db = getDb();
-  const prefs = await loadPrefs(me.id);
+  const loaded = await loadPrefs(me.id);
+  // The bell lists everything; the browser alerts follow the person's choices.
+  const prefs = opts.all
+    ? (Object.fromEntries(Object.keys(loaded).map((k) => [k, { browser: true, email: false }])) as Prefs)
+    : loaded;
   const out: Notice[] = [];
   const q = async <T,>(s: ReturnType<typeof sql>) => (await db.execute(s).catch(() => [])) as unknown as T[];
 
@@ -112,5 +116,5 @@ export async function noticesSince(
       out.push({ kind: "accessRequest", title: r.name, body: r.department ?? "", href: "/settings/team", at: String(r.created_at) });
     }
   }
-  return out;
+  return out.sort((a, b) => (a.at < b.at ? 1 : -1));
 }

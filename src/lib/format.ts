@@ -40,6 +40,24 @@ export function clockTime(d?: Date | string | null): string {
   });
 }
 
+/** Inbox list stamp: clock time today, "Yesterday", then dd/mm. */
+export function listTime(d?: Date | string | null, yesterday = "Yesterday"): string {
+  if (!d) return "";
+  const date = typeof d === "string" ? new Date(d) : d;
+  const day = (x: Date) => x.toLocaleDateString("en-CA", { timeZone: TZ });
+  const now = new Date();
+  if (day(date) === day(now)) return clockTime(date);
+  if (day(date) === day(new Date(now.getTime() - 86_400_000))) return yesterday;
+  return date.toLocaleDateString("en-GB", { day: "2-digit", month: "2-digit", timeZone: TZ });
+}
+
+/** "2026/07/31" or "2026-07-31" -> "31/07". Anything else is returned as is. */
+export function shortDay(v?: string | null): string {
+  if (!v) return "";
+  const m = /^(\d{4})[-/](\d{1,2})[-/](\d{1,2})/.exec(v);
+  return m ? `${m[3].padStart(2, "0")}/${m[2].padStart(2, "0")}` : v;
+}
+
 /** Date + time, for a message older than today. */
 export function stamp(d?: Date | string | null): string {
   if (!d) return "";
@@ -88,7 +106,7 @@ export function waIdentifier(raw?: string | null): {
   const v = (raw ?? "").trim();
   const isPhone = v.length > 0 && /^\d+$/.test(v);
   return {
-    text: isPhone ? `+${v}` : v,
+    text: isPhone ? formatPhone(v) : v,
     isPhone,
     label: isPhone ? "Phone number" : "WhatsApp username — this contact has no phone number",
   };

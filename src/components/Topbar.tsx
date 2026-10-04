@@ -1,6 +1,7 @@
 import Link from "next/link";
 import type { CompanyChoice } from "@/lib/companies";
 import { LangToggle, MenuExpandButton, UserMenu } from "./shell/TopbarControls";
+import { NotifyBell } from "./shell/NotifyBell";
 
 export type Crumb = string | { label: string; href: string };
 
@@ -72,6 +73,7 @@ export function Topbar({
       <div className={`${center ? "md:ml-0" : ""} ml-auto flex items-center gap-2`}>
         <LangToggle className="hidden md:flex" />
         {actions}
+        <NotifyBell />
         <UserMenu
           current={{ name: current.name, role: current.role, department: current.department?.name }}
           companies={companies}

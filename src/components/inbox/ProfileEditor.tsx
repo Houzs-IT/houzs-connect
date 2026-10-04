@@ -56,7 +56,7 @@ export function ProfileEditor({
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
-        className="rounded px-1.5 py-0.5 text-[11px] font-medium text-[var(--color-faint)] transition-colors hover:bg-[var(--color-surface-2)] hover:text-[var(--color-ink)]"
+        className={`rounded px-1.5 py-0.5 text-[11px] font-medium text-[var(--color-faint)] transition-[colors,opacity] ${open ? "" : "opacity-0 focus:opacity-100 group-hover/head:opacity-100"} hover:bg-[var(--color-surface-2)] hover:text-[var(--color-ink)]`}
       >
         {open ? "Close" : "Edit"}
       </button>

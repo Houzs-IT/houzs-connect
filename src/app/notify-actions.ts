@@ -19,6 +19,14 @@ export async function checkNotices(since: string): Promise<Notice[]> {
   return noticesSince(me, Number.isNaN(from.getTime()) || from < floor ? floor : from, { approver });
 }
 
+/** The bell in the top bar: the last day of everything, newest first. */
+export async function recentNotices(): Promise<Notice[]> {
+  const me = await getCurrentMember();
+  if (!me) return [];
+  const approver = (await can(me, "approveDept")) || (await can(me, "approveFinal"));
+  return (await noticesSince(me, new Date(Date.now() - 86_400_000), { approver, all: true })).slice(0, 12);
+}
+
 /** Save one choice on Settings → Notifications. */
 export async function setNotifyPref(kind: string, channel: "browser" | "email", on: boolean): Promise<{ ok: boolean }> {
   const me = await getCurrentMember();

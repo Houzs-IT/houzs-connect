@@ -40,9 +40,38 @@ const EVENT_RUNS = 10;
 /** How many not-yet-reached steps the card previews. */
 const LOOKAHEAD = 5;
 
+/** First sentence of a message, placeholders dropped, kept short. */
+function gist(text: string): string {
+  const plain = text.replace(/\{[^}]*\}/g, "…").replace(/\s+/g, " ").trim();
+  const parts = plain.split(/(?<=[.?!])\s/);
+  // The question is what the customer answers; a greeting says nothing.
+  const first = parts.find((p) => p.endsWith("?")) ?? parts.find((p) => p.length > 12) ?? plain;
+  return first.length > 34 ? `${first.slice(0, 32)}…` : first;
+}
+
 function stepLabel(node: FlowNode): string {
+  const d = (node.data ?? {}) as Record<string, string | undefined> & { message?: string; tag?: string; key?: string; value?: string };
+  // A step the author named keeps its name.
+  if (d.label || d.title) return String(d.label ?? d.title);
+  switch (node.type) {
+    case "trigger":
+      return "Trigger";
+    case "ask_buttons":
+    case "collect_input":
+      return d.message ? `Ask: ${gist(d.message)}` : nodeMeta(node.type).label;
+    case "send_text":
+    case "send_template":
+      return d.message ? `Send: ${gist(d.message)}` : "Send message";
+    case "add_tag":
+      return d.tag ? `Tag: ${d.tag}` : "Add tag";
+    case "set_attribute":
+      return d.key ? `Update ${d.key.replace(/_/g, " ")}` : "Update field";
+    case "call_rest_api":
+      return /erp/i.test(String(d.url ?? "")) ? "Sync back to ERP" : "Call another system";
+    default:
+      break;
+  }
   const base = nodeMeta(node.type).label;
-  const d = node.data ?? {};
   const detail =
     d.message?.replace(/\{[^}]*\}/g, "…").trim() ||
     d.tag ||
