@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation";
-import { eq } from "drizzle-orm";
+import { sql } from "drizzle-orm";
 import { getDb } from "@/db/client";
 import { member } from "@/db/schema";
 import { PageChrome } from "@/components/PageChrome";
@@ -26,7 +26,7 @@ export default async function TeamPage() {
     can(me, "approveDept"),
     can(me, "approveFinal"),
     openRequests(me.companyId).catch(() => []),
-    getDb().query.member.findFirst({ columns: { id: true }, where: eq(member.role, "SUPER_ADMIN") }),
+    getDb().query.member.findFirst({ columns: { id: true }, where: sql`${member.role}::text = 'SUPER_ADMIN'` }),
   ]);
   // The first Super Admin can be named by an owner or admin; after that only a Super Admin can.
   const canSuper = me.role === "SUPER_ADMIN" || (!supers && isAdminRole(me.role));

@@ -13,7 +13,8 @@
 // per company.
 
 import { revalidatePath } from "next/cache";
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
+import { ensureAccessTables } from "@/db/ensure-access";
 import { getDb } from "@/db/client";
 import { bypassReadCache } from "@/db/fresh";
 import { company, member } from "@/db/schema";
@@ -183,9 +184,11 @@ export async function setRoleForm(formData: FormData): Promise<void> {
   const raw = String(formData.get("role") ?? "AGENT");
   if (!email) return;
   const db = getDb();
+  // SUPER_ADMIN is added to the Role enum by migration 0013 (or here, at runtime).
+  await ensureAccessTables(db);
   const rows = await db.query.member.findMany({ where: eq(member.email, email) });
   const wasSuper = rows.some((r) => r.role === "SUPER_ADMIN");
-  const supers = await db.query.member.findMany({ columns: { email: true }, where: eq(member.role, "SUPER_ADMIN") });
+  const supers = await db.query.member.findMany({ columns: { email: true }, where: sql`${member.role}::text = 'SUPER_ADMIN'` });
   const superEmails = new Set(supers.map((x) => x.email.toLowerCase()));
 
   if (raw === "SUPER_ADMIN" || wasSuper) {
