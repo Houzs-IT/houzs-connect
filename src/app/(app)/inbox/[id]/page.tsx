@@ -14,7 +14,7 @@ import { WindowTimer } from "@/components/inbox/WindowTimer";
 import { getCurrentMember } from "@/lib/current-member";
 import { ensureConversationMemberTable } from "@/db/ensure-conversation-member";
 import { isLive } from "@/lib/whatsapp/cloud-api";
-import { attrs, initials, stamp, tint, waIdentifier } from "@/lib/format";
+import { attrs, displayName, initials, stamp, tint, waIdentifier } from "@/lib/format";
 import { bypassReadCache } from "@/db/fresh";
 import { getDict } from "@/lib/i18n/server";
 import { SLA_MINUTES } from "@/lib/sla";
@@ -100,7 +100,7 @@ export default async function ConversationPage({
     }),
   ]);
 
-  const name = convo.contact.name ?? convo.contact.phone;
+  const name = displayName(convo.contact.name, convo.contact.phone);
   const contactAttrs = attrs(convo.contact.attributes);
 
   // Who sent each outbound message. `members` is already the company's full

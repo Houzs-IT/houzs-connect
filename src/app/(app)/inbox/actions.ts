@@ -9,7 +9,7 @@ import { ensureConversationMemberTable } from "@/db/ensure-conversation-member";
 import { conversationCompanyWhere, conversationVisibilityWhere, getVisibility } from "@/lib/access";
 import type { ConversationListItem } from "@/components/inbox/ConversationList";
 import { bypassReadCache } from "@/db/fresh";
-import { attrs } from "@/lib/format";
+import { attrs, displayName, mediaCaption } from "@/lib/format";
 import { can } from "@/lib/permissions";
 
 /**
@@ -110,11 +110,20 @@ export async function fetchConversations(
     const a = attrs(c.contact.attributes);
     return {
       id: c.id,
-      name: c.contact.name ?? c.contact.phone,
+      name: displayName(c.contact.name, c.contact.phone),
       phone: c.contact.phone,
       status: c.status,
       unread: c.unreadCount,
-      lastMessage: latest?.body ?? "",
+      // A picture / file shows as "Photo" or its file name (plus any caption),
+      // not as the "[attachment]" placeholder its body carries.
+      lastMessage: latest && (latest.type === "IMAGE" || latest.type === "DOCUMENT") ? mediaCaption(latest.body) : (latest?.body ?? ""),
+      lastMedia:
+        latest && (latest.type === "IMAGE" || latest.type === "DOCUMENT")
+          ? {
+              kind: latest.type as "IMAGE" | "DOCUMENT",
+              fileName: ((latest.interactivePayload as { fileName?: unknown } | null)?.fileName as string | undefined) ?? null,
+            }
+          : null,
       lastAt: (latest?.createdAt ?? c.lastMessageAt)?.toISOString() ?? null,
       // The customer is waiting on us only while the NEWEST message is theirs;
       // the moment anyone replies, the row stops counting.

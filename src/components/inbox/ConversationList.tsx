@@ -18,6 +18,8 @@ export type ConversationListItem = {
   status: string;
   unread: number;
   lastMessage: string;
+  /** The newest message is a picture or file (its caption, if any, is lastMessage). */
+  lastMedia?: { kind: "IMAGE" | "DOCUMENT"; fileName: string | null } | null;
   lastAt: string | null;
   /** Set only while the newest message is inbound — see fetchConversations. */
   waitingSince: string | null;
@@ -409,6 +411,7 @@ function Row({
   deliveryLabel: string;
   yesterdayLabel: string;
 }) {
+  const s = useShell().t.service;
   const unread = c.unread > 0;
   const bg = active
     ? "bg-[rgba(224,239,242,0.55)]"
@@ -439,7 +442,7 @@ function Row({
             <span className={`shrink-0 text-[10.5px] ${timeCls}`}>{time}</span>
           </div>
           <p className={`truncate text-[12px] ${unread ? "text-[var(--color-ink)]" : "text-[var(--color-muted)]"}`}>
-            {c.lastMessage || "—"}
+            {preview(c, s)}
           </p>
           <div className="flex items-center gap-1.5 whitespace-nowrap text-[10.5px]">
             {c.orderRef && <span className="font-semibold text-[var(--color-brand)]">{c.orderRef}</span>}
@@ -474,7 +477,7 @@ function Row({
         </div>
         <div className="flex items-center gap-2">
           <p className={`min-w-0 flex-1 truncate text-[12.5px] ${unread ? "text-[var(--color-ink)]" : "text-[var(--color-muted)]"}`}>
-            {c.lastMessage || "—"}
+            {preview(c, s)}
           </p>
           {unread && <UnreadBadge n={c.unread} />}
         </div>
@@ -722,4 +725,13 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
       {children}
     </div>
   );
+}
+
+/** The list's one-line preview: the text, or "Photo" / the file name for media. */
+function preview(c: ConversationListItem, s: { mediaPhoto: string; mediaFile: string }): string {
+  if (c.lastMedia) {
+    const what = c.lastMedia.kind === "IMAGE" ? s.mediaPhoto : (c.lastMedia.fileName ?? s.mediaFile);
+    return c.lastMessage ? `${what} · ${c.lastMessage}` : what;
+  }
+  return c.lastMessage || "—";
 }
