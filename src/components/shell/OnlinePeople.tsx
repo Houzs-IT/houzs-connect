@@ -5,19 +5,19 @@ import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { teamPresence, type PresenceMember, type TeamPresence } from "@/app/presence-actions";
 import { fmt } from "@/lib/i18n/dict";
-import { initials } from "@/lib/format";
+import { initials, tint } from "@/lib/format";
 import { useShell } from "./ShellProvider";
 
 /**
- * "Who's online", as in the Houzs ERP (PresenceButton there), in Connect's
- * colours: a people button with a green count, opening Team activity — who is
+ * "Who's online", laid out as in the Houzs ERP (PresenceButton there) but drawn
+ * in Connect's own style (6a "Ink Orbit": a plain white header like Connect's
+ * other dropdowns, Plex Sans eyebrows,
+ * soft badges, round tinted avatars): a people button with a green count,
+ * opening Team activity — who is
  * active now (and on which page; a row takes you there) and who is away
  * (quiet 2–15 min). You are not in your own list. Current company only;
  * refreshed once a minute, the presence heartbeat's rhythm (lib/presence.ts).
  */
-
-/** Square avatars cycle through the theme's dark colours, like the ERP's. */
-const AVATAR_BG = ["var(--color-accent)", "var(--color-accent-ink)", "var(--color-rail-2)"];
 
 const SECTION: Record<string, string> = {
   inbox: "inbox",
@@ -35,12 +35,6 @@ const SECTION: Record<string, string> = {
 
 function minutesSince(iso: string): number {
   return Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60_000));
-}
-
-function colourOf(id: string): string {
-  let h = 0;
-  for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) >>> 0;
-  return AVATAR_BG[h % AVATAR_BG.length];
 }
 
 export function OnlinePeople({ className = "" }: { className?: string }) {
@@ -111,7 +105,9 @@ export function OnlinePeople({ className = "" }: { className?: string }) {
     router.push(m.lastPath);
   };
 
-  const mono = "font-code text-[10px] uppercase tracking-[0.08em]";
+  // Connect's type: eyebrows 10–11px/600 caps (0.14em); badges 10px/600 caps (0.06em).
+  const eyebrow = "text-[10.5px] font-semibold uppercase tracking-[0.14em]";
+  const badge = "rounded-full px-[7px] py-px text-[10px] font-semibold uppercase tracking-[0.06em]";
 
   return (
     <div ref={ref} className={`group relative shrink-0 ${className}`}>
@@ -134,7 +130,7 @@ export function OnlinePeople({ className = "" }: { className?: string }) {
           <path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" />
         </svg>
         {!loading && active.length > 0 && (
-          <span className={`absolute -right-1.5 -top-1.5 grid h-[17px] min-w-[17px] place-items-center rounded-full bg-[var(--color-success)] px-1 font-code text-[10px] font-semibold text-white ring-2 ring-[var(--color-surface)]`}>
+          <span className="absolute -right-1.5 -top-1.5 grid h-[17px] min-w-[17px] place-items-center rounded-full bg-[var(--color-success)] px-1 text-[10px] font-semibold tabular-nums text-white ring-2 ring-[var(--color-surface)]">
             {active.length}
           </span>
         )}
@@ -143,7 +139,7 @@ export function OnlinePeople({ className = "" }: { className?: string }) {
       {/* Hover tooltip — closed state only. */}
       {!open && (
         <span
-          className={`pointer-events-none absolute right-0 top-11 z-20 whitespace-nowrap rounded-[6px] bg-[var(--color-ink)] px-2.5 py-1.5 text-white opacity-0 shadow-[var(--shadow-popover)] transition-opacity delay-[400ms] group-hover:opacity-100 ${mono}`}
+          className="pointer-events-none absolute right-0 top-11 z-20 whitespace-nowrap rounded-[8px] bg-[var(--color-rail)] px-2.5 py-1.5 text-[11.5px] font-medium text-white opacity-0 shadow-[var(--shadow-popover)] transition-opacity delay-[400ms] group-hover:opacity-100"
         >
           {fmt(L.paTip, { n: active.length })}
         </span>
@@ -153,17 +149,17 @@ export function OnlinePeople({ className = "" }: { className?: string }) {
         <div
           role="dialog"
           aria-label={L.paTitle}
-          className="absolute right-0 top-11 z-40 w-[360px] overflow-hidden rounded-[10px] border border-[var(--color-border)] bg-[var(--color-surface)] shadow-[var(--shadow-popover)]"
+          className="absolute right-0 top-11 z-40 w-[360px] overflow-hidden rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)] shadow-[var(--shadow-popover)]"
         >
-          <div className="flex items-center justify-between bg-[var(--color-accent)] px-4 py-3.5">
-            <span className={`text-[11px] text-white ${mono}`}>{L.paTitle}</span>
+          <div className="flex items-center justify-between border-b border-[var(--color-border-subtle)] px-4 py-3">
+            <span className={`text-[var(--color-ink)] ${eyebrow}`}>{L.paTitle}</span>
             <span className="flex items-center gap-1.5">
-              <span className={`flex items-center gap-1.5 rounded-full bg-[var(--color-success)] py-0.5 pl-1.5 pr-2 font-semibold text-white ${mono}`}>
-                <span className="h-1.5 w-1.5 rounded-full bg-white" />
+              <span className={`flex items-center gap-1.5 bg-[var(--color-success-soft)] text-[var(--color-success)] ${badge}`}>
+                <span className="h-1.5 w-1.5 rounded-full bg-[var(--color-success)]" />
                 {fmt(L.paOnline, { n: active.length })}
               </span>
               {away.length > 0 && (
-                <span className={`flex items-center gap-1.5 rounded-full bg-[var(--color-surface-dim)] py-0.5 pl-1.5 pr-2 font-semibold text-[var(--color-muted)] ${mono}`}>
+                <span className={`flex items-center gap-1.5 bg-[var(--color-surface-2)] text-[var(--color-muted)] ${badge}`}>
                   <span className="h-1.5 w-1.5 rounded-full bg-[var(--color-faint)]" />
                   {fmt(L.paAway, { n: away.length })}
                 </span>
@@ -174,7 +170,7 @@ export function OnlinePeople({ className = "" }: { className?: string }) {
           {loading ? (
             <div className="space-y-2 px-4 py-3">
               {[0, 1, 2].map((i) => (
-                <div key={i} className="h-10 animate-pulse rounded-[6px] bg-[var(--color-surface-dim)]" />
+                <div key={i} className="h-10 animate-pulse rounded-[8px] bg-[var(--color-surface-2)]" />
               ))}
             </div>
           ) : active.length === 0 && away.length === 0 ? (
@@ -184,7 +180,7 @@ export function OnlinePeople({ className = "" }: { className?: string }) {
               {active.length > 0 && (
                 <>
                   <div className="px-4 pb-1.5 pt-3">
-                    <span className={`rounded-full bg-[var(--color-success-soft)] px-2 py-0.5 text-[var(--color-success)] ${mono}`}>{L.paActive}</span>
+                    <span className={`bg-[var(--color-success-soft)] text-[var(--color-success)] ${badge}`}>{L.paActive}</span>
                   </div>
                   <div className="px-1.5 pb-1.5">
                     {active.map((m) => (
@@ -194,14 +190,14 @@ export function OnlinePeople({ className = "" }: { className?: string }) {
                         tabIndex={m.lastPath ? 0 : undefined}
                         onClick={() => go(m)}
                         onKeyDown={(e) => e.key === "Enter" && go(m)}
-                        className={`group/row flex items-center gap-3 rounded-[6px] px-2.5 py-2 ${
+                        className={`group/row flex items-center gap-3 rounded-[8px] px-2.5 py-2 ${
                           m.lastPath ? "cursor-pointer hover:bg-[var(--color-surface-2)]" : "cursor-default"
                         }`}
                       >
                         <span className="relative shrink-0">
                           <span
-                            className="grid h-[30px] w-[30px] place-items-center rounded-[6px] font-code text-[10px] font-semibold text-white"
-                            style={{ background: colourOf(m.id) }}
+                            className="grid h-[30px] w-[30px] place-items-center rounded-full text-[10.5px] font-semibold text-white"
+                            style={{ background: tint(m.name) }}
                           >
                             {initials(m.name).toUpperCase()}
                           </span>
@@ -211,7 +207,7 @@ export function OnlinePeople({ className = "" }: { className?: string }) {
                           <span className="block truncate text-[13px] font-semibold text-[var(--color-ink)]">{m.name}</span>
                           <span className="block truncate text-[11px] text-[var(--color-faint)]">{where(m)}</span>
                         </span>
-                        <span className={`shrink-0 text-[var(--color-success)] ${mono}`}>
+                        <span className="shrink-0 text-[11px] font-semibold tabular-nums text-[var(--color-success)]">
                           {m.lastPath ? (
                             <>
                               <span className="group-hover/row:hidden">{since(m)}</span>
@@ -232,13 +228,13 @@ export function OnlinePeople({ className = "" }: { className?: string }) {
               {away.length > 0 && (
                 <>
                   <div className="border-t border-[var(--color-border-subtle)] px-4 pb-1.5 pt-2.5">
-                    <span className={`rounded-full bg-[var(--color-surface-2)] px-2 py-0.5 text-[var(--color-faint)] ${mono}`}>{L.paAwayHead}</span>
+                    <span className={`bg-[var(--color-surface-2)] text-[var(--color-muted)] ${badge}`}>{L.paAwayHead}</span>
                   </div>
                   <div className="px-1.5 pb-1.5">
                     {away.map((m) => (
-                      <div key={m.id} className="flex items-center gap-3 rounded-[6px] px-2.5 py-2 hover:bg-[var(--color-surface-2)]">
+                      <div key={m.id} className="flex items-center gap-3 rounded-[8px] px-2.5 py-2 hover:bg-[var(--color-surface-2)]">
                         <span className="relative shrink-0">
-                          <span className="grid h-[30px] w-[30px] place-items-center rounded-[6px] border border-[var(--color-border)] bg-[var(--color-surface-dim)] font-code text-[10px] font-semibold text-[var(--color-muted)]">
+                          <span className="grid h-[30px] w-[30px] place-items-center rounded-full border border-[var(--color-border)] bg-[var(--color-surface-2)] text-[10.5px] font-semibold text-[var(--color-faint)]">
                             {initials(m.name).toUpperCase()}
                           </span>
                           <span className="absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border-2 border-[var(--color-faint)] bg-[var(--color-surface)]" />
@@ -247,7 +243,7 @@ export function OnlinePeople({ className = "" }: { className?: string }) {
                           <span className="block truncate text-[13px] font-semibold text-[var(--color-muted)]">{m.name}</span>
                           <span className="block truncate text-[11px] text-[var(--color-faint)]">{where(m)}</span>
                         </span>
-                        <span className={`shrink-0 text-[var(--color-faint)] ${mono}`}>{idle(m)}</span>
+                        <span className="shrink-0 text-[11px] tabular-nums text-[var(--color-faint)]">{idle(m)}</span>
                       </div>
                     ))}
                   </div>
@@ -261,9 +257,9 @@ export function OnlinePeople({ className = "" }: { className?: string }) {
             <Link
               href="/settings/team"
               onClick={() => setOpen(false)}
-              className={`text-[var(--color-accent)] hover:text-[var(--color-accent-ink)] ${mono}`}
+              className="text-[11.5px] font-semibold text-[var(--color-accent)] hover:underline"
             >
-              {L.paManage}
+              {L.paManage} →
             </Link>
           </div>
         </div>
