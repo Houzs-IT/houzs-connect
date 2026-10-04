@@ -25,6 +25,8 @@ export interface CompanyChoice {
   current: boolean;
   /** No ERP counterpart — an owner/admin gets a member row on first entry. */
   connectOnly: boolean;
+  /** The ERP company code (HOUZS, 2990), shown beside the name; null for Connect-only. */
+  code: string | null;
 }
 
 interface Who {
@@ -40,7 +42,7 @@ export function isOwnerOrAdmin(role: string): boolean {
 export async function companyChoices(db: DB, me: Who): Promise<CompanyChoice[]> {
   const [companies, rows] = await Promise.all([
     db.query.company.findMany({
-      columns: { id: true, name: true, erpCompanyId: true },
+      columns: { id: true, name: true, erpCompanyId: true, code: true },
       // Fresh (db/fresh.ts): a company created a moment ago must be switchable now.
       where: and(eq(company.active, true), bypassReadCache()),
       orderBy: asc(company.createdAt),
@@ -63,5 +65,6 @@ export async function companyChoices(db: DB, me: Who): Promise<CompanyChoice[]> 
       name: c.name,
       current: c.id === me.companyId,
       connectOnly: c.erpCompanyId == null,
+      code: c.code ?? null,
     }));
 }

@@ -17,14 +17,23 @@ import { SESSION_COOKIE, signSession } from "@/lib/erp-auth";
  * Eligibility comes from companyChoices(); a hand-posted id that is not on that
  * list does nothing.
  */
+/** Sections a switch may land on: the page you were on, minus any record id
+ *  (a conversation or campaign of one company does not exist in another). */
+const SECTIONS = new Set([
+  "inbox", "internal", "dashboard", "contacts", "automations", "campaigns",
+  "templates", "forms", "payments", "logs", "settings",
+]);
+
 export async function switchCompany(formData: FormData) {
   const targetId = String(formData.get("companyId") ?? "");
+  const section = String(formData.get("next") ?? "");
+  const next = SECTIONS.has(section) ? `/${section}` : "/inbox";
   const me = await getCurrentMember();
   if (!me) redirect("/login");
 
   const db = getDb();
   const choice = (await companyChoices(db, me)).find((c) => c.id === targetId);
-  if (!choice || choice.current) redirect("/inbox");
+  if (!choice || choice.current) redirect(next);
 
   const secret = getCloudflareContext().env.SESSION_SECRET;
   if (!secret) redirect("/inbox");
@@ -58,5 +67,5 @@ export async function switchCompany(formData: FormData) {
     path: "/",
     maxAge: 7 * 24 * 3600,
   });
-  redirect("/inbox");
+  redirect(next);
 }

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { usePathname } from "next/navigation";
 import { logout } from "@/app/login/actions";
 import { switchCompany } from "@/app/company-actions";
 import type { CompanyChoice } from "@/lib/companies";
@@ -62,6 +63,81 @@ export function LangToggle({ className = "", pill = false }: { className?: strin
   );
 }
 
+/**
+ * Company switcher, as in the Houzs ERP: the company you are working in, and
+ * the others you may open. Picking one re-signs the session there and stays on
+ * the same section. Shown only when there is somewhere else to go.
+ */
+export function CompanySwitcher({ companies, className = "" }: { companies?: CompanyChoice[]; className?: string }) {
+  const { t } = useShell();
+  const path = usePathname();
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      if (!ref.current?.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  if (!companies || companies.length < 2) return null;
+  const current = companies.find((c) => c.current) ?? companies[0];
+  const section = path.split("/")[1] ?? "";
+
+  return (
+    <div ref={ref} className={`relative ${className}`}>
+      <button
+        type="button"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-label={t.shell.switchCompany}
+        title={t.shell.switchCompany}
+        onClick={() => setOpen((v) => !v)}
+        className="flex h-[34px] max-w-[220px] items-center gap-1.5 rounded-[8px] border border-[color-mix(in_srgb,var(--color-brand)_45%,transparent)] bg-[color-mix(in_srgb,var(--color-brand)_7%,var(--color-surface))] pl-3 pr-2 text-[13px] font-semibold text-[var(--color-brand)] transition-colors hover:bg-[color-mix(in_srgb,var(--color-brand)_12%,var(--color-surface))]"
+      >
+        <span className="truncate">{current.name}</span>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden className="shrink-0 opacity-70">
+          <path d="M8 9l4-4 4 4M8 15l4 4 4-4" />
+        </svg>
+      </button>
+
+      {open && (
+        <div
+          role="menu"
+          className="absolute left-0 z-40 mt-1 w-[240px] overflow-hidden rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)] py-1 shadow-[var(--shadow-popover)]"
+        >
+          {companies.map((c) => (
+            <form key={c.id} action={switchCompany}>
+              <input type="hidden" name="companyId" value={c.id} />
+              <input type="hidden" name="next" value={section} />
+              <button
+                type="submit"
+                role="menuitem"
+                disabled={c.current}
+                className="flex w-full items-center gap-2 px-3 py-2 text-left text-[13px] text-[var(--color-ink)] hover:bg-[var(--color-surface-2)] disabled:cursor-default disabled:hover:bg-transparent"
+              >
+                <span className="w-4 shrink-0 text-[var(--color-accent)]">{c.current ? "✓" : ""}</span>
+                <span className={`min-w-0 flex-1 truncate ${c.current ? "font-semibold text-[var(--color-accent-ink)]" : ""}`}>{c.name}</span>
+                {c.code && (
+                  <span className="shrink-0 text-[10.5px] font-semibold uppercase tracking-[0.06em] text-[var(--color-faint)]">{c.code}</span>
+                )}
+              </button>
+            </form>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function Avatar({ name, size = 32 }: { name: string; size?: number }) {
   return (
     <span
@@ -86,6 +162,7 @@ export function UserMenu({
   companies?: CompanyChoice[];
 }) {
   const { t } = useShell();
+  const path = usePathname();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -129,13 +206,14 @@ export function UserMenu({
           className="absolute right-0 z-40 mt-1 w-56 overflow-hidden rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)] py-1 shadow-[var(--shadow-popover)]"
         >
           {companies && companies.length > 1 && (
-            <>
+            <div className="md:hidden">
               <div className="px-3 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--color-faint)]">
                 {t.shell.company}
               </div>
               {companies.map((c) => (
                 <form key={c.id} action={switchCompany}>
                   <input type="hidden" name="companyId" value={c.id} />
+                  <input type="hidden" name="next" value={path.split("/")[1] ?? ""} />
                   <button
                     type="submit"
                     role="menuitem"
@@ -150,7 +228,7 @@ export function UserMenu({
                 </form>
               ))}
               <div className="my-1 border-t border-[var(--color-border-subtle)]" />
-            </>
+            </div>
           )}
           <form action={logout}>
             <button

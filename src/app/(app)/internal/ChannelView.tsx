@@ -1,7 +1,9 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { IconPanelOpen } from "@/components/icons";
-import { LangToggle } from "@/components/shell/TopbarControls";
+import { CompanySwitcher, LangToggle } from "@/components/shell/TopbarControls";
+import { getDb } from "@/db/client";
+import { companyChoices } from "@/lib/companies";
 import { getCurrentMember } from "@/lib/current-member";
 import { fmt } from "@/lib/i18n/dict";
 import { getDict } from "@/lib/i18n/server";
@@ -58,6 +60,7 @@ export async function ChannelView({ channelId, threadId }: { channelId: string; 
             </span>
             <span className="text-[12.5px] text-[var(--color-muted)]">{fmt(L.members, { n: memberCount })}</span>
           </span>
+          <CompanySwitcher companies={await companyChoices(getDb(), me)} className="hidden md:block" />
           <LangToggle className="hidden md:flex" />
           {panelHref && (
             <Link

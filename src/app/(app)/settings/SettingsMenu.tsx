@@ -23,7 +23,9 @@ export async function SettingsMenu() {
     n(db.select({ n: count() }).from(quickReply).where(eq(quickReply.companyId, me.companyId))),
     n(db.select({ n: count() }).from(tag).where(eq(tag.companyId, me.companyId))),
     n(db.select({ n: count() }).from(contactField).where(eq(contactField.companyId, me.companyId))),
-    n(db.select({ n: count() }).from(channel).where(eq(channel.companyId, me.companyId))),
+    // The Channels page lists every number on the WhatsApp account, whichever
+    // company it is assigned to, so the count does too.
+    n(db.select({ n: count() }).from(channel)),
   ]);
 
   return (
@@ -54,7 +56,7 @@ export async function SettingsMenu() {
         {
           title: L.more,
           items: [
-            { href: "/settings/numbers", label: L.channels, sub: fmt(L.nNumbers, { n: numbers }), icon: "☏", tone: "green" },
+            { href: "/settings/numbers", label: L.channels, sub: numbers === 1 ? L.nNumber1 : fmt(L.nNumbers, { n: numbers }), icon: "☏", tone: "green" },
             { href: "/settings/billing", label: L.billing, sub: L.spend, icon: "RM", tone: "green" },
             { href: "/settings/files", label: L.files, sub: `${L.fPhotos} · ${L.fDocs}`, icon: "▣", tone: "orange" },
             { href: "/settings/integrations", label: L.integrations, sub: "ERP · WhatsApp", icon: "⇄", tone: "pink" },
