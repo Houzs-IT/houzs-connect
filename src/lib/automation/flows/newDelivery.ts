@@ -24,7 +24,10 @@ Please tap *"Confirm Date"* if this works for you. If you need to reschedule, pl
 
 export const newDeliveryFlow: SeedFlow = {
   key: "new_delivery",
-  name: "New Delivery",
+  // MUST equal the ERP's CONNECT_DELIVERY_AUTOMATION constant (connect.ts) — the
+  // ERP fires the delivery follow-up by this exact name, so a mismatch means
+  // nothing runs. Keep the two in lockstep if either is renamed.
+  name: "New Delivery Follow-up",
   description:
     "WS-A single-order delivery-date flow: confirm or amend, balance nudge, Property Details form, per-company disposal/bank/signature, confirm-lock, ERP callback.",
   triggerType: "WEBHOOK",
