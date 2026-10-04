@@ -90,7 +90,7 @@ export async function ChannelView({ channelId, threadId }: { channelId: string; 
                       <span className="rounded-full border border-[var(--color-border)] px-2.5 py-0.5 text-[11.5px] text-[var(--color-muted)]">
                         {k === today
                           ? L.today
-                          : m.createdAt.toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: "Asia/Kuala_Lumpur" })}
+                          : m.createdAt.toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: "Asia/Kuala_Lumpur" }).replace("Sept", "Sep")}
                       </span>
                       <span className="h-px flex-1 bg-[var(--color-border-subtle)]" />
                     </div>

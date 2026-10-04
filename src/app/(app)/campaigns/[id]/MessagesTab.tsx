@@ -158,7 +158,7 @@ export function MessagesTab({
                 <SendStatus status={m.status} L={L} />
                 <ReadStatus status={m.status} replied={m.replied} L={L} />
                 <span className="text-[12.5px] text-[var(--color-muted)]">
-                  {new Date(m.at).toLocaleString("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", timeZone: TZ })}
+                  {new Date(m.at).toLocaleString("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", timeZone: TZ }).replace("Sept", "Sep")}
                 </span>
                 <span className="flex items-center justify-end gap-3 text-[var(--color-accent)]">
                   <button type="button" aria-label={L.msgDetails} onClick={() => setOpen(m)}>

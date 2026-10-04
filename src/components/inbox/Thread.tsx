@@ -34,7 +34,7 @@ function dayLabel(d: Date | string, today: string, yesterday: string, locale: st
     month: "short",
     year: "numeric",
     timeZone: TZ,
-  });
+  }).replace("Sept", "Sep");
 }
 
 function DaySeparator({ label }: { label: string }) {

@@ -66,7 +66,9 @@ export default async function CampaignDetailPage({
   const pct = (v: number, of: number) => (of ? `${((v / of) * 100).toFixed(2)}%` : "0.00%");
 
   const created = row.createdAt;
-  const dateStr = created.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: TZ });
+  const dateStr = created
+    .toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: TZ })
+    .replace("Sept", "Sep");
   const timeStr = created.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", second: "2-digit", timeZone: TZ });
   const onMessages = tab === "messages";
 
@@ -230,7 +232,15 @@ export default async function CampaignDetailPage({
                     tone="green"
                     icon="check"
                     k={L.approvalL}
-                    v={row.requiresApproval ? (approver ? `${L.approved} · ${approver.name}` : L.waiting) : L.notRequired}
+                    v={
+                      row.requiresApproval
+                        ? approver
+                          ? `${L.approved} · ${approver.name}`
+                          : s === "draft" || s === "scheduled" || s === "due"
+                            ? L.waiting
+                            : "—"
+                        : L.notRequired
+                    }
                   />
                   <Info tone="orange" icon="cal" k={L.createdDate} v={dateStr} />
                   <Info tone="purple" icon="clock" k={L.createdTime} v={timeStr} />

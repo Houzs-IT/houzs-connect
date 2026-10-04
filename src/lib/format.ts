@@ -27,7 +27,7 @@ export function relTime(d?: Date | string | null): string {
   if (hr < 24) return `${hr}h`;
   const day = Math.floor(hr / 24);
   if (day < 7) return `${day}d`;
-  return date.toLocaleDateString("en-GB", { day: "2-digit", month: "short", timeZone: TZ });
+  return date.toLocaleDateString("en-GB", { day: "2-digit", month: "short", timeZone: TZ }).replace("Sept", "Sep");
 }
 
 export function clockTime(d?: Date | string | null): string {
@@ -68,7 +68,7 @@ export function stamp(d?: Date | string | null): string {
     hour: "2-digit",
     minute: "2-digit",
     timeZone: TZ,
-  });
+  }).replace("Sept", "Sep");
 }
 
 /** Contact.attributes is stored as JSON (nullable for SQLite). */

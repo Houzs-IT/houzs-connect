@@ -81,5 +81,5 @@ export function whenLabel(d: Date | string | null | undefined): string {
     minute: "2-digit",
     hour12: false,
     timeZone: "Asia/Kuala_Lumpur",
-  });
+  }).replace("Sept", "Sep");
 }

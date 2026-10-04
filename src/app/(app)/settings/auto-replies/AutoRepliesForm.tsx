@@ -261,7 +261,7 @@ export function AutoRepliesForm({
             {lastSaved && (
               <span className="text-[12px] text-[var(--color-faint)]">
                 {fmt(L.arLast, {
-                  when: new Date(lastSaved.at).toLocaleString("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Kuala_Lumpur" }),
+                  when: new Date(lastSaved.at).toLocaleString("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Kuala_Lumpur" }).replace("Sept", "Sep"),
                   by: lastSaved.by ? ` · ${lastSaved.by}` : "",
                 })}
               </span>

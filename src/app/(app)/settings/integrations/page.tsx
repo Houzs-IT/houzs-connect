@@ -11,7 +11,7 @@ import { SettingsHead } from "../ui";
 export const dynamic = "force-dynamic";
 
 const when = (d: Date) =>
-  d.toLocaleString("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Kuala_Lumpur" });
+  d.toLocaleString("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Kuala_Lumpur" }).replace("Sept", "Sep");
 
 /** The systems Connect talks to, and whether each one is actually talking back. */
 export default async function IntegrationsPage() {
