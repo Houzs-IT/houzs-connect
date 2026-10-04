@@ -10,7 +10,8 @@ import { useShell } from "./ShellProvider";
 
 /**
  * "Who's online", laid out as in the Houzs ERP (PresenceButton there) but drawn
- * in Connect's own style (6a "Ink Orbit": navy rail header, Plex Sans eyebrows,
+ * in Connect's own style (6a "Ink Orbit": a plain white header like Connect's
+ * other dropdowns, Plex Sans eyebrows,
  * soft badges, round tinted avatars): a people button with a green count,
  * opening Team activity — who is
  * active now (and on which page; a row takes you there) and who is away
@@ -150,8 +151,8 @@ export function OnlinePeople({ className = "" }: { className?: string }) {
           aria-label={L.paTitle}
           className="absolute right-0 top-11 z-40 w-[360px] overflow-hidden rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)] shadow-[var(--shadow-popover)]"
         >
-          <div className="flex items-center justify-between px-4 py-3.5" style={{ backgroundImage: "var(--rail-gradient)" }}>
-            <span className={`text-white/85 ${eyebrow}`}>{L.paTitle}</span>
+          <div className="flex items-center justify-between border-b border-[var(--color-border-subtle)] px-4 py-3">
+            <span className={`text-[var(--color-ink)] ${eyebrow}`}>{L.paTitle}</span>
             <span className="flex items-center gap-1.5">
               <span className={`flex items-center gap-1.5 bg-[var(--color-success-soft)] text-[var(--color-success)] ${badge}`}>
                 <span className="h-1.5 w-1.5 rounded-full bg-[var(--color-success)]" />
