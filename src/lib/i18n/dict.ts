@@ -65,6 +65,7 @@ const en = {
     notifySettings: "Notification settings",
   },
   role: {
+    SUPER_ADMIN: "Super Admin",
     OWNER: "Owner",
     ADMIN: "Admin",
     MANAGER: "Manager",
@@ -1331,6 +1332,7 @@ const zh: Dict = {
     notifySettings: "通知设置",
   },
   role: {
+    SUPER_ADMIN: "超级管理员",
     OWNER: "所有者",
     ADMIN: "管理员",
     MANAGER: "主管",
