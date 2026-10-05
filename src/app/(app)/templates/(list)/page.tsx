@@ -1,6 +1,7 @@
 import { getDb } from "@/db/client";
 import { headerKey, storedHeaders } from "@/lib/whatsapp/templateMedia";
 import Link from "next/link";
+import { DataTable, type DataColumn, type DataRow } from "@/components/DataTable";
 import { PageChrome } from "@/components/PageChrome";
 import { FilterPill } from "@/components/shell/FilterPill";
 import { IconSearch } from "@/components/icons";
@@ -113,7 +114,120 @@ export default async function TemplatesPage({ searchParams }: { searchParams: Pr
 
   const opts = (vals: string[], labels?: Record<string, string>) =>
     [...new Set(vals)].sort().map((v) => ({ value: v, label: labels?.[v] ?? v }));
-  const cols = "grid-cols-[minmax(0,2.3fr)_minmax(0,0.9fr)_minmax(0,1.2fr)_minmax(0,1fr)_minmax(0,1.1fr)]";
+
+  // The rows the server filters above (pills, mapping, `q`) let through; the
+  // table sorts them and narrows them further by its header funnels.
+  const columns: DataColumn[] = [
+    // max-w-0 + a width: the name / snippet truncate instead of widening the table.
+    { key: "template", label: L.colTemplate, className: "w-[36%] max-w-0" },
+    { key: "category", label: L.colCategory },
+    { key: "status", label: L.colMeta },
+    { key: "vars", label: L.colVars },
+    { key: "read", label: fmt(L.colRead, { d: days }), filter: false },
+  ];
+  const tableRows: DataRow[] = rows.map((r, i) => {
+    const slots = positionalSlots(r.body);
+    const byIndex = new Map(r.bindings.map((b) => [b.index, b]));
+    const missing = slots.filter((n) => !isBound(byIndex.get(n))).length;
+    const stats = analytics?.stats.get(r.id);
+    const rate = stats?.ok && stats.counts.delivered > 0 ? readRate(stats.counts) : null;
+    const tone = ICON_TONES[i % ICON_TONES.length];
+    const href = keep({ t: r.id });
+    const statusLabel = L.statusL[r.status] ?? r.status;
+    const reason = r.rejectedReason && r.rejectedReason !== "NONE" ? r.rejectedReason : null;
+    const varsLabel =
+      slots.length === 0 ? L.noVars : missing > 0 ? L.needsMapping : L.allMappedShort;
+    return {
+      id: r.id,
+      href,
+      active: r.id === selected?.id,
+      search: [r.language, r.header, r.body, reason].filter(Boolean).join(" "),
+      sort: { template: r.name, category: r.category, status: statusLabel, vars: missing, read: rate },
+      text: { template: r.name, category: r.category, status: statusLabel, vars: varsLabel },
+      cells: {
+        template: (
+          <span className="flex min-w-0 items-center gap-3">
+            <span
+              className="grid h-8 w-8 shrink-0 place-items-center rounded-full"
+              style={{ background: `var(--color-pastel-${tone})`, color: `var(--color-pastel-${tone}-ink)` }}
+            >
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" aria-hidden>
+                <path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z" />
+                <path d="M8.5 12h7M8.5 9h4" />
+              </svg>
+            </span>
+            <span className="min-w-0">
+              {/* A real link for keyboard / new-tab use; the rest of the row opens the same URL. */}
+              <Link href={href} scroll={false} className="block truncate text-[13.5px] font-semibold text-[var(--color-ink)]">
+                {r.name}
+              </Link>
+              <span className="block truncate text-[11.5px] text-[var(--color-faint)]">
+                {r.language} · {r.header || r.body}
+              </span>
+            </span>
+          </span>
+        ),
+        category: (
+          <span
+            className={`inline-block rounded-[4px] px-1.5 py-px text-[10.5px] font-semibold uppercase tracking-[0.04em] ${
+              CAT_TONE[r.category] ?? "bg-[var(--color-surface-2)] text-[var(--color-muted)]"
+            }`}
+          >
+            {r.category}
+          </span>
+        ),
+        status: (
+          <span className="block min-w-0">
+            <span
+              className={`inline-block rounded-full px-[7px] py-px text-[10px] font-semibold uppercase tracking-[0.06em] ${
+                STATUS_TONE[r.status] ?? STATUS_TONE.DISABLED
+              }`}
+            >
+              {statusLabel}
+            </span>
+            {reason && (
+              <span className="mt-0.5 block max-w-[180px] truncate text-[11px] text-[var(--color-danger)]" title={reason}>
+                {reason}
+              </span>
+            )}
+          </span>
+        ),
+        vars: (
+          <span className="whitespace-nowrap text-[12px] font-medium">
+            {slots.length === 0 ? (
+              <span className="text-[var(--color-faint)]">{L.noVars}</span>
+            ) : missing > 0 ? (
+              <span className="flex items-center gap-1.5 text-[var(--color-danger)]">
+                <span className="h-[7px] w-[7px] rounded-full bg-[var(--color-danger)]" />
+                {fmt(L.notMapped, { n: missing })}
+              </span>
+            ) : (
+              <span className="flex items-center gap-1.5 text-[var(--color-success)]">
+                <span className="h-[7px] w-[7px] rounded-full bg-[var(--color-success)]" />
+                {fmt(L.mapped, { a: slots.length, b: slots.length })}
+              </span>
+            )}
+          </span>
+        ),
+        read:
+          stats?.ok && rate != null ? (
+            <span className="block">
+              <span className="flex items-center gap-2">
+                <span className="h-[5px] w-[88px] shrink-0 overflow-hidden rounded-full bg-[var(--color-surface-dim)]">
+                  <span className="block h-full rounded-full bg-[var(--color-pastel-blue-ink)]" style={{ width: `${Math.round(rate * 100)}%` }} />
+                </span>
+                <span className="text-[12px] font-semibold tabular-nums text-[var(--color-ink)]">{Math.round(rate * 100)}%</span>
+              </span>
+              <span className="mt-0.5 block whitespace-nowrap text-[11px] text-[var(--color-faint)]">
+                {fmt(L.delivered, { n: stats.counts.delivered.toLocaleString("en-US") })}
+              </span>
+            </span>
+          ) : (
+            <span className="text-[12px] text-[var(--color-faint)]">{stats && !stats.ok ? L.unavailable : "—"}</span>
+          ),
+      },
+    };
+  });
 
   return (
     <PageChrome
@@ -211,118 +325,14 @@ export default async function TemplatesPage({ searchParams }: { searchParams: Pr
                 <FilterPill param="status" label={L.status} anyLabel={L.any} options={opts(all.map((x) => x.status), L.statusL)} />
               </div>
 
-              <div className="flex-1 overflow-x-auto rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)]">
-                <div className="min-w-[760px]">
-                  <div
-                    className={`grid ${cols} gap-3 border-b border-[var(--color-border)] bg-[var(--color-surface-2)] px-4 py-2.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--color-faint)]`}
-                  >
-                    <span>{L.colTemplate}</span>
-                    <span>{L.colCategory}</span>
-                    <span>{L.colMeta}</span>
-                    <span>{L.colVars}</span>
-                    <span>{fmt(L.colRead, { d: days })}</span>
-                  </div>
-                  {rows.length === 0 && (
-                    <p className="px-4 py-10 text-center text-[13px] text-[var(--color-faint)]">
-                      {all.length ? L.noMatch : L.none}
-                    </p>
-                  )}
-                  {rows.map((r, i) => {
-                    const slots = positionalSlots(r.body);
-                    const byIndex = new Map(r.bindings.map((b) => [b.index, b]));
-                    const missing = slots.filter((n) => !isBound(byIndex.get(n))).length;
-                    const stats = analytics?.stats.get(r.id);
-                    const rate = stats?.ok ? readRate(stats.counts) : null;
-                    const on = r.id === selected?.id;
-                    const tone = ICON_TONES[i % ICON_TONES.length];
-                    return (
-                      <Link
-                        key={r.id}
-                        href={keep({ t: r.id })}
-                        scroll={false}
-                        className={`grid ${cols} items-center gap-3 border-b border-[var(--color-border-subtle)] px-4 py-3 last:border-b-0 ${
-                          on
-                            ? "bg-[var(--color-accent-soft)]/50 shadow-[inset_3px_0_0_var(--color-accent)]"
-                            : "hover:bg-[var(--color-surface-2)]"
-                        }`}
-                      >
-                        <span className="flex min-w-0 items-center gap-3">
-                          <span
-                            className="grid h-8 w-8 shrink-0 place-items-center rounded-full"
-                            style={{ background: `var(--color-pastel-${tone})`, color: `var(--color-pastel-${tone}-ink)` }}
-                          >
-                            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" aria-hidden>
-                              <path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z" />
-                              <path d="M8.5 12h7M8.5 9h4" />
-                            </svg>
-                          </span>
-                          <span className="min-w-0">
-                            <span className="block truncate text-[13.5px] font-semibold text-[var(--color-ink)]">{r.name}</span>
-                            <span className="block truncate text-[11.5px] text-[var(--color-faint)]">
-                              {r.language} · {r.header || r.body}
-                            </span>
-                          </span>
-                        </span>
-                        <span>
-                          <span
-                            className={`inline-block rounded-[4px] px-1.5 py-px text-[10.5px] font-semibold uppercase tracking-[0.04em] ${
-                              CAT_TONE[r.category] ?? "bg-[var(--color-surface-2)] text-[var(--color-muted)]"
-                            }`}
-                          >
-                            {r.category}
-                          </span>
-                        </span>
-                        <span className="min-w-0">
-                          <span
-                            className={`inline-block rounded-full px-[7px] py-px text-[10px] font-semibold uppercase tracking-[0.06em] ${
-                              STATUS_TONE[r.status] ?? STATUS_TONE.DISABLED
-                            }`}
-                          >
-                            {L.statusL[r.status] ?? r.status}
-                          </span>
-                          {r.rejectedReason && r.rejectedReason !== "NONE" && (
-                            <span className="mt-0.5 block truncate text-[11px] text-[var(--color-danger)]" title={r.rejectedReason}>
-                              {r.rejectedReason}
-                            </span>
-                          )}
-                        </span>
-                        <span className="text-[12px] font-medium">
-                          {slots.length === 0 ? (
-                            <span className="text-[var(--color-faint)]">{L.noVars}</span>
-                          ) : missing > 0 ? (
-                            <span className="flex items-center gap-1.5 text-[var(--color-danger)]">
-                              <span className="h-[7px] w-[7px] rounded-full bg-[var(--color-danger)]" />
-                              {fmt(L.notMapped, { n: missing })}
-                            </span>
-                          ) : (
-                            <span className="flex items-center gap-1.5 text-[var(--color-success)]">
-                              <span className="h-[7px] w-[7px] rounded-full bg-[var(--color-success)]" />
-                              {fmt(L.mapped, { a: slots.length, b: slots.length })}
-                            </span>
-                          )}
-                        </span>
-                        <span>
-                          {stats?.ok && stats.counts.delivered > 0 && rate != null ? (
-                            <>
-                              <span className="flex items-center gap-2">
-                                <span className="h-[5px] max-w-[88px] flex-1 overflow-hidden rounded-full bg-[var(--color-surface-dim)]">
-                                  <span className="block h-full rounded-full bg-[var(--color-pastel-blue-ink)]" style={{ width: `${Math.round(rate * 100)}%` }} />
-                                </span>
-                                <span className="text-[12px] font-semibold tabular-nums text-[var(--color-ink)]">{Math.round(rate * 100)}%</span>
-                              </span>
-                              <span className="mt-0.5 block text-[11px] text-[var(--color-faint)]">
-                                {fmt(L.delivered, { n: stats.counts.delivered.toLocaleString("en-US") })}
-                              </span>
-                            </>
-                          ) : (
-                            <span className="text-[12px] text-[var(--color-faint)]">{stats && !stats.ok ? L.unavailable : "—"}</span>
-                          )}
-                        </span>
-                      </Link>
-                    );
-                  })}
-                </div>
-              </div>
+              <DataTable
+                columns={columns}
+                rows={tableRows}
+                search={false}
+                minWidth={760}
+                stateKey="templates"
+                empty={all.length ? L.noMatch : L.none}
+              />
             </>
           )}
         </div>

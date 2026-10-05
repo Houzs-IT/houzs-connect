@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { and, asc, count, desc, eq, sql } from "drizzle-orm";
 import { getDb } from "@/db/client";
 import { contact as contactTable, form, formResponse } from "@/db/schema";
+import { DataTable, type CellValue, type DataColumn, type DataRow } from "@/components/DataTable";
 import { PageChrome } from "@/components/PageChrome";
 import { stamp } from "@/lib/format";
 import { getCurrentMember } from "@/lib/current-member";
@@ -11,11 +12,14 @@ import { agoLabel } from "@/lib/i18n/ago";
 import { getDict } from "@/lib/i18n/server";
 import { createForm } from "./actions";
 import { FormBuilder } from "./FormBuilder";
-import { readFields } from "./fields";
+import { readFields, type FieldType } from "./fields";
 
 /** Newest answers first; enough to work from without paging a whole year in. */
 const RESPONSE_LIMIT = 200;
 const TONES = ["green", "orange", "purple", "pink", "blue", "cyan"];
+
+/** Answer types whose values repeat across answers, so their column gets a funnel. */
+const FILTERABLE = new Set<FieldType>(["select", "number", "date"]);
 
 type SP = Record<string, string | string[] | undefined>;
 const one = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v) ?? "";
@@ -70,6 +74,38 @@ export default async function FormsPage({ searchParams }: { searchParams: Promis
           .orderBy(desc(formResponse.createdAt))
           .limit(RESPONSE_LIMIT)
       : [];
+
+  // The answers table: who answered, one column per question, when. Choices,
+  // numbers and dates repeat across answers, so those columns get a funnel;
+  // typed text, emails and phone numbers are one-offs, only searched.
+  const questions = selected?.questions ?? [];
+  const answerColumns: DataColumn[] = [
+    { key: "customer", label: L.customer },
+    ...questions.map((q) => ({ key: `q:${q.key}`, label: q.label, filter: FILTERABLE.has(q.type) })),
+    { key: "when", label: L.when, filter: false },
+  ];
+  const answerRows: DataRow[] = responses.map((r) => {
+    const a = r.answers && typeof r.answers === "object" ? (r.answers as Record<string, unknown>) : {};
+    const who = r.contactName ?? r.contactPhone;
+    const given = questions.map((q) => ({ k: `q:${q.key}`, type: q.type, v: answerText(a[q.key]) }));
+    return {
+      id: r.id,
+      search: r.contactPhone ?? undefined,
+      sort: { customer: who, when: r.createdAt.getTime(), ...Object.fromEntries(given.map((g) => [g.k, answerSort(g.type, g.v)])) },
+      text: { customer: who, when: stamp(r.createdAt), ...Object.fromEntries(given.map((g) => [g.k, g.v])) },
+      cells: {
+        customer: (
+          <span className="whitespace-nowrap text-[var(--color-ink)]">
+            {r.contactName ?? "—"}
+            {r.contactPhone && <span className="ml-2 text-[11.5px] text-[var(--color-faint)]">{r.contactPhone}</span>}
+          </span>
+        ),
+        when: <span className="whitespace-nowrap text-[12px] text-[var(--color-faint)]">{stamp(r.createdAt)}</span>,
+        // An unanswered question is left out, and the table shows its dash.
+        ...Object.fromEntries(given.filter((g) => g.v != null).map((g) => [g.k, <span key={g.k} className="text-[var(--color-muted)]">{g.v}</span>])),
+      },
+    };
+  });
 
   return (
     <PageChrome
@@ -148,47 +184,13 @@ export default async function FormsPage({ searchParams }: { searchParams: Promis
               </Link>
             </div>
             <div className="p-4">
-              <div className="overflow-x-auto rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)]">
-                {responses.length === 0 ? (
-                  <p className="px-4 py-10 text-center text-[13px] text-[var(--color-faint)]">{L.noAnswers}</p>
-                ) : (
-                  <table className="w-full min-w-[640px] text-left text-[13px]">
-                    <thead>
-                      <tr className="border-b border-[var(--color-border)] bg-[var(--color-surface-2)] text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--color-faint)]">
-                        <th className="px-4 py-2.5">{L.customer}</th>
-                        {selected.questions.map((q) => (
-                          <th key={q.key} className="px-4 py-2.5">
-                            {q.label}
-                          </th>
-                        ))}
-                        <th className="px-4 py-2.5">{L.when}</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {responses.map((r) => {
-                        const a = r.answers && typeof r.answers === "object" ? (r.answers as Record<string, unknown>) : {};
-                        return (
-                          <tr key={r.id} className="border-b border-[var(--color-border-subtle)] last:border-0">
-                            <td className="px-4 py-3 text-[var(--color-ink)]">
-                              {r.contactName ?? "—"}
-                              {r.contactPhone && <span className="ml-2 text-[11.5px] text-[var(--color-faint)]">{r.contactPhone}</span>}
-                            </td>
-                            {selected.questions.map((q) => {
-                              const v = a[q.key];
-                              return (
-                                <td key={q.key} className="px-4 py-3 text-[var(--color-muted)]">
-                                  {v == null || v === "" ? "—" : typeof v === "object" ? JSON.stringify(v) : String(v)}
-                                </td>
-                              );
-                            })}
-                            <td className="px-4 py-3 text-[12px] text-[var(--color-faint)]">{stamp(r.createdAt)}</td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                )}
-              </div>
+              <DataTable
+                columns={answerColumns}
+                rows={answerRows}
+                minWidth={640}
+                stateKey={`form-answers:${selected.id}`}
+                empty={L.noAnswers}
+              />
             </div>
           </div>
         ) : (
@@ -206,4 +208,20 @@ export default async function FormsPage({ searchParams }: { searchParams: Promis
       </div>
     </PageChrome>
   );
+}
+
+/** An answer as the table shows it; null when the question was left unanswered. */
+function answerText(v: unknown): string | null {
+  if (v == null || v === "") return null;
+  return typeof v === "object" ? JSON.stringify(v) : String(v);
+}
+
+/** What an answer sorts by: numbers as numbers, a date picker's epoch milliseconds as a number, the rest as text. */
+function answerSort(type: FieldType, v: string | null): CellValue {
+  if (v == null) return null;
+  if (type === "number" || (type === "date" && /^\d+$/.test(v))) {
+    const n = Number(v);
+    if (Number.isFinite(n)) return n;
+  }
+  return v;
 }

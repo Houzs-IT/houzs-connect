@@ -2,9 +2,10 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { sql } from "drizzle-orm";
 import { getDb } from "@/db/client";
+import { DataTable, type DataColumn, type DataRow } from "@/components/DataTable";
 import { PageChrome } from "@/components/PageChrome";
 import { getCurrentMember } from "@/lib/current-member";
-import { formatPhone } from "@/lib/format";
+import { clockTime, formatPhone } from "@/lib/format";
 import { fmt } from "@/lib/i18n/dict";
 import { getDict } from "@/lib/i18n/server";
 import { SettingsHead } from "../ui";
@@ -61,6 +62,78 @@ export default async function FilesPage({ searchParams }: { searchParams: Promis
   const files = [...messages, ...receipts].sort((a, b) => +new Date(b.created_at) - +new Date(a.created_at)).slice(0, 120);
   const label: Record<string, string> = { all: L.fAll, IMAGE: L.fPhotos, DOCUMENT: L.fDocs, AUDIO: L.fVoice, VIDEO: L.fVideo, receipts: L.fReceipts };
   const src = (f: Row) => (f.kind === "RECEIPT" ? `/payments/${f.id}/receipt` : `/settings/files/${f.id}`);
+  const kindLabel = (kind: string) => label[kind === "RECEIPT" ? "receipts" : kind] ?? kind;
+  const day = (d: Date) => d.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "Asia/Kuala_Lumpur" }).replace("Sept", "Sep");
+
+  const columns: DataColumn[] = [
+    { key: "file", label: t.service.mediaFile, filter: false },
+    { key: "type", label: t.logs.colType },
+    { key: "customer", label: t.logs.colCustomer },
+    { key: "direction", label: t.logs.colDirection },
+    { key: "when", label: t.logs.when },
+    { key: "actions", label: "", align: "right", sort: false, filter: false },
+  ];
+  const rows: DataRow[] = files.map((f) => {
+    const [icon, tone] = ICON[f.kind] ?? ["▤", "blue"];
+    const who = f.name || formatPhone(f.phone);
+    const visual = f.kind === "IMAGE" || f.kind === "RECEIPT";
+    const title = f.body?.split("\n")[0] || kindLabel(f.kind);
+    const at = new Date(f.created_at);
+    const direction = f.direction === "IN" ? t.logs.incoming : t.logs.outgoing;
+    return {
+      id: `${f.kind}-${f.id}`,
+      // Newest first is the page's own order; a header click sorts by the instant.
+      sort: { file: title, type: kindLabel(f.kind), customer: who, direction, when: at.getTime() },
+      text: { file: title, type: kindLabel(f.kind), customer: who, direction, when: day(at) },
+      cells: {
+        file: (
+          <div className="flex min-w-0 items-center gap-3">
+            <a href={src(f)} target="_blank" rel="noopener" className="grid h-10 w-10 shrink-0 place-items-center overflow-hidden rounded-[8px] bg-[var(--color-surface-2)]">
+              {visual ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={src(f)} alt="" loading="lazy" className="h-full w-full object-cover" />
+              ) : (
+                <span
+                  className="grid h-8 w-8 place-items-center rounded-full text-[12px] font-bold"
+                  style={{ background: `var(--color-pastel-${tone})`, color: `var(--color-pastel-${tone}-ink)` }}
+                >
+                  {icon}
+                </span>
+              )}
+            </a>
+            <a href={src(f)} target="_blank" rel="noopener" className="min-w-0 max-w-[320px] truncate font-semibold text-[var(--color-ink)] hover:underline">
+              {title}
+            </a>
+          </div>
+        ),
+        type: <span className="whitespace-nowrap text-[var(--color-muted)]">{kindLabel(f.kind)}</span>,
+        customer: (
+          <div className="min-w-0">
+            <div className="truncate text-[var(--color-ink)]">{who}</div>
+            {f.name && <div className="truncate font-code text-[11px] text-[var(--color-faint)]">{formatPhone(f.phone)}</div>}
+          </div>
+        ),
+        direction: <span className="whitespace-nowrap text-[var(--color-muted)]">{direction}</span>,
+        when: (
+          <span className="whitespace-nowrap tabular-nums text-[var(--color-muted)]">
+            {day(at)} · {clockTime(at)}
+          </span>
+        ),
+        actions: (
+          <span className="inline-flex gap-3 whitespace-nowrap text-[12px] font-semibold">
+            <a href={f.kind === "RECEIPT" ? src(f) : `${src(f)}?download=1`} className="text-[var(--color-accent)]" download>
+              {L.fDownload}
+            </a>
+            {f.conversation_id && (
+              <Link href={`/inbox/${f.conversation_id}`} className="text-[var(--color-muted)] hover:text-[var(--color-ink)]">
+                {L.fChat}
+              </Link>
+            )}
+          </span>
+        ),
+      },
+    };
+  });
 
   return (
     <PageChrome section="settings" crumbs={[L.files]}>
@@ -89,51 +162,10 @@ export default async function FilesPage({ searchParams }: { searchParams: Promis
           </form>
         </div>
         <p className="mb-3 text-[12px] text-[var(--color-faint)]">{fmt(L.fCount, { n: files.length })}</p>
-        {files.length === 0 ? (
-          <p className="rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)] p-8 text-center text-[13px] text-[var(--color-faint)]">{L.fNone}</p>
-        ) : (
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
-            {files.map((f) => {
-              const [icon, tone] = ICON[f.kind] ?? ["▤", "blue"];
-              const who = f.name || formatPhone(f.phone);
-              const visual = f.kind === "IMAGE" || f.kind === "RECEIPT";
-              return (
-                <div key={`${f.kind}-${f.id}`} className="overflow-hidden rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)]">
-                  <a href={src(f)} target="_blank" rel="noopener" className="grid h-[120px] place-items-center bg-[var(--color-surface-2)]">
-                    {visual ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img src={src(f)} alt="" loading="lazy" className="h-full w-full object-cover" />
-                    ) : (
-                      <span
-                        className="grid h-12 w-12 place-items-center rounded-full text-[16px] font-bold"
-                        style={{ background: `var(--color-pastel-${tone})`, color: `var(--color-pastel-${tone}-ink)` }}
-                      >
-                        {icon}
-                      </span>
-                    )}
-                  </a>
-                  <div className="px-3 py-2">
-                    <div className="truncate text-[12.5px] font-semibold text-[var(--color-ink)]">{f.body?.split("\n")[0] || label[f.kind === "RECEIPT" ? "receipts" : f.kind] || "—"}</div>
-                    <div className="truncate text-[11.5px] text-[var(--color-faint)]">
-                      {fmt(f.direction === "IN" ? L.fFrom : L.fTo, { who })} ·{" "}
-                      {new Date(f.created_at).toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: "Asia/Kuala_Lumpur" }).replace("Sept", "Sep")}
-                    </div>
-                    <div className="mt-1.5 flex gap-3 text-[12px] font-semibold">
-                      <a href={f.kind === "RECEIPT" ? src(f) : `${src(f)}?download=1`} className="text-[var(--color-accent)]" download>
-                        {L.fDownload}
-                      </a>
-                      {f.conversation_id && (
-                        <Link href={`/inbox/${f.conversation_id}`} className="text-[var(--color-muted)] hover:text-[var(--color-ink)]">
-                          {L.fChat}
-                        </Link>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
+        {/* The type tabs and the customer search above reach the database; the
+            table's own sort and funnels work over the files loaded here. Keyed by
+            tab so its funnels start fresh when the loaded set changes. */}
+        <DataTable key={type} columns={columns} rows={rows} search={false} minWidth={820} stateKey={`settings-files:${type}`} empty={L.fNone} />
         <p className="mt-4 text-[12px] text-[var(--color-faint)]">{L.fNote}</p>
       </div>
     </PageChrome>

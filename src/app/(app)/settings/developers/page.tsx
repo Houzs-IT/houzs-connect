@@ -42,7 +42,9 @@ export default async function DevelopersPage() {
             name: k.name,
             prefix: k.prefix,
             created: fmtDate(k.createdAt),
+            createdAt: k.createdAt.getTime(),
             lastUsed: k.lastUsedAt ? fmtDate(k.lastUsedAt) : null,
+            lastUsedAt: k.lastUsedAt ? k.lastUsedAt.getTime() : null,
             revoked: !!k.revokedAt,
             createdBy: k.createdBy,
           }))}

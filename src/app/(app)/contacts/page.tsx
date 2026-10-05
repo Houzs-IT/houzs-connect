@@ -23,7 +23,9 @@ import {
  * Rows per page. The CRM is fed by ERP order sync, so this list grows without
  * bound; everything past the first page is reachable through the pager.
  */
-const PAGE_SIZE = 50;
+// Header sorting and funnels (components/DataTable.tsx) work over the page the
+// browser holds, so a page is big enough to hold a normal book of customers.
+const PAGE_SIZE = 200;
 const SEGMENTS: Segment[] = ["open-order", "balance-due", "waiting", "blocked"];
 
 type SearchParams = Record<string, string | string[] | undefined>;
@@ -95,6 +97,7 @@ export default async function ContactsPage({ searchParams }: { searchParams: Pro
       tags: c.tagLinks.map((l) => ({ id: l.tag.id, name: l.tag.name, color: l.tag.color })),
       last: lm ? { body: previewText(lm, t.service) || "—", inbound: lm.direction === "IN" } : null,
       updated: shortWhen(lm && lm.at > c.updatedAt ? lm.at : c.updatedAt, t.service.yesterday),
+      updatedTs: (lm && lm.at > c.updatedAt ? lm.at : c.updatedAt).getTime(),
       email: c.email,
       source: c.source,
       sourceId: c.sourceId,
@@ -102,6 +105,7 @@ export default async function ContactsPage({ searchParams }: { searchParams: Pro
       company: a.company ?? null,
       remarks: a.remarks ?? null,
       created: shortWhen(c.createdAt, t.service.yesterday),
+      createdTs: c.createdAt.getTime(),
     };
   });
 
