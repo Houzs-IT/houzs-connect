@@ -10,6 +10,7 @@ import {
   planOrgSync,
   summarizePlan,
 } from "@/lib/sync/erp-org";
+import { autoJoinDepartmentChannels } from "@/lib/internal-auto-join";
 
 /**
  * POST /api/admin/sync-org — trigger the ERP -> Connect org mirror.
@@ -70,6 +71,8 @@ export async function POST(req: NextRequest) {
     const applied = await applyOrgSync(db, plan);
     // Second pass: fill department + reports-to on the rows just written.
     await applyOrgHierarchy(db, erp);
+    // New hires and department moves land in their department's Internal channel.
+    await autoJoinDepartmentChannels(null, true).catch((e) => console.warn("[sync-org] channel auto-join failed:", e));
     return NextResponse.json({ ok: true, dryRun: false, applied });
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);

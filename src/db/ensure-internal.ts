@@ -71,6 +71,16 @@ async function run(db: DB): Promise<void> {
   await db.execute(sql`ALTER TABLE "connect"."internal_channel_member" ADD COLUMN IF NOT EXISTS "state" text DEFAULT 'member' NOT NULL`);
   await db.execute(sql`ALTER TABLE "connect"."internal_channel_member" ADD COLUMN IF NOT EXISTS "role" text DEFAULT 'member' NOT NULL`);
   await db.execute(sql`ALTER TABLE "connect"."internal_channel_member" ADD COLUMN IF NOT EXISTS "requested_at" timestamp with time zone`);
+  // Who has been put in a department channel automatically (migration 0018,
+  // lib/internal-auto-join.ts): once per (channel, person), so leaving sticks.
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "connect"."internal_channel_auto" (
+      "channel_id" text NOT NULL,
+      "member_id" text NOT NULL,
+      "created_at" timestamp with time zone DEFAULT now() NOT NULL,
+      PRIMARY KEY ("channel_id", "member_id")
+    )
+  `);
 }
 
 export async function ensureInternalTables(db: DB): Promise<void> {
