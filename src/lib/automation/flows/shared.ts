@@ -148,7 +148,20 @@ export function buildTemplateSendGraph(opts: {
  * submit). `opening` is the one message that differs between the flows. The
  * Confirm / Amend decision is POSTed to the ERP via {callback_url} (injected on
  * the trigger payload) — no ERP host or key is written here.
+ *
+ * The ERP's /api/chat-callback contract (Houzs-ERP backend/src/routes/chatCallback.ts):
+ *   headers  X-Chat-Key = the ERP's CHAT_CALLBACK_KEY — here `{secret:ERP_CALLBACK_KEY}`,
+ *            resolved by rest.ts from the Worker secret of that name, never from
+ *            a contact attribute (an attribute is visible in the Contacts UI).
+ *   body     { callback_id, event: "confirm"|"amend", ref, phone, delivery_date?, reason?, note? }
+ *   ref      = ref_1 as the ERP sent it (doc_no OR AutoCount number; the ERP resolves both)
+ *   callback_id = "{run_id}-<event>": the same on a retry of this run's step, different
+ *            per conversation, so the ERP's duplicate probe keys on it.
+ * The ERP answers {ok:true, recorded:true, applied:false}: it RECORDS the tap, a human
+ * applies the date. callback_url is injected by the ERP per send.
  */
+export const ERP_CALLBACK_HEADERS = JSON.stringify({ "X-Chat-Key": "{secret:ERP_CALLBACK_KEY}" });
+
 export function buildDeliveryGraph(opts: {
   opening: string;
   openerTemplate: string;
@@ -189,7 +202,12 @@ export function buildDeliveryGraph(opts: {
         type: "call_rest_api",
         x: 1140,
         y: 120,
-        data: { method: "POST", url: "{callback_url}", body: `{"ref":"{ref_1}","decision":"confirm","source":"connect"}` },
+        data: {
+          method: "POST",
+          url: "{callback_url}",
+          headers: ERP_CALLBACK_HEADERS,
+          body: `{"callback_id":"{run_id}-confirm","event":"confirm","ref":"{ref_1}","phone":"{phone}","note":"source=connect"}`,
+        },
       },
       { id: "thanks_confirm", type: "send_text", x: 1360, y: 120, data: { message: CONFIRM_THANKS } },
       {
@@ -281,7 +299,8 @@ export function buildDeliveryGraph(opts: {
         data: {
           method: "POST",
           url: "{callback_url}",
-          body: `{"ref":"{ref_1}","decision":"amend","reason":"{amend_date_reason}","new_date":"{amended_delivery_date}","source":"connect"}`,
+          headers: ERP_CALLBACK_HEADERS,
+          body: `{"callback_id":"{run_id}-amend","event":"amend","ref":"{ref_1}","phone":"{phone}","delivery_date":"{amended_delivery_date}","reason":"{amend_date_reason}","note":"source=connect"}`,
         },
       },
       { id: "amend_submitted", type: "send_text", x: 2680, y: 620, data: { message: AMEND_SUBMITTED } },

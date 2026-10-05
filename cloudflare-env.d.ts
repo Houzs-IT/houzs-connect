@@ -34,4 +34,11 @@ interface CloudflareEnv {
   // Callers send them as `x-connect-key` or `Authorization: Bearer`.
   ERP_WEBHOOK_SECRET?: string; // POST /api/webhooks/erp
   DRIVER_WEBHOOK_SECRET?: string; // POST /api/webhooks/driver
+
+  // OUTBOUND to the ERP: the delivery flows' call_rest_api nodes send this as
+  // X-Chat-Key to {callback_url} (the ERP's /api/chat-callback). Must equal the
+  // ERP worker's CHAT_CALLBACK_KEY. Referenced from a flow header as
+  // `{secret:ERP_CALLBACK_KEY}` (see src/lib/automation/rest.ts); never an
+  // attribute, never in a body.
+  ERP_CALLBACK_KEY?: string;
 }

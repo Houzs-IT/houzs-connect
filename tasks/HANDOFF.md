@@ -376,8 +376,14 @@ node scripts/smoke-rest-api.mjs
 ```
 
 Secrets live on the `houzs-connect` Worker: `SESSION_SECRET`, `ERP_SERVICE_TOKEN`,
-`SYNC_ADMIN_TOKEN`, `ERP_WEBHOOK_SECRET`, `DRIVER_WEBHOOK_SECRET`, and (once live) the
-four `WHATSAPP_*` values. `DATABASE_URL` in `.dev.vars` is for scripts only.
+`SYNC_ADMIN_TOKEN`, `ERP_WEBHOOK_SECRET`, `DRIVER_WEBHOOK_SECRET`, `ERP_CALLBACK_KEY`, and
+(once live) the four `WHATSAPP_*` values. `DATABASE_URL` in `.dev.vars` is for scripts only.
+
+`ERP_CALLBACK_KEY` is the OUTBOUND one: the delivery flows' `call_rest_api` nodes send it as
+`X-Chat-Key` to `{callback_url}` (the ERP's `/api/chat-callback`), referenced from the node's
+headers as `{secret:ERP_CALLBACK_KEY}` (`src/lib/automation/rest.ts` resolves only the names
+in `REST_HEADER_SECRETS`, never from a contact attribute). It must equal the ERP Worker's
+`CHAT_CALLBACK_KEY`; unset, every callback 401s and the run log shows `missingSecrets`.
 
 The two webhook secrets guard `POST /api/webhooks/erp` and `/api/webhooks/driver`
 (`src/lib/webhook-auth.ts`). Callers send `x-connect-key: <secret>` or
@@ -388,6 +394,7 @@ set, that endpoint refuses every call with 503 (and logs why) unless
 ```bash
 wrangler secret put ERP_WEBHOOK_SECRET
 wrangler secret put DRIVER_WEBHOOK_SECRET
+wrangler secret put ERP_CALLBACK_KEY   # = the ERP Worker's CHAT_CALLBACK_KEY
 curl -X POST https://chat.houzscentury.com/api/webhooks/erp \
   -H 'content-type: application/json' -H 'x-connect-key: <ERP_WEBHOOK_SECRET>' \
   -d '{"phone":"60123456789","automation":"New Delivery Follow-up"}'

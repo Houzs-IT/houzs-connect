@@ -12,7 +12,7 @@ import {
   tag as tagTable,
 } from "@/db/schema";
 import { asGraph, type FlowGraph, type FlowNode } from "./types";
-import { callRestApi } from "./rest";
+import { callRestApi, type RestSecrets } from "./rest";
 import { interpolate } from "./vars";
 import { attrs } from "@/lib/format";
 import { getOrCreateConversation, sendOutbound } from "@/lib/whatsapp/transport";
@@ -111,6 +111,7 @@ async function execNode(
     attributes: (
       await db.query.contact.findFirst({ where: eq(contactTable.id, ctx.contactId) })
     )?.attributes,
+    run_id: ctx.runId,
   };
 
   switch (node.type) {
@@ -310,7 +311,11 @@ async function execNode(
       // Real outbound HTTP (see lib/automation/rest.ts). callRestApi never
       // throws: a dead endpoint is logged and the flow carries on, because the
       // customer conversation must survive a failed ERP/Sheet write.
-      const res = await callRestApi(d, varCtx);
+      // Header-only secrets (`{secret:NAME}`), read here so rest.ts stays
+      // pure. ERP_CALLBACK_KEY = the ERP's CHAT_CALLBACK_KEY, which
+      // /api/chat-callback checks as X-Chat-Key.
+      const secrets: RestSecrets = { ERP_CALLBACK_KEY: process.env.ERP_CALLBACK_KEY };
+      const res = await callRestApi(d, varCtx, { secrets });
       await logStep(ctx.runId, {
         node: node.id,
         type: node.type,
@@ -320,6 +325,7 @@ async function execNode(
         status: res.status,
         response: res.snippet,
         ...(res.error ? { error: res.error } : {}),
+        ...(res.missingSecrets ? { missingSecrets: res.missingSecrets } : {}),
       });
       // Only a successful call may overwrite an attribute — persisting an error
       // page would poison later criteria_router branches on that key.
