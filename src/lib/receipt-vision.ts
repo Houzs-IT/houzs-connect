@@ -156,16 +156,37 @@ const loggedFetch: typeof fetch = async (input, init) => {
   return res;
 };
 
-/** Switched off until RECEIPT_AI=on (paused 2026-10-04: live calls failed). */
-export function receiptVisionConfigured(): boolean {
-  return process.env.RECEIPT_AI === "on" && !!process.env.ANTHROPIC_API_KEY?.trim();
+/**
+ * The key with everything a key cannot contain taken out. A key pasted into a
+ * terminal prompt can pick up a line break or an invisible character (a
+ * non-breaking or zero-width space); sent in a header, those bytes can get the
+ * request turned away before it ever reaches Claude. Real keys are plain
+ * letters, digits, "-" and "_".
+ */
+function apiKey(): string {
+  return (process.env.ANTHROPIC_API_KEY ?? "").replace(/[^\x21-\x7E]/g, "");
 }
 
-/** What the key looks like, never the key: catches a pasted space or line break. */
+/** Switched off until RECEIPT_AI=on (paused 2026-10-04: live calls failed). */
+export function receiptVisionConfigured(): boolean {
+  return process.env.RECEIPT_AI === "on" && !!apiKey();
+}
+
+/** For Settings > Integrations: off, on, or no key at all. */
+export function receiptAiState(): "on" | "off" | "no-key" {
+  if (!apiKey()) return "no-key";
+  return process.env.RECEIPT_AI === "on" ? "on" : "off";
+}
+
+/** What the key looks like, never the key: catches a pasted line break or invisible character. */
 function keyShape(): string {
   const raw = process.env.ANTHROPIC_API_KEY ?? "";
-  const trimmed = raw.trim();
-  return `len=${raw.length} trimmedLen=${trimmed.length} sk-ant=${trimmed.startsWith("sk-ant-")} innerWhitespace=${/\s/.test(trimmed)}`;
+  const clean = apiKey();
+  return `len=${raw.length} removed=${raw.length - clean.length} format=${/^sk-ant-[A-Za-z0-9_-]{20,}$/.test(clean) ? "ok" : "unexpected"}`;
+}
+
+function client(): Anthropic {
+  return new Anthropic({ apiKey: apiKey(), timeout: 60_000, maxRetries: 1, fetch: loggedFetch });
 }
 
 export async function readReceipt(bytes: ArrayBuffer, mimeType: string): Promise<ReceiptResult> {
@@ -182,13 +203,7 @@ export async function readReceipt(bytes: ArrayBuffer, mimeType: string): Promise
   if (!file) return { status: "unavailable", error: `cannot read ${mime}` };
 
   try {
-    const client = new Anthropic({
-      apiKey: process.env.ANTHROPIC_API_KEY?.trim(),
-      timeout: 60_000,
-      maxRetries: 1,
-      fetch: loggedFetch,
-    });
-    const response = await client.messages.parse({
+    const response = await client().messages.parse({
       model: MODEL,
       max_tokens: 2048,
       output_config: { effort: "low", format: jsonSchemaOutputFormat(SCHEMA) },
@@ -245,4 +260,81 @@ export function readingNote(r: ReceiptReading): string | null {
     r.uncertain && `check: ${r.uncertain}`,
   ].filter(Boolean);
   return parts.length ? parts.join(" · ") : null;
+}
+
+export type ProbeStep = { step: string; ok: boolean; status: number | null; from: string; detail: string };
+export type ProbeResult = { state: "on" | "off" | "no-key"; key: string; fetch: string; steps: ProbeStep[] };
+
+const API = "https://api.anthropic.com/v1";
+
+/** Who answered: Anthropic stamps request-id, Cloudflare's edge cf-ray. */
+function answeredBy(res: Response): string {
+  if (res.headers.get("request-id")) return "anthropic";
+  if (res.headers.get("cf-ray")) return "cloudflare";
+  return "nobody (no headers)";
+}
+
+async function post(step: string, path: string, key: string | null, body: string, expect: number): Promise<ProbeStep> {
+  try {
+    const res = await rawFetch()(`${API}${path}`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "anthropic-version": "2023-06-01", ...(key ? { "x-api-key": key } : {}) },
+      body,
+    });
+    const text = await res.text().catch(() => "");
+    return { step, ok: res.status === expect, status: res.status, from: answeredBy(res), detail: text.slice(0, 200) || "(empty body)" };
+  } catch (e) {
+    return { step, ok: false, status: null, from: "-", detail: `threw: ${(e as Error)?.message ?? String(e)}`.slice(0, 200) };
+  }
+}
+
+/**
+ * Settings > Integrations "Test connection". Narrows down where a failing
+ * receipt read breaks, one step at a time: can this Worker reach Claude's API
+ * at all (without a key Anthropic should answer 401), is the key accepted, does
+ * a receipt-sized request go through, and does the SDK call the receipt reader
+ * makes work. The token-count endpoint is free, so only the last step is billed
+ * (a few tokens). Never returns the key, only its shape.
+ */
+export async function probeReceiptAi(): Promise<ProbeResult> {
+  const key = apiKey();
+  const result: ProbeResult = {
+    state: receiptAiState(),
+    key: keyShape(),
+    fetch: (globalThis.fetch as typeof fetch & { _nextOriginalFetch?: unknown })._nextOriginalFetch ? "next-original" : "global",
+    steps: [],
+  };
+  const ping = (text: string) => JSON.stringify({ model: MODEL, max_tokens: 1, messages: [{ role: "user", content: text }] });
+
+  result.steps.push(await post("reach the API (no key)", "/messages", null, ping("ping"), 401));
+  if (!key) return result;
+  result.steps.push(await post("key accepted", "/messages/count_tokens", key, ping("ping"), 200));
+  // The key exactly as stored, when cleaning changed it: shows whether the
+  // stray characters were what got requests turned away.
+  const stored = process.env.ANTHROPIC_API_KEY?.trim() ?? "";
+  if (stored !== key) result.steps.push(await post("key as stored", "/messages/count_tokens", stored, ping("ping"), 200));
+  // About the size of a phone screenshot sent as base64.
+  result.steps.push(await post("receipt-sized request (~110 KB)", "/messages/count_tokens", key, ping("a ".repeat(55_000)), 200));
+
+  try {
+    const r = await client().messages.parse({
+      model: MODEL,
+      max_tokens: 64,
+      output_config: {
+        effort: "low",
+        format: jsonSchemaOutputFormat({
+          type: "object",
+          properties: { ok: { type: "boolean" } },
+          required: ["ok"],
+          additionalProperties: false,
+        } as const),
+      },
+      messages: [{ role: "user", content: 'Answer {"ok": true}.' }],
+    });
+    result.steps.push({ step: "SDK structured call", ok: r.parsed_output?.ok === true, status: 200, from: "anthropic", detail: JSON.stringify(r.parsed_output) });
+  } catch (e) {
+    const status = e instanceof Anthropic.APIError ? (e.status ?? null) : null;
+    result.steps.push({ step: "SDK structured call", ok: false, status, from: "-", detail: ((e as Error)?.message ?? String(e)).slice(0, 200) });
+  }
+  return result;
 }

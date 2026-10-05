@@ -5,8 +5,11 @@ import { PageChrome } from "@/components/PageChrome";
 import { getCurrentMember } from "@/lib/current-member";
 import { fmt } from "@/lib/i18n/dict";
 import { getDict } from "@/lib/i18n/server";
+import { isAdminRole } from "@/lib/permissions";
+import { receiptAiState } from "@/lib/receipt-vision";
 import { isLive, phoneNumberInfo } from "@/lib/whatsapp/cloud-api";
 import { SettingsHead } from "../ui";
+import { ReceiptAiTest } from "./ReceiptAiTest";
 
 export const dynamic = "force-dynamic";
 
@@ -33,8 +36,9 @@ export default async function IntegrationsPage() {
     `),
   ]);
   const live = isLive();
+  const ai = receiptAiState();
 
-  const cards: { name: string; icon: string; tone: string; state: string; good: boolean | null; body: string }[] = [
+  const cards: { name: string; icon: string; tone: string; state: string; good: boolean | null; body: string; extra?: React.ReactNode }[] = [
     { name: L.iErp, icon: "H", tone: "orange", state: L.iPaused, good: null, body: L.iErpBody },
     {
       name: L.iWa,
@@ -46,6 +50,18 @@ export default async function IntegrationsPage() {
     },
     { name: L.iErpHook, icon: "⇄", tone: "blue", state: erpAt ? L.iConnected : L.iNotSet, good: !!erpAt, body: erpAt ? fmt(L.iLast, { when: when(erpAt) }) : L.iNever },
     { name: L.iDriver, icon: "▶", tone: "cyan", state: driverAt ? L.iConnected : L.iNotSet, good: !!driverAt, body: driverAt ? fmt(L.iLast, { when: when(driverAt) }) : L.iNever },
+    {
+      name: L.iAi,
+      icon: "✦",
+      tone: "purple",
+      state: ai === "on" ? L.iOn : ai === "off" ? L.iOff : L.iNotSet,
+      good: ai === "on" ? true : ai === "off" ? null : false,
+      body: L.iAiBody,
+      extra:
+        ai !== "no-key" && isAdminRole(me.role) ? (
+          <ReceiptAiTest labels={{ test: L.iTest, testing: L.iTesting, ok: L.iTestOk, fail: L.iTestFail }} />
+        ) : null,
+    },
   ];
 
   return (
@@ -77,6 +93,7 @@ export default async function IntegrationsPage() {
                   </span>
                 </div>
                 {c.body && <p className="mt-1 text-[12.5px] text-[var(--color-muted)]">{c.body}</p>}
+                {c.extra}
               </div>
             </section>
           ))}
