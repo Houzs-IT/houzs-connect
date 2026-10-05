@@ -145,8 +145,9 @@ export async function fetchTeam(): Promise<TeamView> {
   const people = [...byKey.values()].sort((a, b) => rank(a.role) - rank(b.role) || a.name.localeCompare(b.name));
 
   // A photo belongs to the person, so any one of their member rows finds it.
+  // Fresh, like every read here: an admin who just set one must see it.
   const anyRow = (p: Person) => Object.values(p.access)[0]?.memberId;
-  const photos = await photoSrcs(people.map(anyRow));
+  const photos = await photoSrcs(people.map(anyRow), { fresh: true });
   for (const p of people) p.photo = photos.get(anyRow(p) ?? "") ?? null;
 
   return { permitted: true, companies, people };

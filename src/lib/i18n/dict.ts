@@ -1064,6 +1064,8 @@ const en = {
     photoErrSignin: "Your session has ended. Sign in again, then try once more.",
     photoErrSave: "The photo could not be saved. Try again in a moment.",
     photoErrUpload: "The upload was refused. Try a different photo.",
+    photoErrForbidden: "Only an owner or admin can change someone else's photo.",
+    photoEditFor: "Change {name}'s photo",
     // security
     securitySub: "How you sign in to Connect",
     pwTitle: "Password",
@@ -2354,6 +2356,8 @@ const zh: Dict = {
     photoErrSignin: "登录已过期，请重新登录后再试。",
     photoErrSave: "头像没能保存，请稍后再试。",
     photoErrUpload: "上传被拒绝，请换一张照片。",
+    photoErrForbidden: "只有所有者或管理员可以修改别人的头像。",
+    photoEditFor: "更换 {name} 的头像",
     securitySub: "你如何登录 Connect",
     pwTitle: "密码",
     pwBody: "Connect 使用你的 Houzs ERP 密码。请到 Houzs ERP 的个人设置修改，新密码在这里立即生效。",
