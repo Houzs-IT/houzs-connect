@@ -385,6 +385,11 @@ headers as `{secret:ERP_CALLBACK_KEY}` (`src/lib/automation/rest.ts` resolves on
 in `REST_HEADER_SECRETS`, never from a contact attribute). It must equal the ERP Worker's
 `CHAT_CALLBACK_KEY`; unset, every callback 401s and the run log shows `missingSecrets`.
 
+Same-zone gotcha: `erp.houzscentury.com/api/*` is a Workers **Route** on a Pages origin, and
+a Worker's `fetch()` to its own zone bypasses Routes (Cloudflare docs). Connect therefore
+runs with the `global_fetch_strictly_public` compatibility flag (wrangler.toml) so its
+calls to the ERP go through the front door and reach the ERP worker. Keep the flag.
+
 The two webhook secrets guard `POST /api/webhooks/erp` and `/api/webhooks/driver`
 (`src/lib/webhook-auth.ts`). Callers send `x-connect-key: <secret>` or
 `Authorization: Bearer <secret>`; a wrong or missing key is 401. If a secret is not
