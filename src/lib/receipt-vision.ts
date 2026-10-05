@@ -126,8 +126,9 @@ function toBase64(bytes: ArrayBuffer): string {
  * runtime got a real answer. Next keeps the unpatched fetch on
  * `_nextOriginalFetch`; fall back to the global one if it ever goes away.
  */
-const rawFetch = (): typeof fetch =>
-  (globalThis.fetch as typeof fetch & { _nextOriginalFetch?: typeof fetch })._nextOriginalFetch ?? globalThis.fetch;
+// Shared now (lib/raw-fetch.ts) — the automation engine's REST node hit the
+// same empty-400 on its POST to the ERP.
+import { rawFetch } from "@/lib/raw-fetch";
 
 const loggedFetch: typeof fetch = async (input, init) => {
   const res = await rawFetch()(input, init);
