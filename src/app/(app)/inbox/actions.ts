@@ -9,6 +9,7 @@ import { ensureConversationMemberTable } from "@/db/ensure-conversation-member";
 import { conversationCompanyWhere, conversationVisibilityWhere, getVisibility } from "@/lib/access";
 import type { ConversationListItem } from "@/components/inbox/ConversationList";
 import { bypassReadCache } from "@/db/fresh";
+import { photoSrcs } from "@/lib/member-photo";
 import { attrs, displayName, mediaCaption } from "@/lib/format";
 import { can } from "@/lib/permissions";
 
@@ -105,6 +106,9 @@ export async function fetchConversations(
     : [];
   const botActive = new Set(botRows.map((r) => r.contactId));
 
+  // One lookup for every assignee on the page (lib/member-photo.ts).
+  const agentPhotos = await photoSrcs(page.map((c) => c.assignedAgentId));
+
   const items = page.map((c) => {
     const latest = c.messages[0];
     const a = attrs(c.contact.attributes);
@@ -131,6 +135,7 @@ export async function fetchConversations(
         latest && latest.direction === "IN" ? latest.createdAt.toISOString() : null,
       agent: c.assignedAgent?.name ?? null,
       agentId: c.assignedAgentId,
+      agentPhoto: (c.assignedAgentId && agentPhotos.get(c.assignedAgentId)) || null,
       departmentId: c.assignedDepartmentId,
       department: c.assignedDepartment?.name ?? null,
       tags: c.tagLinks.map((t) => ({ id: t.tag.id, name: t.tag.name, color: t.tag.color })),

@@ -5,6 +5,7 @@
 */
 
 import { initials, tint } from "@/lib/format";
+import { PersonAvatar } from "@/components/PersonAvatar";
 
 export const EYEBROW =
   "text-[11px] font-semibold uppercase tracking-[0.14em] text-[var(--color-muted)]";
@@ -70,14 +71,17 @@ export function DeltaText({ pct, goodWhenUp = true }: { pct: number | null; good
   );
 }
 
-export function Avatar({ name, size = 28 }: { name: string; size?: number }) {
+/** `photo` is a staff member's profile photo (lib/member-photo.ts); customers have none. */
+export function Avatar({ name, photo, size = 28 }: { name: string; photo?: string | null; size?: number }) {
   return (
-    <span
-      className="grid shrink-0 place-items-center rounded-full font-semibold text-white"
-      style={{ background: tint(name), width: size, height: size, fontSize: size >= 28 ? 9.5 : 8.5 }}
-    >
-      {initials(name).toUpperCase()}
-    </span>
+    <PersonAvatar name={name} photo={photo} size={size}>
+      <span
+        className="grid shrink-0 place-items-center rounded-full font-semibold text-white"
+        style={{ background: tint(name), width: size, height: size, fontSize: size >= 28 ? 9.5 : 8.5 }}
+      >
+        {initials(name).toUpperCase()}
+      </span>
+    </PersonAvatar>
   );
 }
 

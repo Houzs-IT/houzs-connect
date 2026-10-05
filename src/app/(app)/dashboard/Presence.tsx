@@ -1,4 +1,5 @@
 import { fmt, type Dict } from "@/lib/i18n/dict";
+import { photoSrcs } from "@/lib/member-photo";
 import { companyPresence } from "@/lib/presence";
 import { Avatar } from "./ui";
 
@@ -6,9 +7,10 @@ import { Avatar } from "./ui";
 export async function Presence({ companyId, s }: { companyId: string; s: Dict["dash"] }) {
   const people = await companyPresence(companyId);
   const p = {
-    online: people.filter((x) => x.online).map((x) => x.name),
+    online: people.filter((x) => x.online),
     offline: people.filter((x) => !x.online).length,
   };
+  const photos = await photoSrcs(p.online.slice(0, 3).map((x) => x.id));
   return (
     <span
       title={s.onlineTip}
@@ -16,9 +18,9 @@ export async function Presence({ companyId, s }: { companyId: string; s: Dict["d
     >
       {p.online.length > 0 && (
         <span className="flex pl-1.5">
-          {p.online.slice(0, 3).map((n) => (
-            <span key={n} className="-ml-1.5 rounded-full border-2 border-white">
-              <Avatar name={n} size={22} />
+          {p.online.slice(0, 3).map((x) => (
+            <span key={x.id} className="-ml-1.5 rounded-full border-2 border-white">
+              <Avatar name={x.name} photo={photos.get(x.id)} size={22} />
             </span>
           ))}
         </span>

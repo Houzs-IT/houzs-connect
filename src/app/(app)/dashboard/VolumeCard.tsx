@@ -38,7 +38,7 @@ export function VolumeCard({
   prev: { inbound: number; outbound: number };
   rate: number | null;
   ratePts: number | null;
-  agents: { name: string; sent: number }[];
+  agents: { name: string; sent: number; photo: string | null }[];
 }) {
   const { t } = useShell();
   const s = t.dash;
@@ -105,7 +105,7 @@ export function VolumeCard({
         <ul className="flex flex-col gap-3">
           {agents.map((a) => (
             <li key={a.name} className="flex items-center gap-3">
-              <Avatar name={a.name} size={26} />
+              <Avatar name={a.name} photo={a.photo} size={26} />
               <span className="w-40 shrink-0 truncate text-[12.5px] text-[var(--color-ink)]">{a.name}</span>
               <div className="h-2 flex-1 overflow-hidden rounded-full bg-[var(--color-surface-2)]">
                 <div

@@ -6,6 +6,7 @@ import { Avatar, Badge, Card, EYEBROW, Empty } from "./ui";
 import { delta, humanDuration, type PeriodWindow } from "./util";
 import { DeptFilter } from "./DeptFilter";
 import { companyPresence } from "@/lib/presence";
+import { photoSrcs } from "@/lib/member-photo";
 
 type S = Dict["dash"];
 
@@ -26,6 +27,7 @@ export async function SupportTab({
     companyPresence(companyId),
   ]);
   const online = new Set(people.filter((p) => p.online).map((p) => p.id));
+  const photos = await photoSrcs(report.list.map((a) => a.id));
   const onlineCount = report.list.filter((a) => online.has(a.id)).length;
   const kpis: { label: string; hint: string; dot: string; now: number; prev: number }[] = [
     { label: s.k1, hint: s.k1Hint, dot: "var(--color-accent)", now: stats.cur.total, prev: stats.prev.total },
@@ -121,7 +123,7 @@ export async function SupportTab({
                 >
                   <span className="flex min-w-0 items-center gap-2.5">
                     <span className="relative">
-                      <Avatar name={a.name} />
+                      <Avatar name={a.name} photo={photos.get(a.id)} />
                       <span
                         className={`absolute -bottom-px -right-px h-[9px] w-[9px] rounded-full border-2 border-white ${
                           online.has(a.id) ? "bg-[var(--color-success)]" : "bg-[var(--color-border-strong)]"
