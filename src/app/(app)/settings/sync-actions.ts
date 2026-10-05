@@ -22,6 +22,7 @@ import {
   planOrgSync,
 } from "@/lib/sync/erp-org";
 import { isAdminRole } from "@/lib/permissions";
+import { autoJoinDepartmentChannels } from "@/lib/internal-auto-join";
 
 const DEFAULT_ERP_BASE = "https://erp.houzscentury.com";
 
@@ -43,6 +44,8 @@ export async function syncFromErp(): Promise<void> {
   const plan = planOrgSync(erp, existing);
   await applyOrgSync(db, plan);
   await applyOrgHierarchy(db, erp);
+  // New hires and department moves land in their department's Internal channel.
+  await autoJoinDepartmentChannels(null, true).catch((e) => console.warn("[sync] channel auto-join failed:", e));
 
   revalidatePath("/settings");
   revalidatePath("/inbox");

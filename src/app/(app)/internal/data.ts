@@ -2,6 +2,7 @@ import { createId } from "@paralleldrive/cuid2";
 import { sql } from "drizzle-orm";
 import { getDb } from "@/db/client";
 import { ensureInternalTables } from "@/db/ensure-internal";
+import { autoJoinDepartmentChannels } from "@/lib/internal-auto-join";
 import { photoSrcs } from "@/lib/member-photo";
 import { SLA_MINUTES } from "@/lib/sla";
 
@@ -467,6 +468,8 @@ export async function markRead(channelId: string, meId: string): Promise<void> {
 export async function internalUnreadTotal(companyId: string, meId: string): Promise<number> {
   try {
     await ensureInternalTables(getDb());
+    // New colleagues into their department channel (throttled; see the module).
+    await autoJoinDepartmentChannels(companyId).catch((e) => console.warn("[internal] auto-join failed:", e));
     const r = await rows<{ n: number }>(sql`
       select coalesce(sum(${unread(meId)}), 0)::int as n
       from connect.internal_channel c
