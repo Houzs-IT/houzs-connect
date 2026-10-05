@@ -10,8 +10,9 @@ import { useRef, useState, useSyncExternalStore, useTransition } from "react";
 import { useShell } from "@/components/shell/ShellProvider";
 import { isBound, positionalSlots, resolveBinding, type VarBinding } from "@/lib/automation/vars";
 import { fmt } from "@/lib/i18n/dict";
+import { HEADER_MEDIA, headerFileProblem, type HeaderMediaFormat } from "@/lib/template-media-limits";
 import { LIMITS, type TemplateCategory, type TemplateStatus } from "@/lib/whatsapp/templates";
-import { editTemplateAction, submitCarouselTemplate, submitTemplateWithBinding, templateCurl } from "./actions";
+import { editTemplateAction, submitCarouselTemplate, submitMediaHeaderTemplate, submitTemplateWithBinding, templateCurl } from "./actions";
 import { SlotSelect } from "./SlotSelect";
 import { TemplateBubble } from "./TemplateBubble";
 import { sampleLookup } from "./TemplateFields";
@@ -114,6 +115,10 @@ export function TemplateEditor({
   const [category, setCategory] = useState<TemplateCategory>((existing?.category as TemplateCategory) ?? "UTILITY");
   const [headerOn, setHeaderOn] = useState(!!existing?.header);
   const [header, setHeader] = useState(existing?.header ?? "");
+  // An image / PDF header (new templates only): the format and the chosen file.
+  const [headerMedia, setHeaderMedia] = useState<HeaderMediaFormat | null>(null);
+  const [headerFile, setHeaderFile] = useState<File | null>(null);
+  const [headerPreview, setHeaderPreview] = useState<string | null>(null);
   const [body, setBody] = useState(existing?.body ?? "");
   const [footer, setFooter] = useState(existing?.footer ?? "");
   const [buttons, setButtons] = useState<string[]>(existing?.buttons ?? []);
@@ -165,8 +170,11 @@ export function TemplateEditor({
     cards.length >= 2 &&
     cards.length <= 10 &&
     cards.every((c) => c.file && c.body.trim() && c.buttons.filter((b) => b.trim()).length === cards[0].buttons.filter((b) => b.trim()).length);
+  const mediaHeaderOn = kind === "standard" && !!headerMedia;
   const blocker = kind === "carousel" && !cardsOk
     ? L.needCards
+    : mediaHeaderOn && !headerFile
+    ? L.needHeaderFile
     : !body.trim()
     ? L.writeBody
     : !nameClean
@@ -181,7 +189,8 @@ export function TemplateEditor({
     name,
     language,
     category: kind === "call_permission" ? ("MARKETING" as TemplateCategory) : category,
-    header: kind === "standard" && headerOn ? header.trim() || undefined : undefined,
+    header: kind === "standard" && headerOn && !headerMedia ? header.trim() || undefined : undefined,
+    headerFormat: mediaHeaderOn ? (headerMedia ?? undefined) : undefined,
     body,
     footer: kind !== "carousel" ? footer.trim() || undefined : undefined,
     examples: slots.map((n) => exampleFor(n)),
@@ -192,6 +201,19 @@ export function TemplateEditor({
   });
 
   const patchCard = (uid: number, p: Partial<Card>) => setCards((cs) => cs.map((c) => (c.uid === uid ? { ...c, ...p } : c)));
+
+  /** Pick the header: none, text, or an image / PDF (which drops any chosen file of the other kind). */
+  function pickHeader(next: "none" | "text" | HeaderMediaFormat) {
+    setHeaderOn(next === "text");
+    const media = next === "IMAGE" || next === "DOCUMENT" ? next : null;
+    if (media !== headerMedia) chooseHeaderFile(null);
+    setHeaderMedia(media);
+  }
+  function chooseHeaderFile(file: File | null) {
+    if (headerPreview) URL.revokeObjectURL(headerPreview);
+    setHeaderFile(file);
+    setHeaderPreview(file && file.type.startsWith("image/") ? URL.createObjectURL(file) : null);
+  }
 
   function setSlot(n: number, next: VarBinding | null) {
     const rest = bindings.filter((b) => b.index !== n);
@@ -234,6 +256,13 @@ export function TemplateEditor({
         });
         if (!res.ok) return setNote({ ok: false, text: res.error ?? "Meta refused the edit." });
         setNote({ ok: true, text: L.resubmitted });
+      } else if (mediaHeaderOn && headerFile) {
+        const fd = new FormData();
+        fd.set("payload", JSON.stringify(payload()));
+        fd.set("header", headerFile);
+        const res = await submitMediaHeaderTemplate(fd);
+        if (!res.ok) return setNote({ ok: false, text: res.error ?? "Meta refused the template." });
+        setNote({ ok: true, text: fmt(L.submitted, { name: nameClean, status: res.status ?? "PENDING" }) });
       } else if (kind === "carousel") {
         const fd = new FormData();
         fd.set("payload", JSON.stringify(payload()));
@@ -406,10 +435,11 @@ export function TemplateEditor({
               <span className={label}>{L.header}</span>
               <div className="mb-2 flex gap-2">
                 {([
-                  [L.hNone, !headerOn, () => setHeaderOn(false), true],
-                  [L.hText, headerOn, () => setHeaderOn(true), true],
-                  [L.hImage, false, () => {}, false],
-                  [L.hDocument, false, () => {}, false],
+                  [L.hNone, !headerOn && !headerMedia, () => pickHeader("none"), true],
+                  [L.hText, headerOn && !headerMedia, () => pickHeader("text"), true],
+                  // A media header cannot be carried through an edit (templates.ts), so only a new template offers one.
+                  [L.hImage, headerMedia === "IMAGE", () => pickHeader("IMAGE"), !editing],
+                  [L.hDocument, headerMedia === "DOCUMENT", () => pickHeader("DOCUMENT"), !editing],
                 ] as [string, boolean, () => void, boolean][]).map(([l, on, fn, ok]) => (
                   <button
                     key={l}
@@ -425,10 +455,46 @@ export function TemplateEditor({
                   </button>
                 ))}
               </div>
-              {headerOn && (
+              {headerOn && !headerMedia && (
                 <div className="flex h-[38px] items-center gap-2 rounded-[8px] border border-[var(--color-border)] px-3 focus-within:border-[var(--color-accent)]">
                   <input value={header} maxLength={LIMITS.header} onChange={(e) => setHeader(e.target.value)} className="min-w-0 flex-1 bg-transparent text-[13px] outline-none" />
                   <Counter v={header} max={LIMITS.header} />
+                </div>
+              )}
+              {headerMedia && (
+                <div>
+                  <label className="flex cursor-pointer items-center gap-3 rounded-[10px] border border-dashed border-[var(--color-border-strong)] bg-[var(--color-surface-2)] p-2.5 hover:border-[var(--color-accent)]">
+                    <span className="grid h-[56px] w-[72px] shrink-0 place-items-center overflow-hidden rounded-[8px] bg-[var(--color-surface)] text-[10.5px] font-bold text-[var(--color-faint)]">
+                      {headerPreview ? (
+                        // eslint-disable-next-line @next/next/no-img-element -- a local preview of the chosen file
+                        <img src={headerPreview} alt="" className="h-full w-full object-cover" />
+                      ) : headerMedia === "DOCUMENT" ? (
+                        "PDF"
+                      ) : (
+                        "IMG"
+                      )}
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-[13px] font-semibold text-[var(--color-ink)]">{headerFile?.name ?? L.hChoose}</span>
+                      <span className="block text-[11.5px] text-[var(--color-faint)]">{headerMedia === "IMAGE" ? L.hFileImage : L.hFileDoc}</span>
+                    </span>
+                    <span className="shrink-0 text-[12.5px] font-semibold text-[var(--color-accent)]">{headerFile ? L.hReplace : L.hChoose}</span>
+                    <input
+                      type="file"
+                      accept={HEADER_MEDIA[headerMedia].accept}
+                      className="hidden"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0] ?? null;
+                        e.target.value = "";
+                        if (!file) return;
+                        const problem = headerFileProblem(headerMedia, file);
+                        if (problem) return setNote({ ok: false, text: problem });
+                        setNote(null);
+                        chooseHeaderFile(file);
+                      }}
+                    />
+                  </label>
+                  <p className="mt-1.5 text-[11.5px] text-[var(--color-faint)]">{L.hFileNote}</p>
                 </div>
               )}
             </div>
@@ -676,7 +742,8 @@ export function TemplateEditor({
                 {body.trim() ? (
                   <div className="max-w-[92%]">
                     <TemplateBubble
-                      header={kind === "standard" && headerOn ? header : ""}
+                      media={mediaHeaderOn && headerMedia ? { kind: headerMedia, src: headerPreview, name: headerFile?.name } : null}
+                      header={kind === "standard" && headerOn && !headerMedia ? header : ""}
                       body={body}
                       footer={kind === "carousel" ? "" : footer}
                       buttons={kind === "standard" ? buttons.map((b) => b.trim()).filter(Boolean) : []}

@@ -7,8 +7,9 @@ import { ActionConfirm } from "@/components/ActionConfirm";
 import { useShell } from "@/components/shell/ShellProvider";
 import { positionalSlots, type VarBinding } from "@/lib/automation/vars";
 import { fmt } from "@/lib/i18n/dict";
+import { HEADER_MEDIA, headerFileProblem, isHeaderMediaFormat } from "@/lib/template-media-limits";
 import type { TemplateCounts } from "@/lib/whatsapp/templates";
-import { removeTemplate, saveBindingAction } from "./actions";
+import { removeTemplate, saveBindingAction, setTemplateHeaderFile } from "./actions";
 import { SlotSelect } from "./SlotSelect";
 import { TemplateBubble } from "./TemplateBubble";
 import type { FieldOption, SampleContact, TemplateRowData } from "./types";
@@ -37,6 +38,27 @@ export function TemplateSide({
   const [confirm, setConfirm] = useState(false);
   const slots = positionalSlots(template.body);
   const byIndex = new Map(bindings.map((b) => [b.index, b]));
+  const headerFormat = template.headerFormat;
+  const mediaFormat = isHeaderMediaFormat(headerFormat) ? headerFormat : null;
+  const file = template.headerFile ?? null;
+  const [fileNote, setFileNote] = useState<{ ok: boolean; text: string } | null>(null);
+
+  function uploadHeader(f: File) {
+    if (!mediaFormat) return;
+    const problem = headerFileProblem(mediaFormat, f);
+    if (problem) return setFileNote({ ok: false, text: problem });
+    setFileNote(null);
+    start(async () => {
+      const fd = new FormData();
+      fd.set("name", template.name);
+      fd.set("language", template.language);
+      fd.set("format", mediaFormat);
+      fd.set("file", f);
+      const res = await setTemplateHeaderFile(fd);
+      setFileNote(res.ok ? { ok: true, text: L.hfSaved } : { ok: false, text: res.error ?? "Could not save." });
+      if (res.ok) router.refresh();
+    });
+  }
 
   const change = (n: number, next: VarBinding | null) => {
     const rest = bindings.filter((b) => b.index !== n);
@@ -86,12 +108,60 @@ export function TemplateSide({
 
       <div className="rounded-[12px] bg-[#ebe4d8] p-3">
         <TemplateBubble
+          media={mediaFormat ? { kind: mediaFormat, src: mediaFormat === "IMAGE" ? file?.url : null, name: file?.fileName } : null}
           header={template.header}
           body={template.body}
           footer={template.footer}
           buttons={template.buttons}
         />
       </div>
+
+      {mediaFormat && (
+        <div>
+          <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.1em] text-[var(--color-faint)]">{L.hfTitle}</div>
+          <div
+            className={`flex items-center gap-2.5 rounded-[10px] border px-3 py-2.5 ${
+              file ? "border-[var(--color-border)]" : "border-[var(--color-warning)] bg-[var(--color-pastel-orange)]"
+            }`}
+          >
+            <p className="min-w-0 flex-1 text-[12px] leading-snug text-[var(--color-ink)]">
+              {file ? (
+                <>
+                  <a href={file.url} target="_blank" rel="noreferrer" className="block truncate font-semibold hover:underline">
+                    {file.fileName}
+                  </a>
+                  <span className="text-[var(--color-faint)]">{L.hfSent}</span>
+                </>
+              ) : (
+                fmt(L.hfMissing, { kind: (mediaFormat === "IMAGE" ? L.hImage : L.hDocument).toLowerCase() })
+              )}
+            </p>
+            <label
+              className={`shrink-0 cursor-pointer rounded-[8px] px-2.5 py-1.5 text-[12px] font-semibold ${
+                file ? "border border-[var(--color-border)] text-[var(--color-ink)] hover:bg-[var(--color-surface-2)]" : "bg-[var(--color-accent)] text-white"
+              } ${pending ? "pointer-events-none opacity-50" : ""}`}
+            >
+              {file ? L.hReplace : L.hfAdd}
+              <input
+                type="file"
+                accept={HEADER_MEDIA[mediaFormat].accept}
+                className="hidden"
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  e.target.value = "";
+                  if (f) uploadHeader(f);
+                }}
+              />
+            </label>
+          </div>
+          {fileNote && (
+            <p className={`mt-1.5 text-[11.5px] ${fileNote.ok ? "text-[var(--color-faint)]" : "text-[var(--color-danger)]"}`}>{fileNote.text}</p>
+          )}
+        </div>
+      )}
+      {headerFormat === "VIDEO" && (
+        <p className="rounded-[8px] bg-[var(--color-pastel-orange)] px-3 py-2 text-[11.5px] text-[var(--color-ink)]">{L.hfVideo}</p>
+      )}
 
       {slots.length > 0 && (
         <div>

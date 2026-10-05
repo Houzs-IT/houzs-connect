@@ -1,3 +1,5 @@
+import { getDb } from "@/db/client";
+import { headerKey, storedHeaders } from "@/lib/whatsapp/templateMedia";
 import Link from "next/link";
 import { PageChrome } from "@/components/PageChrome";
 import { FilterPill } from "@/components/shell/FilterPill";
@@ -74,6 +76,8 @@ export default async function TemplatesPage({ searchParams }: { searchParams: Pr
   const analytics = cfg ? await fetchTemplateAnalytics(cfg, templates.map((x) => x.id)) : null;
   const days = analytics?.days ?? ANALYTICS_DAYS;
 
+  // The image / PDF each media-header template is sent with.
+  const headers = await storedHeaders(getDb());
   const rows: TemplateRowData[] = templates.map((x) => ({
     id: x.id,
     name: x.name,
@@ -85,6 +89,11 @@ export default async function TemplatesPage({ searchParams }: { searchParams: Pr
     footer: x.footer,
     buttons: x.buttons,
     mediaHeader: x.mediaHeader,
+    headerFormat: x.headerFormat,
+    headerFile: (() => {
+      const f = headers.get(headerKey(x.name, x.language));
+      return f ? { url: `/api/template-media/${f.id}?v=${f.updatedAt.getTime()}`, fileName: f.fileName, format: f.format } : null;
+    })(),
     rejectedReason: x.rejectedReason,
     bindings: bindings.map.get(bindingKey(x.name, x.language))?.bindings ?? [],
     editBlocked: editBlockedReason(x.status as TemplateStatus),

@@ -67,6 +67,12 @@ export interface TemplateDraft {
   kind?: "standard" | "carousel" | "call_permission";
   /** Carousel cards, 2–10, each with an uploaded image handle. */
   cards?: CarouselCard[];
+  /**
+   * An IMAGE / DOCUMENT header instead of a text one: the sample Meta reviews,
+   * as a handle from the Resumable Upload API (profile.ts uploadForHandle).
+   * Every SEND then needs the file again (templateMedia.ts headerForSend).
+   */
+  headerMedia?: { format: "IMAGE" | "DOCUMENT"; handle: string };
 }
 
 export interface CarouselCard {
@@ -105,6 +111,8 @@ export interface RemoteTemplate {
    * delete its media header — the UI blocks the edit instead.
    */
   mediaHeader: boolean;
+  /** The header's kind as Meta holds it: TEXT, IMAGE, DOCUMENT, VIDEO…; null when there is none. */
+  headerFormat: string | null;
   /** Meta's reason when status is REJECTED — the whole point of showing status. */
   rejectedReason?: string | null;
 }
@@ -231,6 +239,7 @@ function flatten(t: RawTemplate): RemoteTemplate {
     buttons,
     /** True when Meta holds a non-text header this editor cannot round-trip. */
     mediaHeader: !!rawHeader && (rawHeader.format ?? "TEXT") !== "TEXT",
+    headerFormat: rawHeader ? (rawHeader.format ?? "TEXT").toUpperCase() : null,
     rejectedReason: t.rejected_reason ?? null,
   };
 }
@@ -302,7 +311,9 @@ function buildComponents(
     });
     return { ok: true, components };
   }
-  if (header) {
+  if (draft.headerMedia) {
+    components.push({ type: "HEADER", format: draft.headerMedia.format, example: { header_handle: [draft.headerMedia.handle] } });
+  } else if (header) {
     components.push({ type: "HEADER", format: "TEXT", text: header });
   }
   components.push({

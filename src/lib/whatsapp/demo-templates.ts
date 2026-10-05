@@ -24,11 +24,20 @@ const t = (
   header: "",
   footer: "",
   mediaHeader: false,
+  headerFormat: extra.header ? "TEXT" : null,
   rejectedReason: null,
   ...extra,
 });
 
 export const DEMO_TEMPLATES: RemoteTemplate[] = [
+  t(
+    "showroom_promo",
+    "en",
+    "MARKETING",
+    "APPROVED",
+    "Hi {{1}}! Our showroom sale is on this weekend. Show this message at the counter for a free gift.",
+    { mediaHeader: true, headerFormat: "IMAGE" }
+  ),
   t(
     "sales_pic_update",
     "en_GB",
