@@ -3,7 +3,7 @@ import { getDb } from "@/db/client";
 import { contact, contactField, tag } from "@/db/schema";
 import { PageChrome } from "@/components/PageChrome";
 import { getCurrentMember } from "@/lib/current-member";
-import { attrs, formatPhone, waIdentifier } from "@/lib/format";
+import { attrs, formatPhone, previewText, waIdentifier } from "@/lib/format";
 import { getDict } from "@/lib/i18n/server";
 import { ensureContactColumns, normalisePhone } from "./actions";
 import { ContactDetail } from "./ContactDetail";
@@ -93,7 +93,7 @@ export default async function ContactsPage({ searchParams }: { searchParams: Pro
       orderSub: [a.brand_1, a.product_1].filter(Boolean).join(" · ") || null,
       sales: a.sales_person ?? null,
       tags: c.tagLinks.map((l) => ({ id: l.tag.id, name: l.tag.name, color: l.tag.color })),
-      last: lm ? { body: lm.body ?? "—", inbound: lm.direction === "IN" } : null,
+      last: lm ? { body: previewText(lm, t.service) || "—", inbound: lm.direction === "IN" } : null,
       updated: shortWhen(lm && lm.at > c.updatedAt ? lm.at : c.updatedAt, t.service.yesterday),
       email: c.email,
       source: c.source,
