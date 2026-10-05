@@ -89,8 +89,21 @@ export async function setFormStatus(formId: string, published: boolean) {
   // node can send it. In DEMO (or without a WABA id) publishing just flips the
   // status, and send_form stays a no-op (metaFlowId null) — nothing breaks.
   if (published && isFlowsConfigured()) {
-    const res = await publishFlow(auth.form);
-    if (!res.ok) return { ok: false as const, error: res.error };
+    const res = await publishFlow({
+      name: auth.form.name,
+      fields: auth.form.fields,
+      metaFlowId: auth.form.metaFlowId,
+    });
+    if (!res.ok) {
+      // The flow may now EXIST on Meta as a draft even though publishing
+      // failed. Remember its id (status stays draft) so the next click updates
+      // that draft instead of asking Meta for a second flow of the same name.
+      if (res.flowId && res.flowId !== auth.form.metaFlowId) {
+        await auth.db.update(formTable).set({ metaFlowId: res.flowId }).where(eq(formTable.id, formId));
+        revalidatePath(`/forms/${formId}`);
+      }
+      return { ok: false as const, error: res.error };
+    }
     await auth.db
       .update(formTable)
       .set({ status: "published", metaFlowId: res.flowId })
