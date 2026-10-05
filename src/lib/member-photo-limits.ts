@@ -15,5 +15,5 @@ export const PHOTO_SOURCE_MAX_BYTES = 20 * 1024 * 1024;
 /** What the server accepts: the shrunk JPEG, with room to spare. */
 export const PHOTO_UPLOAD_MAX_BYTES = 300 * 1024;
 
-export type PhotoError = "signin" | "empty" | "type" | "size" | "save";
+export type PhotoError = "signin" | "forbidden" | "empty" | "type" | "size" | "save";
 export type PhotoResult = { ok: true } | { ok: false; error: PhotoError };
