@@ -2,6 +2,7 @@ import { getDb } from "@/db/client";
 import { getCurrentMember } from "@/lib/current-member";
 import { companyChoices } from "@/lib/companies";
 import { getDict } from "@/lib/i18n/server";
+import { getMyPhotoSrc } from "@/lib/member-photo";
 import type { Dict } from "@/lib/i18n/dict";
 import type { NavKey } from "./shell/nav";
 import { Topbar, type Crumb } from "./Topbar";
@@ -37,7 +38,7 @@ export async function PageChrome({
         mobileTitle={section === "settings" ? undefined : t.nav[section]}
         actions={actions}
         center={center}
-        current={me}
+        current={{ ...me, photo: await getMyPhotoSrc() }}
         companies={await companyChoices(getDb(), me)}
       />
       <main className="scroll-thin min-h-0 flex-1 overflow-y-auto">

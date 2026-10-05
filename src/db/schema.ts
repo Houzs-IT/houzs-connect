@@ -160,6 +160,21 @@ export const member = connect.table(
   })
 );
 
+/**
+ * A staff profile photo (migration 0015). Keyed by the person's lower-cased
+ * email, not a member id: the org sync gives one person a member row per
+ * company, and the photo is theirs in all of them. `data` is a base64 JPEG the
+ * browser has already cropped to 256×256 (src/lib/member-photo.ts). Its own
+ * table rather than a `member` column, so a deploy that lands before the
+ * migration cannot break the member reads that sign-in depends on.
+ */
+export const memberPhoto = connect.table("member_photo", {
+  email: text("email").primaryKey(),
+  data: text("data").notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedBy: text("updated_by"),
+});
+
 export const department = connect.table(
   "department",
   {

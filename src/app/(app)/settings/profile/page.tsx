@@ -4,9 +4,10 @@ import { getDb } from "@/db/client";
 import { company, department, member } from "@/db/schema";
 import { PageChrome } from "@/components/PageChrome";
 import { getCurrentMember } from "@/lib/current-member";
-import { initials, tint } from "@/lib/format";
 import { getDict } from "@/lib/i18n/server";
+import { getMyPhotoSrc } from "@/lib/member-photo";
 import { SetCard, SettingsHead } from "../ui";
+import { PhotoEditor } from "./PhotoEditor";
 
 /** Who the signed-in person is in Connect — all of it from Houzs ERP. */
 export default async function ProfilePage() {
@@ -16,7 +17,7 @@ export default async function ProfilePage() {
   const L = t.set;
   const db = getDb();
   const row = await db.query.member.findFirst({ where: eq(member.id, me.id) });
-  const [dept, boss, grants] = await Promise.all([
+  const [dept, boss, grants, photo] = await Promise.all([
     row?.departmentId ? db.query.department.findFirst({ where: eq(department.id, row.departmentId) }) : null,
     row?.managerId ? db.query.member.findFirst({ where: eq(member.id, row.managerId) }) : null,
     row
@@ -26,8 +27,8 @@ export default async function ProfilePage() {
           .innerJoin(company, eq(company.id, member.companyId))
           .where(and(eq(member.email, row.email), eq(member.active, true)))
       : Promise.resolve([] as { name: string }[]),
+    getMyPhotoSrc(),
   ]);
-  const c = tint(me.name);
   const roles = t.role as Record<string, string>;
   const fields: [string, string][] = [
     [L.name, me.name],
@@ -43,14 +44,9 @@ export default async function ProfilePage() {
       <div className="max-w-[880px] p-4 md:p-6">
         <SettingsHead title={L.profile} sub={L.profileSub} />
         <SetCard title={me.name} sub={row?.email}>
-          <div className="flex flex-col gap-4 border-t border-[var(--color-border-subtle)] p-4 md:flex-row">
-            <span
-              className="grid h-16 w-16 shrink-0 place-items-center rounded-full text-[20px] font-bold"
-              style={{ background: `color-mix(in srgb, ${c} 14%, white)`, color: c }}
-            >
-              {initials(me.name)}
-            </span>
-            <dl className="grid flex-1 gap-x-6 gap-y-4 sm:grid-cols-2">
+          <PhotoEditor name={me.name} photo={photo} />
+          <div className="border-t border-[var(--color-border-subtle)] p-4">
+            <dl className="grid gap-x-6 gap-y-4 sm:grid-cols-2">
               {fields.map(([k, v]) => (
                 <div key={k}>
                   <dt className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--color-faint)]">{k}</dt>

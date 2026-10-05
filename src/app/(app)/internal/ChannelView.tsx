@@ -7,6 +7,7 @@ import { companyChoices } from "@/lib/companies";
 import { getCurrentMember } from "@/lib/current-member";
 import { fmt } from "@/lib/i18n/dict";
 import { getDict } from "@/lib/i18n/server";
+import { photoSrcs } from "@/lib/member-photo";
 import { companyPresence } from "@/lib/presence";
 import { channelInfo, channelMessages, ensureInternal, threadMessages } from "./data";
 import { Composer } from "./Composer";
@@ -28,6 +29,7 @@ export async function ChannelView({ channelId, threadId }: { channelId: string; 
     threadId ? threadMessages(ch.id, threadId) : Promise.resolve([]),
   ]);
   const names = people.map((p) => p.name);
+  const facePhotos = await photoSrcs(people.slice(0, 3).map((p) => p.id));
   const mentionable = people.filter((p) => p.id !== me.id).map((p) => ({ id: p.id, name: p.name }));
   const title = ch.kind === "channel" ? `# ${ch.name}` : ch.name;
   const today = dayKey(new Date());
@@ -54,7 +56,7 @@ export async function ChannelView({ channelId, threadId }: { channelId: string; 
             <span className="flex -space-x-1.5">
               {people.slice(0, 3).map((p) => (
                 <span key={p.id} className="rounded-full ring-2 ring-white">
-                  <Avatar name={p.name} size={20} />
+                  <Avatar name={p.name} photo={facePhotos.get(p.id)} size={20} />
                 </span>
               ))}
             </span>
