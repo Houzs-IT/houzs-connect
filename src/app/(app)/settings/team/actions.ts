@@ -19,6 +19,7 @@ import { getDb } from "@/db/client";
 import { bypassReadCache } from "@/db/fresh";
 import { company, member } from "@/db/schema";
 import { getCurrentMember } from "@/lib/current-member";
+import { photoSrcs } from "@/lib/member-photo";
 import { isAdminRole } from "@/lib/permissions";
 
 const GRANTABLE = ["ADMIN", "MANAGER", "AGENT", "SALES", "VIEWER", "DRIVER"] as const;
@@ -54,6 +55,8 @@ export interface Person {
   reportsTo: string | null;
   /** companyId -> access, only for companies the person can currently read. */
   access: Record<string, PersonAccess>;
+  /** Profile photo URL (lib/member-photo.ts), or null. */
+  photo: string | null;
 }
 export interface TeamView {
   permitted: boolean;
@@ -118,6 +121,7 @@ export async function fetchTeam(): Promise<TeamView> {
         department: m.departmentId ? deptName.get(m.departmentId) ?? null : null,
         reportsTo: m.managerId ? memberName.get(m.managerId) ?? null : null,
         access: {},
+        photo: null,
       };
       byKey.set(key, p);
     }
@@ -139,6 +143,12 @@ export async function fetchTeam(): Promise<TeamView> {
   const RANK = ["SUPER_ADMIN", "OWNER", "ADMIN", "MANAGER", "AGENT", "SALES", "DRIVER"];
   const rank = (r: string) => (RANK.indexOf(r) < 0 ? RANK.length : RANK.indexOf(r));
   const people = [...byKey.values()].sort((a, b) => rank(a.role) - rank(b.role) || a.name.localeCompare(b.name));
+
+  // A photo belongs to the person, so any one of their member rows finds it.
+  const anyRow = (p: Person) => Object.values(p.access)[0]?.memberId;
+  const photos = await photoSrcs(people.map(anyRow));
+  for (const p of people) p.photo = photos.get(anyRow(p) ?? "") ?? null;
+
   return { permitted: true, companies, people };
 }
 

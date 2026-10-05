@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { PersonAvatar } from "@/components/PersonAvatar";
 import { initials, tint } from "@/lib/format";
 import { fmt, type Dict } from "@/lib/i18n/dict";
 import type { Card, ChatMessage } from "./data";
@@ -12,15 +13,17 @@ const TZ = "Asia/Kuala_Lumpur";
 export const hhmm = (d: Date) => d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", timeZone: TZ });
 export const dayKey = (d: Date) => d.toLocaleDateString("en-CA", { timeZone: TZ });
 
-export function Avatar({ name, size = 32 }: { name: string; size?: number }) {
+export function Avatar({ name, photo, size = 32 }: { name: string; photo?: string | null; size?: number }) {
   const c = tint(name);
   return (
-    <span
-      className="grid shrink-0 place-items-center rounded-full font-bold text-white"
-      style={{ width: size, height: size, background: c, fontSize: size >= 32 ? 11 : 9.5 }}
-    >
-      {initials(name).toUpperCase()}
-    </span>
+    <PersonAvatar name={name} photo={photo} size={size}>
+      <span
+        className="grid shrink-0 place-items-center rounded-full font-bold text-white"
+        style={{ width: size, height: size, background: c, fontSize: size >= 32 ? 11 : 9.5 }}
+      >
+        {initials(name).toUpperCase()}
+      </span>
+    </PersonAvatar>
   );
 }
 
@@ -129,7 +132,7 @@ export function MessageRow({
 }) {
   return (
     <div className={`flex gap-3 px-5 py-2.5 ${active ? "bg-[var(--color-accent-soft)]/50" : "hover:bg-[var(--color-surface-2)]/60"}`}>
-      <Avatar name={m.author} size={compactCard ? 28 : 34} />
+      <Avatar name={m.author} photo={m.authorPhoto} size={compactCard ? 28 : 34} />
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-baseline gap-x-2">
           <span className="text-[13.5px] font-semibold text-[var(--color-ink)]">{m.author}</span>

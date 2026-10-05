@@ -12,6 +12,7 @@ import { ensureContactColumns } from "@/db/ensure";
 import { ensureChannelColumns } from "@/db/ensure-channel";
 import { conversation } from "@/db/schema";
 import { getCurrentMember } from "@/lib/current-member";
+import { getMyPhotoSrc } from "@/lib/member-photo";
 import { bypassReadCache } from "@/db/fresh";
 import {
   conversationCompanyWhere,
@@ -76,7 +77,7 @@ export default async function AppLayout({
       <NotifyPoller />
       <div data-shell className="flex h-dvh flex-col overflow-hidden">
         <div className="flex min-h-0 flex-1">
-          <Sidebar unread={unread} live={live} me={{ name: me.name }} />
+          <Sidebar unread={unread} live={live} me={{ name: me.name, photo: await getMyPhotoSrc() }} />
           <div className="flex min-w-0 flex-1">{children}</div>
         </div>
         <MobileTabBar unread={unread} />

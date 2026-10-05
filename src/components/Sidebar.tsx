@@ -3,6 +3,7 @@
 import Link, { useLinkStatus } from "next/link";
 import { usePathname } from "next/navigation";
 import { initials, tint } from "@/lib/format";
+import { PersonAvatar } from "./PersonAvatar";
 import { useShell } from "./shell/ShellProvider";
 import { NAV, SETTINGS_NAV, isActive, type NavItem } from "./shell/nav";
 
@@ -63,7 +64,7 @@ export function Sidebar({
 }: {
   unread?: number;
   live?: boolean;
-  me: { name: string };
+  me: { name: string; photo?: string | null };
 }) {
   const path = usePathname();
   const { t } = useShell();
@@ -109,13 +110,16 @@ export function Sidebar({
             live ? "bg-[var(--color-success)]" : "bg-[var(--color-rail-faint)]"
           }`}
         />
-        <span
-          title={me.name}
-          className="grid h-8 w-8 place-items-center rounded-full text-[11px] font-semibold text-white"
-          style={{ background: tint(me.name) }}
-        >
-          {initials(me.name).toUpperCase()}
-        </span>
+        <Link href="/settings/profile" title={me.name} aria-label={me.name} className="block rounded-full">
+          <PersonAvatar name={me.name} photo={me.photo} size={32}>
+            <span
+              className="grid h-8 w-8 place-items-center rounded-full text-[11px] font-semibold text-white"
+              style={{ background: tint(me.name) }}
+            >
+              {initials(me.name).toUpperCase()}
+            </span>
+          </PersonAvatar>
+        </Link>
       </div>
     </aside>
   );

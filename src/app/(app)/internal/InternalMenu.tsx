@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { getCurrentMember } from "@/lib/current-member";
 import { getDict } from "@/lib/i18n/server";
+import { photoSrcs } from "@/lib/member-photo";
 import { companyPresence } from "@/lib/presence";
 import { ensureInternal, sidebar } from "./data";
 import { NavLink } from "./NavLink";
@@ -29,7 +30,10 @@ export async function InternalMenu({ mobile = false }: { mobile?: boolean }) {
   await ensureInternal(me.companyId, me.id);
   const [side, people] = await Promise.all([sidebar(me.companyId, me.id), companyPresence(me.companyId)]);
   const online = new Map(people.map((p) => [p.id, p.online]));
-  const others = people.filter((p) => p.id !== me.id).map((p) => ({ id: p.id, name: p.name, online: p.online }));
+  const photos = await photoSrcs([...people.map((p) => p.id), ...side.dms.map((d) => d.otherId)]);
+  const others = people
+    .filter((p) => p.id !== me.id)
+    .map((p) => ({ id: p.id, name: p.name, online: p.online, photo: photos.get(p.id) ?? null }));
 
   // "Houzs Century_Azza" -> "Azza", "Peter Lim" -> "Peter".
   const short = (n: string) => (n.split("_").pop() ?? n).split(" ")[0];
@@ -74,7 +78,7 @@ export async function InternalMenu({ mobile = false }: { mobile?: boolean }) {
             row(
               `/internal/${d.id}`,
               <span className="relative shrink-0">
-                <Avatar name={d.otherName} size={40} />
+                <Avatar name={d.otherName} photo={photos.get(d.otherId)} size={40} />
                 <span
                   className={`absolute bottom-0 right-0 h-2.5 w-2.5 rounded-full border-2 border-white ${
                     online.get(d.otherId) ? "bg-[var(--color-success)]" : "bg-[var(--color-border-strong)]"
@@ -136,7 +140,7 @@ export async function InternalMenu({ mobile = false }: { mobile?: boolean }) {
         {side.dms.map((d) => (
           <NavLink key={d.id} href={`/internal/${d.id}`}>
             <span className="relative">
-              <Avatar name={d.otherName} size={20} />
+              <Avatar name={d.otherName} photo={photos.get(d.otherId)} size={20} />
               {online.get(d.otherId) && (
                 <span className="absolute -bottom-0.5 -right-0.5 h-2 w-2 rounded-full border border-white bg-[var(--color-success)]" />
               )}

@@ -1,11 +1,12 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { logout } from "@/app/login/actions";
 import { switchCompany } from "@/app/company-actions";
 import type { CompanyChoice } from "@/lib/companies";
-import { initials, tint } from "@/lib/format";
+import { PersonAvatar } from "../PersonAvatar";
 import { IconChevronDown, IconLogout, IconPanelOpen } from "../icons";
 import { useShell } from "./ShellProvider";
 
@@ -138,15 +139,8 @@ export function CompanySwitcher({ companies, className = "" }: { companies?: Com
   );
 }
 
-export function Avatar({ name, size = 32 }: { name: string; size?: number }) {
-  return (
-    <span
-      className="grid shrink-0 place-items-center rounded-full font-semibold text-white"
-      style={{ background: tint(name), width: size, height: size, fontSize: size >= 32 ? 12 : 11 }}
-    >
-      {initials(name).toUpperCase()}
-    </span>
-  );
+export function Avatar({ name, photo, size = 32 }: { name: string; photo?: string | null; size?: number }) {
+  return <PersonAvatar name={name} photo={photo} size={size} fontSize={size >= 32 ? 12 : size >= 24 ? 11 : undefined} />;
 }
 
 /**
@@ -158,7 +152,7 @@ export function UserMenu({
   current,
   companies,
 }: {
-  current: { name: string; role: string; department?: string | null };
+  current: { name: string; role: string; department?: string | null; photo?: string | null };
   companies?: CompanyChoice[];
 }) {
   const { t } = useShell();
@@ -192,7 +186,7 @@ export function UserMenu({
         onClick={() => setOpen((v) => !v)}
         className="flex items-center gap-2 rounded-[8px] py-1 pl-1 pr-1.5 text-left transition-colors hover:bg-[var(--color-surface-2)]"
       >
-        <Avatar name={current.name} />
+        <Avatar name={current.name} photo={current.photo} />
         <span className="hidden leading-[1.25] sm:block">
           <span className="block text-[13px] font-medium text-[var(--color-ink)]">{current.name}</span>
           <span className="block text-[11px] text-[var(--color-faint)]">{sub}</span>
@@ -230,6 +224,15 @@ export function UserMenu({
               <div className="my-1 border-t border-[var(--color-border-subtle)]" />
             </div>
           )}
+          <Link
+            href="/settings/profile"
+            role="menuitem"
+            onClick={() => setOpen(false)}
+            className="flex w-full items-center gap-2 px-3 py-2 text-left text-[13px] text-[var(--color-muted)] hover:bg-[var(--color-surface-2)] hover:text-[var(--color-ink)]"
+          >
+            <Avatar name={current.name} photo={current.photo} size={16} />
+            {t.shell.myProfile}
+          </Link>
           <form action={logout}>
             <button
               type="submit"

@@ -1,5 +1,6 @@
 import { initials, tint } from "@/lib/format";
 import type { Dict } from "@/lib/i18n/dict";
+import { PersonAvatar } from "@/components/PersonAvatar";
 import { toggleAccess, type Person, type TeamCompany } from "./actions";
 import { syncFromErp } from "../sync-actions";
 import { RoleSelect } from "./RoleSelect";
@@ -56,12 +57,14 @@ export function TeamClient({
                 <tr key={p.key} className="border-b border-[var(--color-border-subtle)] align-middle last:border-0">
                   <td className="px-4 py-2.5">
                     <div className="flex items-center gap-2.5">
-                      <span
-                        className="grid h-8 w-8 shrink-0 place-items-center rounded-full text-[11px] font-bold"
-                        style={{ background: `color-mix(in srgb, ${c} 14%, white)`, color: c }}
-                      >
-                        {initials(p.name)}
-                      </span>
+                      <PersonAvatar name={p.name} photo={p.photo} size={32}>
+                        <span
+                          className="grid h-8 w-8 shrink-0 place-items-center rounded-full text-[11px] font-bold"
+                          style={{ background: `color-mix(in srgb, ${c} 14%, white)`, color: c }}
+                        >
+                          {initials(p.name)}
+                        </span>
+                      </PersonAvatar>
                       <span className="min-w-0">
                         <span className="block truncate font-semibold text-[var(--color-ink)]">{p.name}</span>
                         <span className="block truncate font-code text-[11px] text-[var(--color-faint)]">{p.email}</span>

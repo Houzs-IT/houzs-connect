@@ -1,6 +1,7 @@
 "use server";
 
 import { getCurrentMember } from "@/lib/current-member";
+import { photoSrcs } from "@/lib/member-photo";
 import { ONLINE_WINDOW_MS, recentPresence, touchPresence } from "@/lib/presence";
 
 /** Heartbeat from an open Connect tab — keeps the member "online", and notes
@@ -12,7 +13,15 @@ export async function pingPresence(path?: string): Promise<void> {
   await touchPresence(me.id, ok ? path : null);
 }
 
-export type PresenceMember = { id: string; name: string; role: string; lastSeen: string; lastPath: string | null };
+export type PresenceMember = {
+  id: string;
+  name: string;
+  role: string;
+  lastSeen: string;
+  lastPath: string | null;
+  /** Profile photo URL (lib/member-photo.ts), or null. */
+  photo: string | null;
+};
 export type TeamPresence = { active: PresenceMember[]; away: PresenceMember[] };
 
 /**
@@ -24,12 +33,14 @@ export async function teamPresence(): Promise<TeamPresence> {
   if (!me) return { active: [], away: [] };
   const now = Date.now();
   const people = (await recentPresence(me.companyId)).filter((p) => p.id !== me.id);
+  const photos = await photoSrcs(people.map((p) => p.id));
   const toMember = (p: (typeof people)[number]): PresenceMember => ({
     id: p.id,
     name: p.name,
     role: p.role,
     lastSeen: p.lastSeen.toISOString(),
     lastPath: p.lastPath,
+    photo: photos.get(p.id) ?? null,
   });
   return {
     active: people.filter((p) => now - p.lastSeen.getTime() < ONLINE_WINDOW_MS).map(toMember),

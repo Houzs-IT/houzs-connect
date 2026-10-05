@@ -8,7 +8,7 @@ import { createChannel, openDm } from "./actions";
 import { Avatar } from "./parts";
 
 /** The pencil in the Internal menu: start a DM with a colleague, or make a channel. */
-export function NewChat({ people }: { people: { id: string; name: string; online: boolean }[] }) {
+export function NewChat({ people }: { people: { id: string; name: string; online: boolean; photo: string | null }[] }) {
   const router = useRouter();
   const { t } = useShell();
   const L = t.internal;
@@ -72,7 +72,7 @@ export function NewChat({ people }: { people: { id: string; name: string; online
                     onClick={() => start(async () => go(await openDm(p.id)))}
                     className="flex w-full items-center gap-2.5 rounded-[8px] px-2 py-2 text-left text-[13px] hover:bg-[var(--color-surface-2)]"
                   >
-                    <Avatar name={p.name} size={26} />
+                    <Avatar name={p.name} photo={p.photo} size={26} />
                     <span className="flex-1 truncate text-[var(--color-ink)]">{p.name}</span>
                     {p.online && <span className="h-2 w-2 rounded-full bg-[var(--color-success)]" title={L.online} />}
                   </button>

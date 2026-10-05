@@ -6,6 +6,7 @@ import { useEffect, useRef, useState } from "react";
 import { teamPresence, type PresenceMember, type TeamPresence } from "@/app/presence-actions";
 import { fmt } from "@/lib/i18n/dict";
 import { initials, tint } from "@/lib/format";
+import { PersonAvatar } from "../PersonAvatar";
 import { useShell } from "./ShellProvider";
 
 /**
@@ -195,12 +196,14 @@ export function OnlinePeople({ className = "" }: { className?: string }) {
                         }`}
                       >
                         <span className="relative shrink-0">
-                          <span
-                            className="grid h-[30px] w-[30px] place-items-center rounded-full text-[10.5px] font-semibold text-white"
-                            style={{ background: tint(m.name) }}
-                          >
-                            {initials(m.name).toUpperCase()}
-                          </span>
+                          <PersonAvatar name={m.name} photo={m.photo} size={30}>
+                            <span
+                              className="grid h-[30px] w-[30px] place-items-center rounded-full text-[10.5px] font-semibold text-white"
+                              style={{ background: tint(m.name) }}
+                            >
+                              {initials(m.name).toUpperCase()}
+                            </span>
+                          </PersonAvatar>
                           <span className="absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full bg-[var(--color-success)] ring-2 ring-[var(--color-surface)]" />
                         </span>
                         <span className="min-w-0 flex-1">
@@ -234,9 +237,11 @@ export function OnlinePeople({ className = "" }: { className?: string }) {
                     {away.map((m) => (
                       <div key={m.id} className="flex items-center gap-3 rounded-[8px] px-2.5 py-2 hover:bg-[var(--color-surface-2)]">
                         <span className="relative shrink-0">
-                          <span className="grid h-[30px] w-[30px] place-items-center rounded-full border border-[var(--color-border)] bg-[var(--color-surface-2)] text-[10.5px] font-semibold text-[var(--color-faint)]">
-                            {initials(m.name).toUpperCase()}
-                          </span>
+                          <PersonAvatar name={m.name} photo={m.photo} size={30} className="opacity-60 grayscale">
+                            <span className="grid h-[30px] w-[30px] place-items-center rounded-full border border-[var(--color-border)] bg-[var(--color-surface-2)] text-[10.5px] font-semibold text-[var(--color-faint)]">
+                              {initials(m.name).toUpperCase()}
+                            </span>
+                          </PersonAvatar>
                           <span className="absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border-2 border-[var(--color-faint)] bg-[var(--color-surface)]" />
                         </span>
                         <span className="min-w-0 flex-1">

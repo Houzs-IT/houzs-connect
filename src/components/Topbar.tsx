@@ -32,7 +32,7 @@ export function Topbar({
   actions?: React.ReactNode;
   /** Phone title; defaults to the last crumb. */
   mobileTitle?: string;
-  current: { name: string; role: string; department?: { name: string } | null };
+  current: { name: string; role: string; department?: { name: string } | null; photo?: string | null };
   /** Companies this person may work in (src/lib/companies.ts). The switcher
    *  only appears when there is somewhere else to go. */
   companies?: CompanyChoice[];
@@ -78,7 +78,12 @@ export function Topbar({
         <OnlinePeople className="hidden md:block" />
         <NotifyBell />
         <UserMenu
-          current={{ name: current.name, role: current.role, department: current.department?.name }}
+          current={{
+            name: current.name,
+            role: current.role,
+            department: current.department?.name,
+            photo: current.photo,
+          }}
           companies={companies}
         />
       </div>

@@ -2,6 +2,7 @@ import { createId } from "@paralleldrive/cuid2";
 import { sql } from "drizzle-orm";
 import { getDb } from "@/db/client";
 import { ensureInternalTables } from "@/db/ensure-internal";
+import { photoSrcs } from "@/lib/member-photo";
 import { SLA_MINUTES } from "@/lib/sla";
 
 /*
@@ -164,6 +165,8 @@ export type ChatMessage = {
   id: string;
   authorId: string | null;
   author: string;
+  /** The author's profile photo (lib/member-photo.ts), or null. */
+  authorPhoto: string | null;
   dept: string | null;
   body: string;
   createdAt: Date;
@@ -203,6 +206,7 @@ function toMessage(r: Row): ChatMessage {
     id: r.id as string,
     authorId: (r.author_member_id as string | null) ?? null,
     author: r.author as string,
+    authorPhoto: null, // filled by withPhotos
     dept: (r.dept as string | null) ?? null,
     body: r.body as string,
     createdAt: new Date(r.created_at as string),
@@ -229,6 +233,13 @@ function toMessage(r: Row): ChatMessage {
     lastReplyAt: r.last_reply_at ? new Date(r.last_reply_at as string) : null,
     replyAuthors: (r.reply_authors as string[] | null) ?? [],
   };
+}
+
+/** Each author's profile photo — one lookup per timeline, not per message. */
+async function withPhotos<T extends ChatMessage>(msgs: T[]): Promise<T[]> {
+  const photos = await photoSrcs(msgs.map((m) => m.authorId));
+  for (const m of msgs) m.authorPhoto = (m.authorId && photos.get(m.authorId)) || null;
+  return msgs;
 }
 
 export async function channelInfo(companyId: string, channelId: string, meId: string) {
@@ -259,7 +270,7 @@ export async function channelMessages(channelId: string, limit = 200): Promise<C
       limit ${limit}
     ) t order by created_at asc
   `);
-  return r.map(toMessage);
+  return withPhotos(r.map(toMessage));
 }
 
 /** A thread: the root message and every reply, oldest first. */
@@ -271,7 +282,7 @@ export async function threadMessages(channelId: string, rootId: string): Promise
     where m.channel_id = ${channelId} and (m.id = ${rootId} or m.parent_id = ${rootId})
     order by (m.id <> ${rootId}), m.created_at asc
   `);
-  return r.map(toMessage);
+  return withPhotos(r.map(toMessage));
 }
 
 /** Search every channel I can see. */
@@ -287,7 +298,7 @@ export async function searchMessages(companyId: string, meId: string, q: string)
     order by m.created_at desc
     limit 50
   `);
-  return r.map((x) => ({ ...toMessage(x), channelId: x.channel_id as string, channelName: x.channel_name as string }));
+  return withPhotos(r.map((x) => ({ ...toMessage(x), channelId: x.channel_id as string, channelName: x.channel_name as string })));
 }
 
 /** Mark a channel read for me (creates my row on first visit). */
