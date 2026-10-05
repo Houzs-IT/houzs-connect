@@ -55,6 +55,24 @@ function resolveSecrets(
   });
 }
 
+/** A Worker Service Binding (`env.<NAME>.fetch`) to call instead of the network. */
+export interface RestFetcher {
+  fetch: (input: string | Request, init?: RequestInit) => Promise<Response>;
+}
+
+/**
+ * Hosts whose calls go over a Service Binding instead of the public network,
+ * keyed by hostname. The ERP's /api/* is a Workers ROUTE on a Pages origin on
+ * the same zone as Connect; three live runs (2026-10-05) saw the plain fetch
+ * answered "400, empty body" by something before the ERP worker (its live tail
+ * never showed the request), with the runtime fetch AND the
+ * global_fetch_strictly_public flag making no difference. A binding is a direct
+ * Worker-to-Worker call on the account: no DNS, no zone routing, no edge in the
+ * way. The URL is passed through unchanged, so the ERP's router still sees
+ * https://erp.houzscentury.com/api/chat-callback.
+ */
+export type RestBindings = Record<string, RestFetcher | undefined>;
+
 export interface RestCallResult {
   method: string;
   /** Interpolated URL, as actually requested (or attempted). */
@@ -70,6 +88,22 @@ export interface RestCallResult {
   error?: string;
   /** `{secret:NAME}` header references that resolved to nothing. */
   missingSecrets?: string[];
+  /** Present on a non-2xx: enough response headers to tell WHO answered —
+   *  `cf-ray`/`server` mean Cloudflare's edge, `x-request-id` means the ERP
+   *  worker itself. Never the request headers (they carry the secret). */
+  responseHeaders?: Record<string, string>;
+  /** "binding:<host>" when the call went over a Service Binding. */
+  via?: string;
+}
+
+const DIAG_HEADERS = ["cf-ray", "server", "x-request-id", "content-type", "cf-cache-status"];
+function diagHeaders(res: Response): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const k of DIAG_HEADERS) {
+    const v = res.headers.get(k);
+    if (v) out[k] = v;
+  }
+  return out;
 }
 
 function truncate(s: string, max: number): string {
@@ -135,7 +169,7 @@ function hasHeader(headers: Record<string, string>, name: string): boolean {
 export async function callRestApi(
   data: NonNullable<FlowNode["data"]> | undefined,
   ctx: VarContext,
-  opts?: { timeoutMs?: number; secrets?: RestSecrets }
+  opts?: { timeoutMs?: number; secrets?: RestSecrets; bindings?: RestBindings }
 ): Promise<RestCallResult> {
   const d = data ?? {};
   const method = String(d.method ?? "POST").trim().toUpperCase() || "POST";
@@ -168,10 +202,14 @@ export async function callRestApi(
     headers["Content-Type"] = looksJson ? "application/json" : "text/plain;charset=UTF-8";
   }
 
+  // A Service Binding for this host wins over the network (see RestBindings).
+  // Otherwise rawFetch, not fetch: Next's wrapper is one more thing between us
+  // and the wire (see lib/raw-fetch.ts).
+  const binding = opts?.bindings?.[parsed.hostname.toLowerCase()];
+  const via = binding ? { via: `binding:${parsed.hostname.toLowerCase()}` } : {};
+  const doFetch = binding ? binding.fetch.bind(binding) : rawFetch();
   try {
-    // rawFetch, not fetch: through Next's wrapper this POST came back as an
-    // empty 400 that never reached the ERP (see lib/raw-fetch.ts).
-    const res = await rawFetch()(url, {
+    const res = await doFetch(url, {
       method,
       headers,
       body: sendBody ? body : undefined,
@@ -188,11 +226,12 @@ export async function callRestApi(
     return {
       ...base,
       ...missingSecrets,
+      ...via,
       ok: res.ok,
       status: res.status,
       text: capped,
       snippet: truncate(text, REST_LOG_SNIPPET_CHARS),
-      ...(res.ok ? {} : { error: `HTTP ${res.status}` }),
+      ...(res.ok ? {} : { error: `HTTP ${res.status}`, responseHeaders: diagHeaders(res) }),
     };
   } catch (e) {
     const err = e as { name?: string; message?: string };
@@ -200,6 +239,7 @@ export async function callRestApi(
     return {
       ...base,
       ...missingSecrets,
+      ...via,
       error: timedOut
         ? `timeout after ${opts?.timeoutMs ?? REST_TIMEOUT_MS}ms`
         : truncate(err?.message ?? String(e), REST_LOG_SNIPPET_CHARS),

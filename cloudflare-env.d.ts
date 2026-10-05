@@ -41,4 +41,9 @@ interface CloudflareEnv {
   // `{secret:ERP_CALLBACK_KEY}` (see src/lib/automation/rest.ts); never an
   // attribute, never in a body.
   ERP_CALLBACK_KEY?: string;
+
+  // Service Binding to the ERP worker (autocount-sync-api, same account). The
+  // automation engine's call_rest_api uses it for erp.houzscentury.com instead
+  // of a network fetch — see src/lib/automation/rest.ts RestBindings for why.
+  ERP?: { fetch: (input: string | Request, init?: RequestInit) => Promise<Response> };
 }

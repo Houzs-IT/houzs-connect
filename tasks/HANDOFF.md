@@ -387,8 +387,10 @@ in `REST_HEADER_SECRETS`, never from a contact attribute). It must equal the ERP
 
 Same-zone gotcha: `erp.houzscentury.com/api/*` is a Workers **Route** on a Pages origin, and
 a Worker's `fetch()` to its own zone bypasses Routes (Cloudflare docs). Connect therefore
-runs with the `global_fetch_strictly_public` compatibility flag (wrangler.toml) so its
-calls to the ERP go through the front door and reach the ERP worker. Keep the flag.
+runs with the `global_fetch_strictly_public` compatibility flag (wrangler.toml) — and, because
+that still left the callback POST dying as an empty 400 before the ERP worker, the engine now
+calls `erp.houzscentury.com` over a **Service Binding** (`[[services]] ERP -> autocount-sync-api`,
+`src/lib/automation/rest.ts` RestBindings). Keep both.
 
 The two webhook secrets guard `POST /api/webhooks/erp` and `/api/webhooks/driver`
 (`src/lib/webhook-auth.ts`). Callers send `x-connect-key: <secret>` or

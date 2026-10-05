@@ -12,7 +12,8 @@ import {
   tag as tagTable,
 } from "@/db/schema";
 import { asGraph, type FlowGraph, type FlowNode } from "./types";
-import { callRestApi, type RestSecrets } from "./rest";
+import { callRestApi, type RestBindings, type RestSecrets } from "./rest";
+import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { interpolate } from "./vars";
 import { attrs } from "@/lib/format";
 import { getOrCreateConversation, sendOutbound } from "@/lib/whatsapp/transport";
@@ -26,6 +27,20 @@ import { generateAgentReply } from "@/lib/ai";
  */
 
 const MAX_STEPS = 100; // safety against cycles
+
+/** Hostnames served by the ERP worker, all answered by the one ERP binding. */
+const ERP_HOSTS = ["erp.houzscentury.com"];
+
+function erpBindings(): RestBindings {
+  let erp: CloudflareEnv["ERP"];
+  try {
+    erp = getCloudflareContext().env.ERP;
+  } catch {
+    erp = undefined; // not inside the Worker (seed script, tests)
+  }
+  if (!erp) return {};
+  return Object.fromEntries(ERP_HOSTS.map((h) => [h, erp]));
+}
 const MAX_JUMP_DEPTH = 10; // safety against jump_to_automation chains forming a cycle
 
 function nextNodeId(
@@ -315,7 +330,10 @@ async function execNode(
       // pure. ERP_CALLBACK_KEY = the ERP's CHAT_CALLBACK_KEY, which
       // /api/chat-callback checks as X-Chat-Key.
       const secrets: RestSecrets = { ERP_CALLBACK_KEY: process.env.ERP_CALLBACK_KEY };
-      const res = await callRestApi(d, varCtx, { secrets });
+      // The ERP over its Service Binding when the Worker has one (wrangler.toml
+      // [[services]] ERP -> autocount-sync-api); absent in local dev / scripts,
+      // where the call simply goes over the network.
+      const res = await callRestApi(d, varCtx, { secrets, bindings: erpBindings() });
       await logStep(ctx.runId, {
         node: node.id,
         type: node.type,

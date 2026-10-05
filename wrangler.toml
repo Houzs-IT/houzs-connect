@@ -40,6 +40,15 @@ custom_domain = true
 directory = ".open-next/assets"
 binding = "ASSETS"
 
+# Direct Worker-to-Worker call to the ERP API worker on this account. The
+# automation engine's call_rest_api uses it for erp.houzscentury.com (the
+# delivery flows' {callback_url}); over the network that POST was answered
+# "400, empty body" before the ERP worker ever saw it (2026-10-05). Only this
+# Worker calls out; the ERP worker needs no change.
+[[services]]
+binding = "ERP"
+service = "autocount-sync-api"
+
 [vars]
 # LIVE since 2026-08-15: the Meta app, WABA and number are set up and the four
 # WHATSAPP_* secrets are on the Worker, so sends go out over the Cloud API for
