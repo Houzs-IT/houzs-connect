@@ -21,6 +21,39 @@ export const REST_LOG_SNIPPET_CHARS = 500;
 /** Contact attributes are JSON columns rendered in the UI — bound them too. */
 export const REST_SAVE_MAX_CHARS = 2_000;
 
+/**
+ * Worker secrets a header value may name as `{secret:NAME}`. Only these names
+ * resolve — a flow is operator-editable JSON and must not be able to read an
+ * arbitrary env var into an outbound request. Each one is documented in
+ * cloudflare-env.d.ts.
+ */
+export const REST_HEADER_SECRETS = ["ERP_CALLBACK_KEY"] as const;
+export type RestHeaderSecret = (typeof REST_HEADER_SECRETS)[number];
+export type RestSecrets = Partial<Record<RestHeaderSecret, string | undefined>>;
+
+const SECRET_REF = /\{secret:([A-Z0-9_]+)\}/g;
+
+/**
+ * Replace `{secret:NAME}` in a header value with the Worker secret of that
+ * name. Unknown or unset names resolve to "" and are reported, so a missing
+ * secret shows up in the run log as missingSecrets rather than as a bare 401
+ * from the far end. Never applied to the URL or body: a secret belongs in a
+ * header, and interpolating it into a logged body would write it into the run
+ * log.
+ */
+function resolveSecrets(
+  value: string,
+  secrets: RestSecrets | undefined,
+  missing: Set<string>
+): string {
+  return value.replace(SECRET_REF, (_m, name: string) => {
+    const allowed = (REST_HEADER_SECRETS as readonly string[]).includes(name);
+    const v = allowed ? secrets?.[name as RestHeaderSecret] : undefined;
+    if (!v) missing.add(name);
+    return v ?? "";
+  });
+}
+
 export interface RestCallResult {
   method: string;
   /** Interpolated URL, as actually requested (or attempted). */
@@ -34,6 +67,8 @@ export interface RestCallResult {
   snippet: string;
   /** Present only on failure: why the call did not succeed. */
   error?: string;
+  /** `{secret:NAME}` header references that resolved to nothing. */
+  missingSecrets?: string[];
 }
 
 function truncate(s: string, max: number): string {
@@ -45,12 +80,18 @@ function truncate(s: string, max: number): string {
  * object (imported graphs), or `Key: value` lines (what people actually type).
  * Values are interpolated so a flow can pass e.g. a token attribute.
  */
-function parseHeaders(raw: unknown, ctx: VarContext): Record<string, string> {
+function parseHeaders(
+  raw: unknown,
+  ctx: VarContext,
+  secrets: RestSecrets | undefined,
+  missing: Set<string>
+): Record<string, string> {
   const out: Record<string, string> = {};
+  const value = (v: string) => resolveSecrets(interpolate(v, ctx), secrets, missing);
   const take = (obj: Record<string, unknown>) => {
     for (const [k, v] of Object.entries(obj)) {
       if (v == null) continue;
-      out[k.trim()] = interpolate(String(v), ctx);
+      out[k.trim()] = value(String(v));
     }
   };
 
@@ -75,7 +116,7 @@ function parseHeaders(raw: unknown, ctx: VarContext): Record<string, string> {
   for (const line of text.split(/\r?\n/)) {
     const idx = line.indexOf(":");
     if (idx <= 0) continue;
-    out[line.slice(0, idx).trim()] = interpolate(line.slice(idx + 1).trim(), ctx);
+    out[line.slice(0, idx).trim()] = value(line.slice(idx + 1).trim());
   }
   return out;
 }
@@ -93,7 +134,7 @@ function hasHeader(headers: Record<string, string>, name: string): boolean {
 export async function callRestApi(
   data: NonNullable<FlowNode["data"]> | undefined,
   ctx: VarContext,
-  opts?: { timeoutMs?: number }
+  opts?: { timeoutMs?: number; secrets?: RestSecrets }
 ): Promise<RestCallResult> {
   const d = data ?? {};
   const method = String(d.method ?? "POST").trim().toUpperCase() || "POST";
@@ -114,7 +155,9 @@ export async function callRestApi(
     return { ...base, error: `unsupported protocol ${parsed.protocol}` };
   }
 
-  const headers = parseHeaders(d.headers, ctx);
+  const missing = new Set<string>();
+  const headers = parseHeaders(d.headers, ctx, opts?.secrets, missing);
+  const missingSecrets = missing.size ? { missingSecrets: [...missing] } : {};
   const rawBody = typeof d.body === "string" ? d.body : "";
   const body = rawBody ? interpolate(rawBody, ctx) : "";
   // GET/HEAD cannot carry a body; sending one makes fetch throw.
@@ -141,6 +184,7 @@ export async function callRestApi(
     const capped = truncate(text, REST_SAVE_MAX_CHARS);
     return {
       ...base,
+      ...missingSecrets,
       ok: res.ok,
       status: res.status,
       text: capped,
@@ -152,6 +196,7 @@ export async function callRestApi(
     const timedOut = err?.name === "TimeoutError" || err?.name === "AbortError";
     return {
       ...base,
+      ...missingSecrets,
       error: timedOut
         ? `timeout after ${opts?.timeoutMs ?? REST_TIMEOUT_MS}ms`
         : truncate(err?.message ?? String(e), REST_LOG_SNIPPET_CHARS),

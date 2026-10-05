@@ -11,6 +11,10 @@ export interface VarContext {
   source?: string | null;
   sourceId?: string | null;
   sourceUrl?: string | null;
+  /** The AutomationRun id, when interpolating inside a run. Lets a
+   *  call_rest_api body carry an idempotency key ({run_id}) that is the same on
+   *  a retry of the same step and different for every conversation. */
+  run_id?: string | null;
 }
 
 /**
@@ -50,6 +54,7 @@ function buildLookup(ctx: VarContext): Record<string, string> {
     source: ctx.source ?? "",
     source_id: ctx.sourceId ?? "",
     source_url: ctx.sourceUrl ?? "",
+    run_id: ctx.run_id ?? "",
   };
 }
 
