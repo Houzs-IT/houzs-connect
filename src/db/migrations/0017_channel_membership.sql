@@ -4,7 +4,8 @@
 -- (a request a channel admin or a company admin approves). Null marks a
 -- channel made before membership existed; the app settles those once
 -- (internal/data.ts settleMembership): a department channel keeps that
--- department plus the company's admins and needs approval, #general keeps
+-- department plus the company's admins (0019 later dropped the admins) and
+-- needs approval, #general keeps
 -- everyone and is open, any other channel keeps whoever already had it open.
 --
 -- internal_channel_member.state: 'member' or 'pending' (a request to join).

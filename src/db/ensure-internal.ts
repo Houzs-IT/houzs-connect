@@ -68,6 +68,9 @@ async function run(db: DB): Promise<void> {
   // and data.ts settles its members once. A member row is a member or a
   // pending request, and an admin of the channel or not.
   await db.execute(sql`ALTER TABLE "connect"."internal_channel" ADD COLUMN IF NOT EXISTS "access" text`);
+  // Which membership rule a channel was settled under (migration 0019): 2 =
+  // department channels hold the department only, not every company admin.
+  await db.execute(sql`ALTER TABLE "connect"."internal_channel" ADD COLUMN IF NOT EXISTS "settled" integer DEFAULT 0 NOT NULL`);
   await db.execute(sql`ALTER TABLE "connect"."internal_channel_member" ADD COLUMN IF NOT EXISTS "state" text DEFAULT 'member' NOT NULL`);
   await db.execute(sql`ALTER TABLE "connect"."internal_channel_member" ADD COLUMN IF NOT EXISTS "role" text DEFAULT 'member' NOT NULL`);
   await db.execute(sql`ALTER TABLE "connect"."internal_channel_member" ADD COLUMN IF NOT EXISTS "requested_at" timestamp with time zone`);
