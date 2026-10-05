@@ -527,6 +527,12 @@ export const internalChannel = connect.table(
     access: text("access"),
     /** Membership rule the channel was settled under (2 = department channels hold the department only). */
     settled: integer("settled").notNull().default(0),
+    /** The channel's photo: a small JPEG data URL. */
+    icon: text("icon"),
+    /** Who may edit name / photo / description, post, add people: "all" or "admins". */
+    permEdit: text("perm_edit").notNull().default("admins"),
+    permPost: text("perm_post").notNull().default("all"),
+    permAdd: text("perm_add").notNull().default("admins"),
     name: text("name").notNull(),
     topic: text("topic"),
     departmentId: text("department_id"),
@@ -548,6 +554,8 @@ export const internalChannelMember = connect.table("internal_channel_member", {
   /** "admin" manages the channel's members and settings; "member" does not. */
   role: text("role").notNull().default("member"),
   requestedAt: timestamp("requested_at", { withTimezone: true }),
+  /** No unread count or notifications for this member. */
+  muted: boolean("muted").notNull().default(false),
 });
 
 export const internalMessage = connect.table(

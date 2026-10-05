@@ -90,7 +90,7 @@ export async function noticesSince(
       join connect.internal_channel c on c.id = m.channel_id and c.company_id = ${me.companyId}
       left join connect.member a on a.id = m.author_member_id
       where m.created_at > ${since.toISOString()}::timestamptz and coalesce(m.author_member_id, '') <> ${me.id}
-        and exists (select 1 from connect.internal_channel_member x where x.channel_id = c.id and x.member_id = ${me.id} and x.state = 'member')
+        and exists (select 1 from connect.internal_channel_member x where x.channel_id = c.id and x.member_id = ${me.id} and x.state = 'member' and not x.muted)
         and (m.mentions ? ${me.id} or m.mentions ? 'channel' or c.kind = 'dm')
       order by m.created_at desc
       limit 5

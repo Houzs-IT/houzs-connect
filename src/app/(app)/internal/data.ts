@@ -153,6 +153,8 @@ export type SideChannel = {
   lastBody: string | null;
   /** Requests to join waiting, shown to whoever can approve them. */
   pending: number;
+  /** I muted it: its unread count is grey and leaves the rail's total. */
+  muted: boolean;
 };
 export type SideDm = { id: string; otherId: string; otherName: string; unread: number; lastBy: string | null; lastBody: string | null };
 export type SideDiscussion = { conversationId: string; name: string; orderRef: string | null; channelId: string; messageId: string };
@@ -177,8 +179,8 @@ type Last = { by: string | null; body: string | null } | null;
 export async function sidebar(companyId: string, meId: string, companyAdminFlag = false) {
   const companyAdmin = companyAdminFlag ? sql`true` : sql`false`;
   const [channels, dms, discussions] = await Promise.all([
-    rows<{ id: string; name: string; topic: string | null; unread: number; last: Last; pending: number }>(sql`
-      select c.id, c.name, c.topic, ${unread(meId)} as unread, ${last} as last,
+    rows<{ id: string; name: string; topic: string | null; unread: number; last: Last; pending: number; muted: boolean }>(sql`
+      select c.id, c.name, c.topic, ${unread(meId)} as unread, ${last} as last, cm.muted,
         case when cm.role = 'admin' or ${companyAdmin} then (
           select count(*)::int from connect.internal_channel_member p where p.channel_id = c.id and p.state = 'pending'
         ) else 0 end as pending
@@ -218,6 +220,7 @@ export async function sidebar(companyId: string, meId: string, companyAdminFlag 
       lastBy: c.last?.by ?? null,
       lastBody: c.last?.body ?? null,
       pending: Number(c.pending ?? 0),
+      muted: !!c.muted,
     })) as SideChannel[],
     dms: dms.map((d) => ({
       id: d.id,
@@ -340,49 +343,74 @@ export async function channelInfo(companyId: string, channelId: string, meId: st
     name: string;
     topic: string | null;
     access: string | null;
+    icon: string | null;
+    perm_edit: string | null;
+    perm_post: string | null;
+    perm_add: string | null;
     created_by: string | null;
+    created_by_name: string | null;
+    created_at: string;
+    company_name: string | null;
     my_state: string | null;
     my_role: string | null;
+    my_muted: boolean | null;
     member_count: number;
     pending_count: number;
+    channel_count: number;
     other_name: string | null;
   }>(sql`
-    select c.id, c.kind, c.name, c.topic, c.access, c.created_by_member_id as created_by,
-      me.state as my_state, me.role as my_role,
+    select c.id, c.kind, c.name, c.topic, c.access, c.icon, c.perm_edit, c.perm_post, c.perm_add,
+      c.created_by_member_id as created_by, cb.name as created_by_name, c.created_at, co.name as company_name,
+      me.state as my_state, me.role as my_role, me.muted as my_muted,
       (select count(*)::int from connect.internal_channel_member x where x.channel_id = c.id and x.state = 'member') as member_count,
       (select count(*)::int from connect.internal_channel_member x where x.channel_id = c.id and x.state = 'pending') as pending_count,
+      (select count(*)::int from connect.internal_channel c2 where c2.company_id = c.company_id and c2.kind = 'channel') as channel_count,
       (select mo.name from connect.internal_channel_member o join connect.member mo on mo.id = o.member_id
         where o.channel_id = c.id and o.member_id <> ${meId} limit 1) as other_name
     from connect.internal_channel c
     left join connect.internal_channel_member me on me.channel_id = c.id and me.member_id = ${meId}
+    left join connect.member cb on cb.id = c.created_by_member_id
+    left join connect.company co on co.id = c.company_id
     where c.id = ${channelId} and c.company_id = ${companyId}
       and (c.kind = 'channel' or me.member_id is not null)
   `);
   const c = r[0];
   if (!c) return null;
   const isMember = c.kind === "dm" || c.my_state === "member";
+  const all = (v: string | null) => (v === "all" ? "all" : "admins") as "all" | "admins";
   return {
     id: c.id,
     kind: c.kind as "channel" | "dm",
     name: c.kind === "dm" ? (c.other_name ?? c.name) : c.name,
     topic: c.topic,
+    icon: c.icon,
     createdBy: c.created_by,
+    createdByName: c.created_by_name,
+    createdAt: new Date(c.created_at),
+    companyName: c.company_name,
     access: (c.access === "approval" ? "approval" : "open") as "open" | "approval",
+    /** Who may edit the info, post, add people (channel admins and company admins always may). */
+    permEdit: all(c.perm_edit),
+    permPost: c.perm_post === "admins" ? ("admins" as const) : ("all" as const),
+    permAdd: all(c.perm_add),
     isMember,
     isPending: c.my_state === "pending",
+    muted: !!c.my_muted,
     /** Admin of this channel (a company admin manages every channel too: check the role as well). */
     isChannelAdmin: isMember && c.my_role === "admin",
     memberCount: Number(c.member_count ?? 0),
     pendingCount: Number(c.pending_count ?? 0),
+    /** Channels in the company: the "community" the info panel shows. */
+    channelCount: Number(c.channel_count ?? 0),
   };
 }
 
-export type ChannelMember = { id: string; name: string; dept: string | null; role: "admin" | "member"; state: "member" | "pending" };
+export type ChannelMember = { id: string; name: string; dept: string | null; role: "admin" | "member"; state: "member" | "pending"; since: string };
 
 /** Who is in a channel, and who asked to join: requests first, then admins, then by name. */
 export async function channelMembers(channelId: string): Promise<ChannelMember[]> {
-  const r = await rows<{ id: string; name: string; dept: string | null; role: string; state: string }>(sql`
-    select m.id, m.name, d.name as dept, x.role, x.state
+  const r = await rows<{ id: string; name: string; dept: string | null; role: string; state: string; since: string }>(sql`
+    select m.id, m.name, d.name as dept, x.role, x.state, coalesce(x.requested_at, x.joined_at) as since
     from connect.internal_channel_member x
     join connect.member m on m.id = x.member_id
     left join connect.department d on d.id = m.department_id
@@ -395,7 +423,63 @@ export async function channelMembers(channelId: string): Promise<ChannelMember[]
     dept: x.dept,
     role: x.role === "admin" ? "admin" : "member",
     state: x.state === "pending" ? "pending" : "member",
+    since: new Date(x.since).toISOString(),
   }));
+}
+
+export type ChannelEvent = { id: string; action: string; actor: string | null; target: string | null; detail: string | null; at: string };
+
+/** "Member changes": the newest first. */
+export async function channelEvents(channelId: string, limit = 60): Promise<ChannelEvent[]> {
+  const r = await rows<{ id: string; action: string; actor: string | null; target: string | null; detail: string | null; created_at: string }>(sql`
+    select e.id, e.action, a.name as actor, t.name as target, e.detail, e.created_at
+    from connect.internal_channel_event e
+    left join connect.member a on a.id = e.actor_member_id
+    left join connect.member t on t.id = e.target_member_id
+    where e.channel_id = ${channelId}
+    order by e.created_at desc
+    limit ${limit}
+  `);
+  return r.map((e) => ({ id: e.id, action: e.action, actor: e.actor, target: e.target, detail: e.detail, at: new Date(e.created_at).toISOString() }));
+}
+
+export type SharedItems = {
+  links: { url: string; by: string | null; at: string }[];
+  conversations: { id: string; name: string; orderRef: string | null }[];
+};
+
+/** Links and customer conversations shared in a channel, newest first ("Media, links and docs"). */
+export async function channelShared(channelId: string): Promise<SharedItems> {
+  const [msgs, convos] = await Promise.all([
+    rows<{ body: string; by: string | null; created_at: string }>(sql`
+      select m.body, a.name as by, m.created_at from connect.internal_message m
+      left join connect.member a on a.id = m.author_member_id
+      where m.channel_id = ${channelId} and m.body ~* 'https?://'
+      order by m.created_at desc limit 40
+    `),
+    rows<{ id: string; name: string | null; phone: string; attributes: unknown }>(sql`
+      select distinct on (cv.id) cv.id, ct.name, ct.phone, ct.attributes
+      from connect.internal_message m
+      join connect.conversation cv on cv.id = m.conversation_id
+      join connect.contact ct on ct.id = cv.contact_id
+      where m.channel_id = ${channelId}
+      order by cv.id, m.created_at desc
+      limit 20
+    `),
+  ]);
+  const links: SharedItems["links"] = [];
+  const seen = new Set<string>();
+  for (const m of msgs) {
+    for (const u of m.body.match(/https?:\/\/[^\s<>"')]+/gi) ?? []) {
+      if (seen.has(u) || links.length >= 20) continue;
+      seen.add(u);
+      links.push({ url: u, by: m.by, at: new Date(m.created_at).toISOString() });
+    }
+  }
+  return {
+    links,
+    conversations: convos.map((c) => ({ id: c.id, name: c.name || c.phone, orderRef: refOf(c.attributes) })),
+  };
 }
 
 export type BrowseChannel = {
@@ -459,7 +543,12 @@ export async function threadMessages(channelId: string, rootId: string): Promise
 }
 
 /** Search every channel I can see. */
-export async function searchMessages(companyId: string, meId: string, q: string): Promise<(ChatMessage & { channelId: string; channelName: string })[]> {
+export async function searchMessages(
+  companyId: string,
+  meId: string,
+  q: string,
+  channelId?: string | null
+): Promise<(ChatMessage & { channelId: string; channelName: string })[]> {
   const like = `%${q}%`;
   const r = await rows<Row>(sql`
     select ${MESSAGE_SELECT}, 0 as replies, c.id as channel_id, c.name as channel_name
@@ -467,6 +556,7 @@ export async function searchMessages(companyId: string, meId: string, q: string)
     join connect.internal_channel c on c.id = m.channel_id and c.company_id = ${companyId}
     ${MESSAGE_JOINS}
     where m.body ilike ${like}
+      ${channelId ? sql`and c.id = ${channelId}` : sql``}
       and exists (select 1 from connect.internal_channel_member x where x.channel_id = c.id and x.member_id = ${meId} and x.state = 'member')
     order by m.created_at desc
     limit 50
@@ -496,7 +586,7 @@ export async function internalUnreadTotal(companyId: string, meId: string): Prom
     const r = await rows<{ n: number }>(sql`
       select coalesce(sum(${unread(meId)}), 0)::int as n
       from connect.internal_channel c
-      join connect.internal_channel_member cm on cm.channel_id = c.id and cm.member_id = ${meId} and cm.state = 'member'
+      join connect.internal_channel_member cm on cm.channel_id = c.id and cm.member_id = ${meId} and cm.state = 'member' and not cm.muted
       where c.company_id = ${companyId} and now() is not null
     `);
     return Number(r[0]?.n ?? 0);

@@ -19,10 +19,15 @@ function Waiting({ n }: { n: number }) {
   );
 }
 
-function Badge({ n }: { n: number }) {
+/** Unread count; grey for a channel the viewer muted. */
+function Badge({ n, muted = false }: { n: number; muted?: boolean }) {
   if (!n) return null;
   return (
-    <span className="grid h-[18px] min-w-[18px] place-items-center rounded-full bg-[var(--color-accent)] px-1 text-[10.5px] font-bold text-white">
+    <span
+      className={`grid h-[18px] min-w-[18px] place-items-center rounded-full px-1 text-[10.5px] font-bold text-white ${
+        muted ? "bg-[var(--color-border-strong)]" : "bg-[var(--color-accent)]"
+      }`}
+    >
       {n > 99 ? "99+" : n}
     </span>
   );
@@ -54,14 +59,14 @@ export async function InternalMenu({ mobile = false }: { mobile?: boolean }) {
     const head = (title: string) => (
       <div className="px-4 pb-1.5 pt-4 text-[10.5px] font-semibold uppercase tracking-[0.16em] text-[var(--color-faint)]">{title}</div>
     );
-    const row = (href: string, icon: React.ReactNode, name: string, sub: string, n: number) => (
+    const row = (href: string, icon: React.ReactNode, name: string, sub: string, n: number, muted = false) => (
       <Link key={href} href={href} className="flex items-center gap-3 border-b border-[var(--color-border-subtle)] bg-[var(--color-surface)] px-4 py-3">
         {icon}
         <span className="min-w-0 flex-1">
           <span className={`block truncate text-[14.5px] text-[var(--color-ink)] ${n ? "font-bold" : "font-semibold"}`}>{name}</span>
           {sub && <span className="block truncate text-[13px] text-[var(--color-muted)]">{sub}</span>}
         </span>
-        <Badge n={n} />
+        <Badge n={n} muted={muted} />
       </Link>
     );
     return (
@@ -81,7 +86,8 @@ export async function InternalMenu({ mobile = false }: { mobile?: boolean }) {
               <span className="grid h-10 w-10 shrink-0 place-items-center rounded-[10px] border border-[var(--color-border)] bg-[var(--color-surface-2)] text-[16px] font-semibold text-[var(--color-ink)]">#</span>,
               c.name,
               preview(c.lastBy, c.lastBody),
-              c.unread + c.pending
+              c.unread + c.pending,
+              c.muted && !c.pending
             )
           )}
           <Link href="/internal/browse" className="flex items-center gap-3 border-b border-[var(--color-border-subtle)] bg-[var(--color-surface)] px-4 py-3 text-[14px] font-semibold text-[var(--color-accent)]">
@@ -148,7 +154,7 @@ export async function InternalMenu({ mobile = false }: { mobile?: boolean }) {
             <span className="text-[var(--color-faint)]">#</span>
             <span className={`min-w-0 flex-1 truncate ${c.unread ? "font-semibold" : ""}`}>{c.name}</span>
             <Waiting n={c.pending} />
-            <Badge n={c.unread} />
+            <Badge n={c.unread} muted={c.muted} />
           </NavLink>
         ))}
         <NavLink href="/internal/browse">

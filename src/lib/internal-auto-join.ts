@@ -63,6 +63,9 @@ export async function autoJoinDepartmentChannels(companyId: string | null, force
         insert into connect.internal_channel_member (channel_id, member_id, state, role, joined_at)
         select channel_id, member_id, 'member', 'member', now() from cand
         on conflict (channel_id, member_id) do update set state = 'member'
+      ), logged as (
+        insert into connect.internal_channel_event (id, channel_id, action, target_member_id)
+        select gen_random_uuid()::text, channel_id, 'auto_joined', member_id from cand
       )
       insert into connect.internal_channel_auto (channel_id, member_id)
       select channel_id, member_id from cand
