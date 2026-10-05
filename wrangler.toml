@@ -11,7 +11,18 @@ account_id = "816e457307d7fa0491c2a08a72ad5dcd"
 # OpenNext requires nodejs_compat and a recent compatibility_date. nodejs_compat
 # also gives postgres.js the Node socket/Buffer APIs it needs on Workers.
 compatibility_date = "2024-12-30"
-compatibility_flags = ["nodejs_compat"]
+# global_fetch_strictly_public: route outbound fetch() through Cloudflare's front
+# door even for hostnames on OUR OWN zone. Without it a same-zone subrequest goes
+# straight to the zone's origin and SKIPS Workers Routes — and the ERP API is a
+# Route (erp.houzscentury.com/api/* -> autocount-sync-api on a Pages origin), so
+# every call_rest_api POST to {callback_url} landed on the Pages SPA and came back
+# as an empty 400 that the ERP worker never saw (live tail, 2026-10-05). The ERP
+# -> Connect direction was never affected: chat.houzscentury.com is a Custom
+# Domain, which same-zone fetches do reach. Connect fetches nothing on its own
+# hostname, so the "loops back to itself" caveat does not apply.
+# https://developers.cloudflare.com/workers/configuration/routing/routes/ ("Routes
+# cannot be the target of a same-zone fetch() call").
+compatibility_flags = ["nodejs_compat", "global_fetch_strictly_public"]
 
 # Keep the *.workers.dev URL working alongside the branded custom domain.
 workers_dev = true
