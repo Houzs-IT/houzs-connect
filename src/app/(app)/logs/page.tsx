@@ -3,7 +3,7 @@ import { PageChrome } from "@/components/PageChrome";
 import { FilterPill } from "@/components/shell/FilterPill";
 import { IconSearch } from "@/components/icons";
 import { getCurrentMember } from "@/lib/current-member";
-import { formatPhone, initials, tint } from "@/lib/format";
+import { formatPhone, initials, previewText, tint } from "@/lib/format";
 import { fmt, type Dict } from "@/lib/i18n/dict";
 import { getDict } from "@/lib/i18n/server";
 import { isLive, phoneNumberInfo, type PhoneNumberInfo } from "@/lib/whatsapp/cloud-api";
@@ -193,7 +193,7 @@ export default async function MessageHistoryPage({ searchParams }: { searchParam
                         </span>
                       </span>
                       <span className="min-w-0">
-                        <span className="block truncate text-[13px] text-[var(--color-ink)]">{r.body || "—"}</span>
+                        <span className="block truncate text-[13px] text-[var(--color-ink)]">{previewText(r, t.service) || "—"}</span>
                         {err && st === "FAILED" && <span className="block truncate text-[11.5px] text-[var(--color-danger)]">{err}</span>}
                       </span>
                       <span>
@@ -248,7 +248,7 @@ export default async function MessageHistoryPage({ searchParams }: { searchParam
                 </div>
                 <div className="scroll-thin flex flex-1 flex-col gap-4 overflow-y-auto p-4">
                   <div className="rounded-[12px] bg-[#ebe4d8] p-3">
-                    <div className="line-clamp-4 whitespace-pre-wrap rounded-[8px] bg-white px-3 py-2 text-[12.5px] text-[var(--color-ink)]">{selected.body || "—"}</div>
+                    <div className="line-clamp-4 whitespace-pre-wrap rounded-[8px] bg-white px-3 py-2 text-[12.5px] text-[var(--color-ink)]">{previewText(selected, t.service) || "—"}</div>
                   </div>
                   <Timeline row={selected} events={timeline} L={L} />
                   {selected.waMessageId && (

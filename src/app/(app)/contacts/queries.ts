@@ -130,13 +130,15 @@ export async function filterOptions(companyId: string) {
 
 /** Each contact's newest message (body, direction, when) — one query per page. */
 export async function lastMessages(contactIds: string[]) {
-  const out = new Map<string, { body: string | null; direction: string; at: Date }>();
+  const out = new Map<string, { body: string | null; type: string; fileName: string | null; direction: string; at: Date }>();
   if (!contactIds.length) return out;
   const db = getDb();
   const rows = await db
     .selectDistinctOn([conversation.contactId], {
       contactId: conversation.contactId,
       body: message.body,
+      type: message.type,
+      payload: message.interactivePayload,
       direction: message.direction,
       at: message.createdAt,
     })
@@ -144,7 +146,10 @@ export async function lastMessages(contactIds: string[]) {
     .innerJoin(message, eq(message.conversationId, conversation.id))
     .where(inArray(conversation.contactId, contactIds))
     .orderBy(conversation.contactId, desc(message.createdAt));
-  for (const r of rows) out.set(r.contactId, { body: r.body, direction: r.direction, at: r.at });
+  for (const r of rows) {
+    const fileName = (r.payload as { fileName?: unknown } | null)?.fileName;
+    out.set(r.contactId, { body: r.body, type: r.type, fileName: typeof fileName === "string" ? fileName : null, direction: r.direction, at: r.at });
+  }
   return out;
 }
 

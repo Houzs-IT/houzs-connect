@@ -1,5 +1,9 @@
 // What Meta charged this WhatsApp Business Account this month, per category.
 //
+// Month to date is asked for DAILY and added up: Meta answers MONTHLY only for
+// a window of whole months ("You must [use a full month] time window to get
+// monthly granularity data").
+//
 // Tries the per-message pricing analytics first (Meta's current billing model)
 // and falls back to the older conversation analytics. Either may be refused for
 // a token without whatsapp_business_management; the error is passed through so
@@ -39,7 +43,7 @@ export async function monthSpend(): Promise<Spend> {
   };
 
   const pricing = await graph<{ pricing_analytics?: { data?: { data_points?: Point[] }[] } }>(
-    `${GRAPH}/${cfg.wabaId}?fields=pricing_analytics.start(${start}).end(${end}).granularity(MONTHLY).dimensions(["PRICING_CATEGORY"]).metric_types(["COST","VOLUME"])`,
+    `${GRAPH}/${cfg.wabaId}?fields=pricing_analytics.start(${start}).end(${end}).granularity(DAILY).dimensions(["PRICING_CATEGORY"]).metric_types(["COST","VOLUME"])`,
     cfg.token
   );
   if (pricing.ok) {
@@ -47,7 +51,7 @@ export async function monthSpend(): Promise<Spend> {
     return { ok: true, currency, rows: tally(points, "pricing_category", "volume"), source: "pricing" };
   }
   const convo = await graph<{ conversation_analytics?: { data?: { data_points?: Point[] }[] } }>(
-    `${GRAPH}/${cfg.wabaId}?fields=conversation_analytics.start(${start}).end(${end}).granularity(MONTHLY).dimensions(["CONVERSATION_CATEGORY"]).metric_types(["COST","CONVERSATION"])`,
+    `${GRAPH}/${cfg.wabaId}?fields=conversation_analytics.start(${start}).end(${end}).granularity(DAILY).dimensions(["CONVERSATION_CATEGORY"]).metric_types(["COST","CONVERSATION"])`,
     cfg.token
   );
   if (convo.ok) {

@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { useParams, useSearchParams } from "next/navigation";
-import { initials, listTime, shortDay, tint } from "@/lib/format";
+import { initials, listTime, previewText, shortDay, tint } from "@/lib/format";
 import { fmt } from "@/lib/i18n/dict";
 import { IconClose, IconSearch } from "@/components/icons";
 import { useShell } from "@/components/shell/ShellProvider";
@@ -729,9 +729,5 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 
 /** The list's one-line preview: the text, or "Photo" / the file name for media. */
 function preview(c: ConversationListItem, s: { mediaPhoto: string; mediaFile: string }): string {
-  if (c.lastMedia) {
-    const what = c.lastMedia.kind === "IMAGE" ? s.mediaPhoto : (c.lastMedia.fileName ?? s.mediaFile);
-    return c.lastMessage ? `${what} · ${c.lastMessage}` : what;
-  }
-  return c.lastMessage || "—";
+  return previewText({ body: c.lastMessage, type: c.lastMedia?.kind ?? "TEXT", fileName: c.lastMedia?.fileName }, s) || "—";
 }

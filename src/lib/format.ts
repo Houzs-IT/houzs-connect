@@ -55,6 +55,23 @@ export function mediaCaption(body: string | null | undefined): string {
     .trim();
 }
 
+/**
+ * One line for a message in a list: its text, or "Photo" / the file name (plus
+ * any caption) for a picture or file, never the "[attachment]" placeholder its
+ * body carries.
+ */
+export function previewText(
+  m: { body: string | null; type: string; fileName?: string | null },
+  labels: { mediaPhoto: string; mediaFile: string }
+): string {
+  if (m.type === "IMAGE" || m.type === "DOCUMENT") {
+    const what = m.type === "IMAGE" ? labels.mediaPhoto : (m.fileName ?? labels.mediaFile);
+    const caption = mediaCaption(m.body);
+    return caption ? `${what} · ${caption}` : what;
+  }
+  return m.body ?? "";
+}
+
 /** A contact's name, or their number written properly when the "name" is empty or just digits. */
 export function displayName(name: string | null | undefined, phone: string): string {
   const n = (name ?? "").trim();

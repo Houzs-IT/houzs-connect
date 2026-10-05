@@ -36,6 +36,8 @@ export type LogRow = {
   phone: string;
   body: string | null;
   type: string;
+  /** A file we sent keeps its name in the payload. */
+  fileName: string | null;
   direction: "IN" | "OUT";
   status: string;
   waMessageId: string | null;
@@ -50,7 +52,7 @@ export async function logRows(companyId: string, f: LogFilter, limit = 200): Pro
   const digits = f.q.replace(/\D/g, "");
   const rows = (await getDb().execute(sql`
     select m.id, m.conversation_id, ct.name, ct.phone, m.body, m.type, m.direction, m.status,
-      m.wa_message_id, m.created_at,
+      m.wa_message_id, m.created_at, m.interactive_payload->>'fileName' as file_name,
       case when m.interactive_payload->>'kind' = 'send_error' then m.interactive_payload->>'reason' end as send_error
     from connect.message m
     join connect.conversation c on c.id = m.conversation_id
@@ -74,6 +76,7 @@ export async function logRows(companyId: string, f: LogFilter, limit = 200): Pro
     status: string;
     wa_message_id: string | null;
     created_at: string | Date;
+    file_name: string | null;
     send_error: string | null;
   }[];
   return rows.map((r) => ({
@@ -83,6 +86,7 @@ export async function logRows(companyId: string, f: LogFilter, limit = 200): Pro
     phone: r.phone,
     body: r.body,
     type: r.type,
+    fileName: r.file_name,
     direction: r.direction,
     status: r.status,
     waMessageId: r.wa_message_id,

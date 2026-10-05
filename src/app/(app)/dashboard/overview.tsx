@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { fmt, type Dict } from "@/lib/i18n/dict";
+import { receiptAiState } from "@/lib/receipt-vision";
 import { Skel } from "@/components/skeleton";
 import { Donut } from "./charts";
 import {
@@ -396,7 +397,8 @@ export function ReportCard({ s }: { s: S }) {
 
 export async function AccountsCard({ companyId, s }: { companyId: string; s: S }) {
   const a = await connectedAccounts(companyId);
-  const connected = (a.numbers.length > 0 ? 1 : 0) + (a.erpSynced ? 1 : 0) + (a.driverToday > 0 ? 1 : 0);
+  const ai = receiptAiState();
+  const connected = (a.numbers.length > 0 ? 1 : 0) + (a.erpSynced ? 1 : 0) + (a.driverToday > 0 ? 1 : 0) + (ai === "on" ? 1 : 0);
   const total = 4;
   const integration = (
     mark: string,
@@ -464,7 +466,7 @@ export async function AccountsCard({ companyId, s }: { companyId: string; s: S }
       <div className="mt-2 flex flex-col gap-2">
         {integration("HC", s.erp, a.erpSynced ? s.erpOn : s.erpOff, a.erpSynced, "/settings/team")}
         {integration("TMS", s.driver, fmt(s.driverEvents, { n: a.driverToday }), a.driverToday > 0, "/logs/webhooks")}
-        {integration("OCR", s.ocr, s.ocrOff, false, "/payments", true)}
+        {integration("OCR", s.ocr, ai === "on" ? s.ocrOn : ai === "off" ? s.ocrPaused : s.ocrOff, ai === "on", "/settings/integrations", ai !== "on")}
       </div>
     </Card>
   );
