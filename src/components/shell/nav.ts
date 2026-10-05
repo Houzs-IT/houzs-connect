@@ -7,7 +7,7 @@ import {
   IconInbox,
   IconInternal,
   IconLogs,
-  IconReceipt,
+  IconPayments,
   IconSettings,
 } from "../icons";
 import type { Dict } from "@/lib/i18n/dict";
@@ -37,7 +37,7 @@ export const NAV: NavItem[] = [
   { key: "automations", href: "/automations", Icon: IconAutomation },
   { key: "campaigns", href: "/campaigns", Icon: IconCampaign },
   { key: "templates", href: "/templates", match: ["/templates", "/forms"], Icon: IconForm },
-  { key: "payments", href: "/payments", Icon: IconReceipt },
+  { key: "payments", href: "/payments", Icon: IconPayments },
   { key: "logs", href: "/logs", Icon: IconLogs },
 ];
 
