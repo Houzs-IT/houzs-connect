@@ -521,8 +521,10 @@ export const internalChannel = connect.table(
   {
     id: id(),
     companyId: text("company_id").notNull(),
-    /** "channel" (everyone in the company) or "dm" (exactly two members). */
+    /** "channel" (members, see access) or "dm" (exactly two members). */
     kind: text("kind").notNull().default("channel"),
+    /** "open": anyone in the company joins; "approval": a request an admin approves. Null = not settled yet. */
+    access: text("access"),
     name: text("name").notNull(),
     topic: text("topic"),
     departmentId: text("department_id"),
@@ -539,6 +541,11 @@ export const internalChannelMember = connect.table("internal_channel_member", {
   memberId: text("member_id").notNull(),
   lastReadAt: timestamp("last_read_at", { withTimezone: true }),
   joinedAt: timestamp("joined_at", { withTimezone: true }).notNull().defaultNow(),
+  /** "member", or "pending" while a request to join waits. */
+  state: text("state").notNull().default("member"),
+  /** "admin" manages the channel's members and settings; "member" does not. */
+  role: text("role").notNull().default("member"),
+  requestedAt: timestamp("requested_at", { withTimezone: true }),
 });
 
 export const internalMessage = connect.table(

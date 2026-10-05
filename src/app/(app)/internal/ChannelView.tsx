@@ -9,10 +9,12 @@ import { fmt } from "@/lib/i18n/dict";
 import { getDict } from "@/lib/i18n/server";
 import { photoSrcs } from "@/lib/member-photo";
 import { companyPresence } from "@/lib/presence";
-import { channelInfo, channelMessages, ensureInternal, threadMessages } from "./data";
+import { isAdminRole } from "@/lib/permissions";
+import { channelInfo, channelMembers, channelMessages, ensureInternal, threadMessages } from "./data";
 import { Composer } from "./Composer";
 import { ChannelMenu } from "./ChannelMenu";
-import { isAdminRole } from "@/lib/permissions";
+import { JoinGate } from "./JoinGate";
+import { MembersDialog } from "./MembersDialog";
 import { LiveRefresh } from "./LiveRefresh";
 import { Avatar, MessageRow, dayKey } from "./parts";
 
@@ -25,17 +27,51 @@ export async function ChannelView({ channelId, threadId }: { channelId: string; 
   await ensureInternal(me.companyId, me.id);
   const ch = await channelInfo(me.companyId, channelId, me.id);
   if (!ch) notFound();
-  const [msgs, people, thread] = await Promise.all([
+  const companyAdmin = isAdminRole(me.role);
+  const isChannel = ch.kind === "channel";
+  const canManage = isChannel && (companyAdmin || ch.isChannelAdmin);
+  const title = isChannel ? `# ${ch.name}` : ch.name;
+
+  // Not in this channel: what it is, and Join / Request to join, instead of its messages.
+  if (isChannel && !ch.isMember) {
+    return (
+      <div className="flex min-w-0 flex-1 flex-col">
+        <header className="flex h-14 shrink-0 items-center gap-3 border-b border-[var(--color-border)] bg-[var(--color-surface)] px-4">
+          <Link href="/internal" className="grid h-8 w-8 place-items-center text-[18px] text-[var(--color-muted)] md:hidden" aria-label={L.back}>
+            ‹
+          </Link>
+          <h1 className="min-w-0 flex-1 truncate text-[16px] font-semibold text-[var(--color-ink)]">{title}</h1>
+          <CompanySwitcher companies={await companyChoices(getDb(), me)} className="hidden md:block" />
+          <LangToggle className="hidden md:flex" />
+          {canManage && <ChannelMenu id={ch.id} name={ch.name} topic={ch.topic} access={ch.access} />}
+        </header>
+        <JoinGate
+          id={ch.id}
+          name={ch.name}
+          topic={ch.topic}
+          members={ch.memberCount}
+          access={ch.access}
+          pending={ch.isPending}
+          direct={ch.access === "open" || companyAdmin}
+        />
+      </div>
+    );
+  }
+
+  const [msgs, people, thread, members] = await Promise.all([
     channelMessages(ch.id),
     companyPresence(me.companyId),
     threadId ? threadMessages(ch.id, threadId) : Promise.resolve([]),
+    isChannel ? channelMembers(ch.id) : Promise.resolve([]),
   ]);
   const names = people.map((p) => p.name);
-  const facePhotos = await photoSrcs(people.slice(0, 3).map((p) => p.id));
-  const mentionable = people.filter((p) => p.id !== me.id).map((p) => ({ id: p.id, name: p.name }));
-  const title = ch.kind === "channel" ? `# ${ch.name}` : ch.name;
+  const inChannel = members.filter((m) => m.state === "member");
+  const photos = await photoSrcs([...people.map((p) => p.id), ...members.map((m) => m.id)]);
+  const faces = (isChannel ? inChannel : people).slice(0, 3).map((p) => ({ id: p.id, name: p.name, photo: photos.get(p.id) ?? null }));
+  // In a channel, @ offers its members; in a DM, the colleague.
+  const mentionable = (isChannel ? inChannel : people).filter((p) => p.id !== me.id).map((p) => ({ id: p.id, name: p.name }));
   const today = dayKey(new Date());
-  const memberCount = ch.kind === "channel" ? people.length : 2;
+  const memberCount = isChannel ? inChannel.length : 2;
   const root = thread[0] ?? null;
   // The panel button opens the latest thread, or closes the open one.
   const latestThread = [...msgs].reverse().find((m) => m.replies > 0);
@@ -54,21 +90,31 @@ export async function ChannelView({ channelId, threadId }: { channelId: string; 
             {ch.topic && <p className="hidden truncate text-[12.5px] text-[var(--color-faint)] md:block">{ch.topic}</p>}
             <p className="text-[11.5px] text-[var(--color-faint)] md:hidden">{fmt(L.members, { n: memberCount })}</p>
           </div>
-          <span className="hidden items-center gap-2 rounded-[8px] border border-[var(--color-border)] px-2 py-1 md:flex">
-            <span className="flex -space-x-1.5">
-              {people.slice(0, 3).map((p) => (
-                <span key={p.id} className="rounded-full ring-2 ring-white">
-                  <Avatar name={p.name} photo={facePhotos.get(p.id)} size={20} />
-                </span>
-              ))}
+          {isChannel ? (
+            <MembersDialog
+              channelId={ch.id}
+              members={members}
+              people={people.map((p) => ({ id: p.id, name: p.name, photo: photos.get(p.id) ?? null }))}
+              photos={Object.fromEntries(members.map((m) => [m.id, photos.get(m.id) ?? null]))}
+              meId={me.id}
+              canManage={canManage}
+              faces={faces}
+            />
+          ) : (
+            <span className="hidden items-center gap-2 rounded-[8px] border border-[var(--color-border)] px-2 py-1 md:flex">
+              <span className="flex -space-x-1.5">
+                {faces.map((p) => (
+                  <span key={p.id} className="rounded-full ring-2 ring-white">
+                    <Avatar name={p.name} photo={p.photo} size={20} />
+                  </span>
+                ))}
+              </span>
+              <span className="text-[12.5px] text-[var(--color-muted)]">{fmt(L.members, { n: memberCount })}</span>
             </span>
-            <span className="text-[12.5px] text-[var(--color-muted)]">{fmt(L.members, { n: memberCount })}</span>
-          </span>
+          )}
           <CompanySwitcher companies={await companyChoices(getDb(), me)} className="hidden md:block" />
           <LangToggle className="hidden md:flex" />
-          {ch.kind === "channel" && (isAdminRole(me.role) || ch.createdBy === me.id) && (
-            <ChannelMenu id={ch.id} name={ch.name} topic={ch.topic} />
-          )}
+          {canManage && <ChannelMenu id={ch.id} name={ch.name} topic={ch.topic} access={ch.access} />}
           {panelHref && (
             <Link
               href={panelHref}

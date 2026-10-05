@@ -63,6 +63,14 @@ async function run(db: DB): Promise<void> {
   await db.execute(
     sql`CREATE INDEX IF NOT EXISTS "internal_message_conversation_idx" ON "connect"."internal_message" ("conversation_id")`
   );
+  // Channel membership (migration 0017). A channel is open (anyone in the
+  // company joins) or needs approval; null = made before membership existed,
+  // and data.ts settles its members once. A member row is a member or a
+  // pending request, and an admin of the channel or not.
+  await db.execute(sql`ALTER TABLE "connect"."internal_channel" ADD COLUMN IF NOT EXISTS "access" text`);
+  await db.execute(sql`ALTER TABLE "connect"."internal_channel_member" ADD COLUMN IF NOT EXISTS "state" text DEFAULT 'member' NOT NULL`);
+  await db.execute(sql`ALTER TABLE "connect"."internal_channel_member" ADD COLUMN IF NOT EXISTS "role" text DEFAULT 'member' NOT NULL`);
+  await db.execute(sql`ALTER TABLE "connect"."internal_channel_member" ADD COLUMN IF NOT EXISTS "requested_at" timestamp with time zone`);
 }
 
 export async function ensureInternalTables(db: DB): Promise<void> {

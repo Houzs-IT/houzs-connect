@@ -1,12 +1,23 @@
 import Link from "next/link";
 import { getCurrentMember } from "@/lib/current-member";
 import { getDict } from "@/lib/i18n/server";
+import { isAdminRole } from "@/lib/permissions";
 import { photoSrcs } from "@/lib/member-photo";
 import { companyPresence } from "@/lib/presence";
 import { ensureInternal, sidebar } from "./data";
 import { NavLink } from "./NavLink";
 import { NewChat } from "./NewChat";
 import { Avatar } from "./parts";
+
+/** Requests to join waiting for me to approve. */
+function Waiting({ n }: { n: number }) {
+  if (!n) return null;
+  return (
+    <span className="grid h-[18px] min-w-[18px] place-items-center rounded-full bg-[var(--color-warning)] px-1 text-[10.5px] font-bold text-white" title="Requests to join">
+      +{n}
+    </span>
+  );
+}
 
 function Badge({ n }: { n: number }) {
   if (!n) return null;
@@ -28,7 +39,7 @@ export async function InternalMenu({ mobile = false }: { mobile?: boolean }) {
   const t = await getDict();
   const L = t.internal;
   await ensureInternal(me.companyId, me.id);
-  const [side, people] = await Promise.all([sidebar(me.companyId, me.id), companyPresence(me.companyId)]);
+  const [side, people] = await Promise.all([sidebar(me.companyId, me.id, isAdminRole(me.role)), companyPresence(me.companyId)]);
   const online = new Map(people.map((p) => [p.id, p.online]));
   const photos = await photoSrcs([...people.map((p) => p.id), ...side.dms.map((d) => d.otherId)]);
   const others = people
@@ -70,9 +81,13 @@ export async function InternalMenu({ mobile = false }: { mobile?: boolean }) {
               <span className="grid h-10 w-10 shrink-0 place-items-center rounded-[10px] border border-[var(--color-border)] bg-[var(--color-surface-2)] text-[16px] font-semibold text-[var(--color-ink)]">#</span>,
               c.name,
               preview(c.lastBy, c.lastBody),
-              c.unread
+              c.unread + c.pending
             )
           )}
+          <Link href="/internal/browse" className="flex items-center gap-3 border-b border-[var(--color-border-subtle)] bg-[var(--color-surface)] px-4 py-3 text-[14px] font-semibold text-[var(--color-accent)]">
+            <span className="grid h-10 w-10 shrink-0 place-items-center rounded-[10px] border border-dashed border-[var(--color-border-strong)] text-[18px]">+</span>
+            {L.browse}
+          </Link>
           {head(L.dms)}
           {side.dms.map((d) =>
             row(
@@ -132,9 +147,14 @@ export async function InternalMenu({ mobile = false }: { mobile?: boolean }) {
           <NavLink key={c.id} href={`/internal/${c.id}`} fallback={i === 0}>
             <span className="text-[var(--color-faint)]">#</span>
             <span className={`min-w-0 flex-1 truncate ${c.unread ? "font-semibold" : ""}`}>{c.name}</span>
+            <Waiting n={c.pending} />
             <Badge n={c.unread} />
           </NavLink>
         ))}
+        <NavLink href="/internal/browse">
+          <span className="text-[var(--color-accent)]">+</span>
+          <span className="min-w-0 flex-1 truncate text-[var(--color-accent)]">{L.browse}</span>
+        </NavLink>
 
         {group(L.dms)}
         {side.dms.map((d) => (
