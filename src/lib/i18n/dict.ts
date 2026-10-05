@@ -10,6 +10,8 @@ export type Lang = "en" | "zh";
 export const LANG_COOKIE = "hc_lang";
 /** Secondary-menu collapse, remembered per browser the same way. */
 export const MENU_COOKIE = "hc_menu";
+/** "0" when this browser put the customer panel beside a conversation away. */
+export const PANEL_COOKIE = "hc_panel";
 
 export function parseLang(v: string | undefined | null): Lang {
   return v === "zh" ? "zh" : "en";
@@ -116,6 +118,8 @@ const en = {
     noMatch: "Nothing matches the search or filters.",
   },
   service: {
+    hidePanel: "Hide customer info",
+    showPanel: "Show customer info",
     views: "Views",
     allConvos: "All conversations",
     mine: "Assigned to me",
@@ -400,6 +404,22 @@ const en = {
     soonNote: "Coming soon — not built yet.",
   },
   contacts: {
+    tagManage: "Manage",
+    tagManageTitle: "Manage tags",
+    tagManageSub: "Rename, recolour or delete tags. A deleted tag comes off every contact and conversation.",
+    tagUses: "{n} tagged",
+    tagColour: "Colour",
+    tagSave: "Save",
+    tagSaved: "Saved.",
+    tagDelete: "Delete",
+    tagDeleteTitle: "Delete the tag “{name}”?",
+    tagDeleteBody: "It comes off every contact tagged with it ({n}) and every conversation it is on. Automations and campaigns that pick people by this tag will no longer match anyone. This cannot be undone.",
+    tagNew: "New tag",
+    tagNewPh: "Tag name",
+    tagAdd: "Add",
+    tagNone: "No tags yet.",
+    tagAddTo: "+ Add tag",
+    tagRemove: "Remove {name}",
     segments: "Segments",
     all: "All contacts",
     openOrder: "Open order",
@@ -1305,6 +1325,13 @@ const en = {
     capability: "Capability",
   },
   internal: {
+    channelSettings: "Channel settings",
+    editChannel: "Edit channel",
+    deleteChannel: "Delete channel",
+    deleteChannelTitle: "Delete #{c}?",
+    deleteChannelBody: "Every message and thread in this channel is deleted for everyone. This cannot be undone.",
+    save: "Save",
+    saving: "Saving…",
     title: "Internal",
     search: "Search messages",
     channels: "Channels",
@@ -1451,6 +1478,8 @@ const zh: Dict = {
     noMatch: "没有符合搜索或筛选的内容。",
   },
   service: {
+    hidePanel: "收起客户信息",
+    showPanel: "展开客户信息",
     views: "视图",
     allConvos: "全部会话",
     mine: "分配给我",
@@ -1733,6 +1762,22 @@ const zh: Dict = {
     soonNote: "即将推出，暂未开放。",
   },
   contacts: {
+    tagManage: "管理",
+    tagManageTitle: "管理标签",
+    tagManageSub: "可以改名、改颜色或删除标签。删除的标签会从所有联系人和对话上移除。",
+    tagUses: "{n} 个联系人",
+    tagColour: "颜色",
+    tagSave: "保存",
+    tagSaved: "已保存。",
+    tagDelete: "删除",
+    tagDeleteTitle: "删除标签“{name}”？",
+    tagDeleteBody: "它会从 {n} 个联系人和所有带有它的对话上移除。按这个标签选人的自动化和群发将不再匹配到任何人。删除后无法恢复。",
+    tagNew: "新标签",
+    tagNewPh: "标签名称",
+    tagAdd: "新增",
+    tagNone: "还没有标签。",
+    tagAddTo: "+ 加标签",
+    tagRemove: "移除 {name}",
     segments: "分组",
     all: "全部联系人",
     openOrder: "有进行中订单",
@@ -2623,6 +2668,13 @@ const zh: Dict = {
     capability: "权限",
   },
   internal: {
+    channelSettings: "频道设置",
+    editChannel: "编辑频道",
+    deleteChannel: "删除频道",
+    deleteChannelTitle: "删除 #{c}？",
+    deleteChannelBody: "这个频道里所有的消息和讨论串都会被删除，所有人都看不到。删除后无法恢复。",
+    save: "保存",
+    saving: "保存中…",
     title: "内部沟通",
     search: "搜索消息",
     channels: "频道",

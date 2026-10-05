@@ -188,7 +188,7 @@ export async function contactDetail(companyId: string, id: string) {
     with: { tagLinks: { with: { tag: true } } },
   });
   if (!c) return null;
-  const [convos, fields] = await Promise.all([
+  const [convos, fields, allTags] = await Promise.all([
     db.query.conversation.findMany({
       where: eq(conversation.contactId, id),
       orderBy: desc(conversation.lastMessageAt),
@@ -202,8 +202,9 @@ export async function contactDetail(companyId: string, id: string) {
       where: eq(contactField.companyId, companyId),
       orderBy: asc(contactField.createdAt),
     }),
+    db.query.tag.findMany({ where: eq(tag.companyId, companyId), orderBy: asc(tag.name) }),
   ]);
-  return { c, convos, fields };
+  return { c, convos, fields, allTags };
 }
 
 const TZ = "Asia/Kuala_Lumpur";

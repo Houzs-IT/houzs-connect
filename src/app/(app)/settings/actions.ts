@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { and, eq } from "drizzle-orm";
 import { getDb } from "@/db/client";
-import { contactField, quickReply, tag } from "@/db/schema";
+import { contactField, contactTag, conversationTag, quickReply, tag } from "@/db/schema";
 import { getCurrentMember } from "@/lib/current-member";
 
 /** Auth + company scope for every settings mutation. Null when unauthenticated. */
@@ -85,6 +85,15 @@ export async function deleteTag(formData: FormData) {
   if (!c) return;
   const id = String(formData.get("id") ?? "");
   if (!id) return;
-  await c.db.delete(tag).where(and(eq(tag.id, id), eq(tag.companyId, c.companyId)));
+  const own = await c.db.query.tag.findFirst({ where: and(eq(tag.id, id), eq(tag.companyId, c.companyId)), columns: { id: true } });
+  if (!own) return;
+  // Nothing removes a deleted tag's links by itself; take it off everything first.
+  await c.db.transaction(async (tx) => {
+    await tx.delete(contactTag).where(eq(contactTag.tagId, id));
+    await tx.delete(conversationTag).where(eq(conversationTag.tagId, id));
+    await tx.delete(tag).where(eq(tag.id, id));
+  });
   revalidatePath("/settings", "layout");
+  revalidatePath("/contacts", "layout");
+  revalidatePath("/inbox", "layout");
 }

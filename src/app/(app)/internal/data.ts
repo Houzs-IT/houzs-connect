@@ -16,7 +16,7 @@ const rows = async <T,>(q: ReturnType<typeof sql>) => (await getDb().execute(q))
 
 /** Lower-case, dash-separated channel name: "Customer Service" → "customer-service". */
 export function slug(s: string): string {
-  return s.toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40) || "channel";
+  return s.toLowerCase().trim().replace(/[^\p{L}\p{N}]+/gu, "-").replace(/^-+|-+$/g, "").slice(0, 40) || "channel";
 }
 
 /**
@@ -243,8 +243,8 @@ async function withPhotos<T extends ChatMessage>(msgs: T[]): Promise<T[]> {
 }
 
 export async function channelInfo(companyId: string, channelId: string, meId: string) {
-  const r = await rows<{ id: string; kind: string; name: string; topic: string | null; other_name: string | null }>(sql`
-    select c.id, c.kind, c.name, c.topic,
+  const r = await rows<{ id: string; kind: string; name: string; topic: string | null; created_by: string | null; other_name: string | null }>(sql`
+    select c.id, c.kind, c.name, c.topic, c.created_by_member_id as created_by,
       (select mo.name from connect.internal_channel_member o join connect.member mo on mo.id = o.member_id
         where o.channel_id = c.id and o.member_id <> ${meId} limit 1) as other_name
     from connect.internal_channel c
@@ -252,7 +252,9 @@ export async function channelInfo(companyId: string, channelId: string, meId: st
       and (c.kind = 'channel' or exists (select 1 from connect.internal_channel_member x where x.channel_id = c.id and x.member_id = ${meId}))
   `);
   const c = r[0];
-  return c ? { id: c.id, kind: c.kind as "channel" | "dm", name: c.kind === "dm" ? (c.other_name ?? c.name) : c.name, topic: c.topic } : null;
+  return c
+    ? { id: c.id, kind: c.kind as "channel" | "dm", name: c.kind === "dm" ? (c.other_name ?? c.name) : c.name, topic: c.topic, createdBy: c.created_by }
+    : null;
 }
 
 /** The channel's timeline: top-level messages and replies also sent to it, oldest first. */

@@ -23,7 +23,12 @@ export type MenuItem = {
   sub?: string;
 };
 
-export type MenuGroup = { title?: string; items: MenuItem[] };
+export type MenuGroup = {
+  title?: string;
+  items: MenuItem[];
+  /** A small control beside the heading (e.g. Contacts' "Manage" for tags). */
+  action?: React.ReactNode;
+};
 
 function hrefActive(item: MenuItem, path: string, search: string) {
   if (item.href.startsWith("?")) return search === item.href.slice(1);
@@ -83,9 +88,10 @@ export function SecondaryMenu({
       <nav className="scroll-thin flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-2 py-3">
         {groups.map((g, gi) => (
           <div key={g.title ?? gi} className="flex flex-col gap-px">
-            {g.title && (
-              <div className="px-2 pb-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--color-faint)]">
-                {g.title}
+            {(g.title || g.action) && (
+              <div className="flex items-center justify-between gap-2 px-2 pb-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--color-faint)]">
+                <span>{g.title}</span>
+                {g.action}
               </div>
             )}
             {g.items.map((item) => {

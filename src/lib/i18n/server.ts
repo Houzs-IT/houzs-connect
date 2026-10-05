@@ -1,6 +1,6 @@
 import { cache } from "react";
 import { cookies } from "next/headers";
-import { DICTS, LANG_COOKIE, MENU_COOKIE, parseLang } from "./dict";
+import { DICTS, LANG_COOKIE, MENU_COOKIE, PANEL_COOKIE, parseLang } from "./dict";
 
 /** The viewer's language, from the `hc_lang` cookie (default English). */
 export const getLang = cache(async () => {
@@ -12,6 +12,12 @@ export const getLang = cache(async () => {
 export async function getDict() {
   return DICTS[await getLang()];
 }
+
+/** Whether this browser put the conversation's customer panel away (`hc_panel=0`). */
+export const getPanelCollapsed = cache(async () => {
+  const jar = await cookies();
+  return jar.get(PANEL_COOKIE)?.value === "0";
+});
 
 /** Whether this browser collapsed the secondary menu (`hc_menu=0`). */
 export const getMenuCollapsed = cache(async () => {

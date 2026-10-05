@@ -9,6 +9,7 @@ import { Composer } from "@/components/inbox/Composer";
 import { ContactPanel, type FirstReply } from "@/components/inbox/ContactPanel";
 import { ConversationMenu } from "@/components/inbox/ConversationMenu";
 import { AssignButton, ResolveButton } from "@/components/inbox/HeaderActions";
+import { MenuWithoutPanel, PanelGate, PanelToggle } from "@/components/inbox/PanelToggle";
 import { DemoReplyBar } from "@/components/inbox/DemoReplyBar";
 import { WindowTimer } from "@/components/inbox/WindowTimer";
 import { getCurrentMember } from "@/lib/current-member";
@@ -273,10 +274,12 @@ export default async function ConversationPage({
             <div className="hidden md:block">
               <ResolveButton conversationId={convo.id} closed={convo.status === "CLOSED"} />
             </div>
-            {/* The panel (and its menu) is hidden below xl; keep the actions. */}
-            <div className="xl:hidden">
+            {/* Put the customer panel away / bring it back (wide screens). */}
+            <PanelToggle />
+            {/* The panel (and its menu) is hidden below xl or when put away; keep the actions. */}
+            <MenuWithoutPanel>
               <ConversationMenu conversationId={convo.id} />
-            </div>
+            </MenuWithoutPanel>
           </div>
         </div>
 
@@ -315,7 +318,8 @@ export default async function ConversationPage({
         />
       </div>
 
-      {/* Right: contact + order attributes */}
+      {/* Right: contact + order attributes (can be put away) */}
+      <PanelGate>
       <ContactPanel
         conversationId={convo.id}
         contactName={name}
@@ -346,6 +350,7 @@ export default async function ConversationPage({
         }))}
         automation={automation}
       />
+      </PanelGate>
     </div>
   );
 }

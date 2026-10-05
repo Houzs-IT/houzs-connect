@@ -11,6 +11,8 @@ import { photoSrcs } from "@/lib/member-photo";
 import { companyPresence } from "@/lib/presence";
 import { channelInfo, channelMessages, ensureInternal, threadMessages } from "./data";
 import { Composer } from "./Composer";
+import { ChannelMenu } from "./ChannelMenu";
+import { isAdminRole } from "@/lib/permissions";
 import { LiveRefresh } from "./LiveRefresh";
 import { Avatar, MessageRow, dayKey } from "./parts";
 
@@ -64,6 +66,9 @@ export async function ChannelView({ channelId, threadId }: { channelId: string; 
           </span>
           <CompanySwitcher companies={await companyChoices(getDb(), me)} className="hidden md:block" />
           <LangToggle className="hidden md:flex" />
+          {ch.kind === "channel" && (isAdminRole(me.role) || ch.createdBy === me.id) && (
+            <ChannelMenu id={ch.id} name={ch.name} topic={ch.topic} />
+          )}
           {panelHref && (
             <Link
               href={panelHref}
