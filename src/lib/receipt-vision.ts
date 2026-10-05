@@ -304,9 +304,12 @@ export async function probeReceiptAi(): Promise<ProbeResult> {
     fetch: (globalThis.fetch as typeof fetch & { _nextOriginalFetch?: unknown })._nextOriginalFetch ? "next-original" : "global",
     steps: [],
   };
-  const ping = (text: string) => JSON.stringify({ model: MODEL, max_tokens: 1, messages: [{ role: "user", content: text }] });
+  // count_tokens takes no max_tokens (it answers 400 to one); /messages needs it.
+  const ping = (text: string) => JSON.stringify({ model: MODEL, messages: [{ role: "user", content: text }] });
 
-  result.steps.push(await post("reach the API (no key)", "/messages", null, ping("ping"), 401));
+  result.steps.push(
+    await post("reach the API (no key)", "/messages", null, JSON.stringify({ model: MODEL, max_tokens: 1, messages: [{ role: "user", content: "ping" }] }), 401)
+  );
   if (!key) return result;
   result.steps.push(await post("key accepted", "/messages/count_tokens", key, ping("ping"), 200));
   // The key exactly as stored, when cleaning changed it: shows whether the
