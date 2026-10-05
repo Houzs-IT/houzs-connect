@@ -1,7 +1,8 @@
-import { and, asc, count, desc, eq, gte, ilike, lte, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, gte, ilike, lte, or, sql, type SQL } from "drizzle-orm";
 import Link from "next/link";
 import { getDb } from "@/db/client";
 import { campaign, contact, contactTag, tag } from "@/db/schema";
+import { DataTable, type DataColumn, type DataRow } from "@/components/DataTable";
 import { PageChrome } from "@/components/PageChrome";
 import { SecondaryMenu } from "@/components/shell/SecondaryMenu";
 import { IconSearch } from "@/components/icons";
@@ -30,6 +31,9 @@ function one(v: string | string[] | undefined): string {
 
 const MANAGERS = new Set(["SUPER_ADMIN", "OWNER", "ADMIN", "MANAGER"]);
 
+/** Lifecycle order when sorting by status. */
+const STATUS_RANK: Record<CampStatus, number> = { draft: 0, scheduled: 1, due: 2, sending: 3, sent: 4, failed: 5 };
+
 export default async function CampaignsPage({
   searchParams,
 }: {
@@ -48,7 +52,8 @@ export default async function CampaignsPage({
   const statusFilter = one(sp.status);
 
   const filters = [eq(campaign.companyId, me.companyId)];
-  if (q) filters.push(ilike(campaign.name, `%${q}%`));
+  // The name, or the template it sends.
+  if (q) filters.push(or(ilike(campaign.name, `%${q}%`), ilike(campaign.templateName, `%${q}%`)) as SQL);
   if (from) filters.push(gte(campaign.createdAt, new Date(`${from}T00:00:00+08:00`)));
   if (to) filters.push(lte(campaign.createdAt, new Date(`${to}T23:59:59+08:00`)));
 
@@ -155,7 +160,117 @@ export default async function CampaignsPage({
   };
 
   const canApprove = MANAGERS.has(me.role);
-  const cols = "grid-cols-[minmax(0,2.3fr)_minmax(0,1.3fr)_minmax(0,2fr)_minmax(0,1.1fr)_minmax(0,1.1fr)_36px]";
+
+  const columns: DataColumn[] = [
+    { key: "campaign", label: L.colCampaign },
+    { key: "audience", label: L.colAudience },
+    { key: "result", label: L.colResult, filter: false, className: "w-[260px]" },
+    { key: "when", label: L.colWhen, filter: false },
+    { key: "status", label: L.colStatus },
+    { key: "actions", label: "", sort: false, filter: false, align: "right", className: "w-[52px]" },
+  ];
+
+  const tableRows: DataRow[] = shown.map((r, i) => {
+    const stats = (r.stats as CampaignStats | null) ?? {};
+    const aud = audienceOf(r);
+    const c = counts.get(r.id);
+    const sentState = r.s === "sent" || r.s === "sending" || r.s === "failed";
+    const editable = r.s === "draft" || r.s === "scheduled" || r.s === "due";
+    const href = editable ? `/campaigns/new?edit=${r.id}` : `/campaigns/${r.id}`;
+    const at = sentState ? stats.startedAt : r.scheduleAt;
+    const sentN = !sentState ? null : c && c.sent > 0 ? c.sent : (stats.sent ?? 0);
+    return {
+      id: r.id,
+      search: r.templateName ?? undefined,
+      sort: {
+        campaign: r.name,
+        audience: aud.people,
+        result: sentN,
+        when: at ? new Date(at).getTime() : null,
+        status: STATUS_RANK[r.s],
+      },
+      text: {
+        campaign: r.name,
+        audience: aud.label,
+        result: sentN == null ? L.notSent : fmt(L.nSent, { n: sentN }),
+        when: whenLabel(at) || null,
+        status: L[r.s],
+      },
+      cells: {
+        campaign: (
+          <div className="flex min-w-0 max-w-[380px] items-center gap-3">
+            <CampIcon seed={i} />
+            <div className="min-w-0">
+              <Link href={href} className="block truncate text-[13.5px] font-semibold text-[var(--color-ink)] hover:underline">
+                {r.name}
+              </Link>
+              <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[11.5px]">
+                <span className="rounded-[4px] border border-[var(--color-border)] px-1.5 py-px text-[11px] text-[var(--color-faint)]">
+                  {r.templateName || "—"}
+                </span>
+                {!!stats.failed && <span className="text-[var(--color-danger)]">{fmt(L.refused, { n: stats.failed })}</span>}
+                {stats.error && <span className="text-[var(--color-danger)]">{stats.error}</span>}
+                {!!stats.skippedOptedOut && (
+                  <span className="text-[var(--color-faint)]">{fmt(L.skippedOpt, { n: stats.skippedOptedOut })}</span>
+                )}
+                {!!stats.skippedBlocked && (
+                  <span className="text-[var(--color-faint)]">{fmt(L.skippedBlocked, { n: stats.skippedBlocked })}</span>
+                )}
+              </div>
+            </div>
+          </div>
+        ),
+        audience: (
+          <div className="min-w-0 max-w-[220px]">
+            <div className="flex items-center gap-1.5 truncate text-[12.5px] text-[var(--color-ink)]">
+              {aud.dot && <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: aud.dot }} />}
+              <span className="truncate">{aud.label}</span>
+            </div>
+            <div className="text-[11.5px] text-[var(--color-faint)]">
+              {aud.people == null ? "—" : fmt(L.people, { n: aud.people.toLocaleString("en-US") })}
+            </div>
+          </div>
+        ),
+        result: !sentState ? (
+          <span className="text-[12px] text-[var(--color-faint)]">{L.notSent}</span>
+        ) : c && c.sent > 0 ? (
+          <ResultBar sent={c.sent} read={c.read} replied={c.replied} total={Math.max(c.total, 1)} L={L} />
+        ) : (stats.sent ?? 0) > 0 ? (
+          // Sent before messages carried their campaign: the count only.
+          <ResultBar sent={stats.sent ?? 0} read={0} replied={0} total={Math.max(stats.total ?? 0, stats.sent ?? 0, 1)} L={L} />
+        ) : (
+          <span className="text-[12px] text-[var(--color-muted)]">{fmt(L.nSent, { n: stats.sent ?? 0 })}</span>
+        ),
+        when: (
+          <div className="whitespace-nowrap leading-tight">
+            <div className="text-[12.5px] text-[var(--color-ink)]">{whenLabel(at) || "—"}</div>
+            {!!at && <div className="mt-0.5 text-[11px] text-[var(--color-faint)]">{sentState ? L.startedL : L.scheduled}</div>}
+          </div>
+        ),
+        status: (
+          <div className="leading-tight">
+            <StatusBadge s={r.s} L={L} />
+            {r.requiresApproval && (r.approvedByMemberId || !sentState) && (
+              <div className={`mt-1 text-[11px] ${r.approvedByMemberId ? "text-[var(--color-faint)]" : "text-[var(--color-warning)]"}`}>
+                {r.approvedByMemberId ? L.approved : L.waiting}
+              </div>
+            )}
+          </div>
+        ),
+        actions: (
+          <div className="flex justify-end">
+            <CampaignRowMenu
+              id={r.id}
+              name={r.name}
+              editable={editable}
+              scheduled={r.s === "scheduled" || r.s === "due"}
+              canApprove={canApprove && r.waiting}
+            />
+          </div>
+        ),
+      },
+    };
+  });
 
   return (
     <>
@@ -215,144 +330,25 @@ export default async function CampaignsPage({
             <RangePicker from={from} to={to} />
           </div>
 
-          <div className="overflow-x-auto rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)]">
-            <div className="min-w-[980px]">
-              <div
-                className={`grid ${cols} gap-3 border-b border-[var(--color-border)] bg-[var(--color-surface-2)] px-4 py-2.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--color-faint)]`}
-              >
-                <span>{L.colCampaign}</span>
-                <span>{L.colAudience}</span>
-                <span>{L.colResult}</span>
-                <span>{L.colWhen}</span>
-                <span>{L.colStatus}</span>
-                <span />
-              </div>
+          {/* The search above runs on the server (it reaches past the rows
+              loaded here); the table sorts and funnel-filters the loaded rows. */}
+          <DataTable
+            columns={columns}
+            rows={tableRows}
+            search={false}
+            minWidth={980}
+            stateKey="campaigns"
+            empty={q || from || to || statusFilter ? L.noMatch : L.none}
+          />
 
-              {shown.length === 0 && (
-                <p className="px-4 py-10 text-center text-[13px] text-[var(--color-faint)]">
-                  {all.length && (q || from || to || statusFilter) ? L.noMatch : L.none}
-                </p>
-              )}
-
-              {shown.map((r, i) => {
-                const stats = (r.stats as CampaignStats | null) ?? {};
-                const aud = audienceOf(r);
-                const c = counts.get(r.id);
-                const sentState = r.s === "sent" || r.s === "sending" || r.s === "failed";
-                const editable = r.s === "draft" || r.s === "scheduled" || r.s === "due";
-                const href = editable ? `/campaigns/new?edit=${r.id}` : `/campaigns/${r.id}`;
-                return (
-                  <div
-                    key={r.id}
-                    className={`grid ${cols} items-center gap-3 border-b border-[var(--color-border-subtle)] px-4 py-3.5 last:border-b-0 hover:bg-[var(--color-surface-2)]`}
-                  >
-                    <div className="flex min-w-0 items-center gap-3">
-                      <CampIcon seed={i} />
-                      <div className="min-w-0">
-                        <Link
-                          href={href}
-                          className="block truncate text-[13.5px] font-semibold text-[var(--color-ink)] hover:underline"
-                        >
-                          {r.name}
-                        </Link>
-                        <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[11.5px]">
-                          <span className="rounded-[4px] border border-[var(--color-border)] px-1.5 py-px text-[11px] text-[var(--color-faint)]">
-                            {r.templateName || "—"}
-                          </span>
-                          {!!stats.failed && (
-                            <span className="text-[var(--color-danger)]">{fmt(L.refused, { n: stats.failed })}</span>
-                          )}
-                          {stats.error && <span className="text-[var(--color-danger)]">{stats.error}</span>}
-                          {!!stats.skippedOptedOut && (
-                            <span className="text-[var(--color-faint)]">
-                              {fmt(L.skippedOpt, { n: stats.skippedOptedOut })}
-                            </span>
-                          )}
-                          {!!stats.skippedBlocked && (
-                            <span className="text-[var(--color-faint)]">
-                              {fmt(L.skippedBlocked, { n: stats.skippedBlocked })}
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-1.5 truncate text-[12.5px] text-[var(--color-ink)]">
-                        {aud.dot && (
-                          <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: aud.dot }} />
-                        )}
-                        <span className="truncate">{aud.label}</span>
-                      </div>
-                      <div className="text-[11.5px] text-[var(--color-faint)]">
-                        {aud.people == null ? "—" : fmt(L.people, { n: aud.people.toLocaleString("en-US") })}
-                      </div>
-                    </div>
-
-                    <div className="min-w-0">
-                      {!sentState ? (
-                        <span className="text-[12px] text-[var(--color-faint)]">{L.notSent}</span>
-                      ) : c && c.sent > 0 ? (
-                        <ResultBar sent={c.sent} read={c.read} replied={c.replied} total={Math.max(c.total, 1)} L={L} />
-                      ) : (stats.sent ?? 0) > 0 ? (
-                        // Sent before messages carried their campaign: the count only.
-                        <ResultBar sent={stats.sent ?? 0} read={0} replied={0} total={Math.max(stats.total ?? 0, stats.sent ?? 0, 1)} L={L} />
-                      ) : (
-                        <span className="text-[12px] text-[var(--color-muted)]">
-                          {fmt(L.nSent, { n: stats.sent ?? 0 })}
-                        </span>
-                      )}
-                    </div>
-
-                    <div className="leading-tight">
-                      <div className="text-[12.5px] text-[var(--color-ink)]">
-                        {sentState
-                          ? whenLabel(stats.startedAt) || "—"
-                          : r.scheduleAt
-                            ? whenLabel(r.scheduleAt)
-                            : "—"}
-                      </div>
-                      {(sentState ? !!stats.startedAt : !!r.scheduleAt) && (
-                        <div className="mt-0.5 text-[11px] text-[var(--color-faint)]">
-                          {sentState ? L.startedL : L.scheduled}
-                        </div>
-                      )}
-                    </div>
-
-                    <div className="leading-tight">
-                      <StatusBadge s={r.s} L={L} />
-                      {r.requiresApproval && (r.approvedByMemberId || !sentState) && (
-                        <div
-                          className={`mt-1 text-[11px] ${
-                            r.approvedByMemberId ? "text-[var(--color-faint)]" : "text-[var(--color-warning)]"
-                          }`}
-                        >
-                          {r.approvedByMemberId ? L.approved : L.waiting}
-                        </div>
-                      )}
-                    </div>
-
-                    <CampaignRowMenu
-                      id={r.id}
-                      name={r.name}
-                      editable={editable}
-                      scheduled={r.s === "scheduled" || r.s === "due"}
-                      canApprove={canApprove && r.waiting}
-                    />
-                  </div>
-                );
-              })}
-
-              {shown.length > 0 && (
-                <div className="flex flex-wrap items-center gap-4 border-t border-[var(--color-border)] px-4 py-2.5 text-[11.5px] text-[var(--color-muted)]">
-                  <Legend color="#a9c1f5" label={L.sentL} />
-                  <Legend color="var(--color-pastel-blue-ink)" label={L.readL} />
-                  <Legend color="var(--color-pastel-purple-ink)" label={L.repliedL} />
-                  <span className="ml-auto text-[11px] text-[var(--color-faint)]">{L.legendNote}</span>
-                </div>
-              )}
+          {shown.length > 0 && (
+            <div className="flex flex-wrap items-center gap-4 px-1 text-[11.5px] text-[var(--color-muted)]">
+              <Legend color="#a9c1f5" label={L.sentL} />
+              <Legend color="var(--color-pastel-blue-ink)" label={L.readL} />
+              <Legend color="var(--color-pastel-purple-ink)" label={L.repliedL} />
+              <span className="ml-auto text-[11px] text-[var(--color-faint)]">{L.legendNote}</span>
             </div>
-          </div>
+          )}
         </div>
       </PageChrome>
     </>

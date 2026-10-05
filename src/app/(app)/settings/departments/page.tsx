@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import { asc, count, eq } from "drizzle-orm";
 import { getDb } from "@/db/client";
 import { department, member } from "@/db/schema";
+import { DataTable, type DataColumn, type DataRow } from "@/components/DataTable";
 import { PageChrome } from "@/components/PageChrome";
 import { getCurrentMember } from "@/lib/current-member";
 import { fmt } from "@/lib/i18n/dict";
@@ -27,33 +28,39 @@ export default async function DepartmentsPage() {
   ]);
   const by = new Map(heads.map((h) => [h.id, h.n]));
 
+  const columns: DataColumn[] = [
+    { key: "name", label: L.department, filter: false },
+    { key: "people", label: L.members, align: "right", className: "w-[160px]" },
+  ];
+  const rows: DataRow[] = depts.map((d, i) => {
+    const tone = TONES[i % TONES.length];
+    const n = by.get(d.id) ?? 0;
+    return {
+      id: d.id,
+      sort: { name: d.name, people: n },
+      text: { name: d.name, people: fmt(L.deptMembers, { n }) },
+      cells: {
+        name: (
+          <div className="flex items-center gap-3">
+            <span
+              className="grid h-8 w-8 shrink-0 place-items-center rounded-full text-[12px] font-bold"
+              style={{ background: `var(--color-pastel-${tone})`, color: `var(--color-pastel-${tone}-ink)` }}
+            >
+              {d.name.slice(0, 1).toUpperCase()}
+            </span>
+            <span className="min-w-0 truncate font-semibold text-[var(--color-ink)]">{d.name}</span>
+          </div>
+        ),
+        people: <span className="tabular-nums text-[var(--color-muted)]">{fmt(L.deptMembers, { n })}</span>,
+      },
+    };
+  });
+
   return (
     <PageChrome section="settings" crumbs={[L.departments]}>
       <div className="max-w-[1000px] p-4 md:p-6">
         <SettingsHead title={L.departments} sub={L.deptSub} />
-        {depts.length === 0 ? (
-          <p className="rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)] p-6 text-[13px] text-[var(--color-faint)]">{L.noDepts}</p>
-        ) : (
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {depts.map((d, i) => {
-              const tone = TONES[i % TONES.length];
-              return (
-                <div key={d.id} className="flex items-center gap-3 rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-3.5">
-                  <span
-                    className="grid h-9 w-9 shrink-0 place-items-center rounded-full text-[13px] font-bold"
-                    style={{ background: `var(--color-pastel-${tone})`, color: `var(--color-pastel-${tone}-ink)` }}
-                  >
-                    {d.name.slice(0, 1).toUpperCase()}
-                  </span>
-                  <div className="min-w-0">
-                    <div className="truncate text-[14px] font-semibold text-[var(--color-ink)]">{d.name}</div>
-                    <div className="text-[12px] text-[var(--color-faint)]">{fmt(L.deptMembers, { n: by.get(d.id) ?? 0 })}</div>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
+        <DataTable columns={columns} rows={rows} minWidth={420} stateKey="settings-departments" empty={L.noDepts} />
       </div>
     </PageChrome>
   );

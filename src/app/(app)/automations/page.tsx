@@ -5,10 +5,10 @@ import { automation, automationRun, channel } from "@/db/schema";
 import { PageChrome } from "@/components/PageChrome";
 import { relTime } from "@/lib/format";
 import { getCurrentMember } from "@/lib/current-member";
-import { AutomationCard, type AutomationCardData } from "./AutomationCard";
+import { AutomationActions, AutomationName, AutomationStatus, type AutomationCardData } from "./AutomationCard";
 import { NewAutomation } from "./NewAutomation";
 import { SecondaryMenu } from "@/components/shell/SecondaryMenu";
-import { IconSearch } from "@/components/icons";
+import { DataTable, type DataColumn, type DataRow } from "@/components/DataTable";
 import { fmt } from "@/lib/i18n/dict";
 import { getDict } from "@/lib/i18n/server";
 import {
@@ -24,7 +24,7 @@ import {
 export default async function AutomationsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ q?: string; status?: string; trigger?: string }>;
+  searchParams: Promise<{ status?: string; trigger?: string }>;
 }) {
   const sp = await searchParams;
   // This page listed EVERY company's automations: no `getCurrentMember()`, no
@@ -131,6 +131,7 @@ export default async function AutomationsPage({
       edgeCount: a.edgeCount,
       runCount: runsByAutomation.get(a.id) ?? 0,
       updatedLabel: rel(a.updatedAt),
+      updatedAt: a.updatedAt.getTime(),
       messageSteps: sends.messageSteps,
       apiSteps: sends.apiSteps,
       gaps: findFlowGaps(probes),
@@ -142,21 +143,62 @@ export default async function AutomationsPage({
 
   const liveCount = cards.filter((c) => c.enabled).length;
   const needs = (c: AutomationCardData) => c.gaps.length > 0 || c.importApproximations != null;
-  const q = (sp.q ?? "").trim().toLowerCase();
+  // The left menu's status / trigger links narrow the list here; searching,
+  // sorting and the column filters then run in the table over what is left.
+  // (The old `?q=` search only matched names over these same loaded rows, so
+  // the table's own search replaces it.)
   const shown = cards.filter((c) => {
     if (sp.status === "live" && !c.enabled) return false;
     if (sp.status === "draft" && c.enabled) return false;
     if (sp.status === "check" && !needs(c)) return false;
     if (sp.trigger && c.triggerLabel !== sp.trigger) return false;
-    if (q && !c.name.toLowerCase().includes(q)) return false;
     return true;
   });
   const L = t.autos;
   // The everyday triggers are always listed, the rest only when used.
   const byTrigger = new Map<string, number>(["ACTION_CALLBACK", "NEW_INCOMING_MESSAGE", "TAG_ADDED"].map((k) => [k, 0]));
   for (const c of cards) byTrigger.set(c.triggerLabel, (byTrigger.get(c.triggerLabel) ?? 0) + 1);
-  const cols =
-    "grid-cols-[minmax(0,2.4fr)_minmax(0,1.7fr)_minmax(0,1.1fr)_minmax(0,0.8fr)_minmax(0,0.9fr)_36px]";
+
+  const columns: DataColumn[] = [
+    // `max-w-0` with a share of the width lets the long names and trigger
+    // details truncate instead of stretching the table.
+    { key: "name", label: L.colName, className: "w-[32%] max-w-0" },
+    { key: "when", label: L.colWhen, className: "w-[22%] max-w-0" },
+    { key: "runs", label: L.colRuns, filter: false },
+    { key: "edited", label: L.colEdited, filter: false },
+    { key: "status", label: L.colStatus },
+    { key: "actions", label: "", sort: false, filter: false, className: "w-[60px]" },
+  ];
+  const tableRows: DataRow[] = shown.map((a) => {
+    const trigger = L.triggers[a.triggerLabel] ?? a.triggerLabel;
+    const status = a.enabled ? L.live : L.draft;
+    return {
+      id: a.id,
+      search: [a.triggerDetail, a.note].filter(Boolean).join(" "),
+      sort: { name: a.name, when: trigger, runs: a.runs7, edited: a.updatedAt, status },
+      text: { name: a.name, when: trigger, edited: a.updatedLabel, status },
+      cells: {
+        name: <AutomationName a={a} />,
+        when: (
+          <div className="min-w-0">
+            <div className="truncate text-[12.5px] text-[var(--color-ink)]">{trigger}</div>
+            <div className="truncate text-[11.5px] text-[var(--color-faint)]" title={a.triggerSentence}>
+              {a.triggerDetail ?? L.triggerSub[a.triggerLabel] ?? a.channelName}
+            </div>
+          </div>
+        ),
+        runs: <RunsCell a={a} last7={L.last7} />,
+        edited: (
+          <div className="whitespace-nowrap leading-tight">
+            <div className="text-[12.5px] text-[var(--color-ink)]">{a.updatedLabel}</div>
+            <div className="text-[10.5px] text-[var(--color-faint)]">v{a.version}</div>
+          </div>
+        ),
+        status: <AutomationStatus a={a} />,
+        actions: <AutomationActions a={a} />,
+      },
+    };
+  });
 
   return (
     <>
@@ -195,47 +237,41 @@ export default async function AutomationsPage({
         actions={<NewAutomation triggers={CREATABLE_TRIGGERS} canCreate={!!defaultChannel} />}
       >
         <div className="flex flex-col gap-4 p-4 md:p-6">
-          <div className="flex flex-wrap items-center gap-3">
-            <form className="flex h-[38px] w-full max-w-[320px] items-center gap-2 rounded-[8px] border border-[var(--color-border)] bg-[var(--color-surface)] px-3 focus-within:border-[var(--color-accent)]">
-              {sp.status && <input type="hidden" name="status" value={sp.status} />}
-              {sp.trigger && <input type="hidden" name="trigger" value={sp.trigger} />}
-              <IconSearch width={15} height={15} className="text-[var(--color-faint)]" />
-              <input
-                name="q"
-                defaultValue={sp.q ?? ""}
-                placeholder={L.search}
-                className="w-full bg-transparent text-[13px] outline-none placeholder:text-[var(--color-faint)]"
-              />
-            </form>
-            <span className="ml-auto text-[12px] text-[var(--color-faint)]">
-              {fmt(L.summary, { n: cards.length, live: liveCount })}
-            </span>
-          </div>
-
-          <div className="overflow-x-auto rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)]">
-            <div className="min-w-[900px]">
-              <div
-                className={`grid ${cols} gap-3 border-b border-[var(--color-border)] px-4 py-2.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--color-faint)]`}
-              >
-                <span>{L.colName}</span>
-                <span>{L.colWhen}</span>
-                <span>{L.colRuns}</span>
-                <span>{L.colEdited}</span>
-                <span>{L.colStatus}</span>
-                <span />
-              </div>
-              {shown.length === 0 ? (
-                <p className="px-4 py-10 text-center text-[13px] text-[var(--color-faint)]">
-                  {cards.length ? L.noMatch : L.none}
-                </p>
-              ) : (
-                shown.map((a) => <AutomationCard key={a.id} a={a} />)
-              )}
-            </div>
-          </div>
+          <DataTable
+            columns={columns}
+            rows={tableRows}
+            searchPlaceholder={L.search}
+            empty={cards.length ? L.noMatch : L.none}
+            toolbar={
+              <span className="text-[12px] text-[var(--color-faint)]">
+                {fmt(L.summary, { n: cards.length, live: liveCount })}
+              </span>
+            }
+            minWidth={900}
+            stateKey="automations"
+          />
         </div>
       </PageChrome>
     </>
+  );
+}
+
+/** Runs column: the last seven days as a sparkline, with their total. */
+function RunsCell({ a, last7 }: { a: AutomationCardData; last7: string }) {
+  const max = Math.max(1, ...a.daily);
+  const spark = a.daily
+    .map((v, i) => `${(i / Math.max(1, a.daily.length - 1)) * 56},${18 - (v / max) * 16}`)
+    .join(" ");
+  return (
+    <div className="flex items-center gap-2.5">
+      <svg width="56" height="20" viewBox="0 0 56 20" className="shrink-0" aria-hidden>
+        <polyline points={spark} fill="none" stroke={a.runs7 ? "var(--color-accent)" : "var(--color-border-strong)"} strokeWidth="1.4" strokeLinejoin="round" />
+      </svg>
+      <div className="leading-tight">
+        <div className="text-[12.5px] font-semibold tabular-nums text-[var(--color-ink)]">{a.runs7}</div>
+        <div className="whitespace-nowrap text-[10.5px] text-[var(--color-faint)]">{last7}</div>
+      </div>
+    </div>
   );
 }
 

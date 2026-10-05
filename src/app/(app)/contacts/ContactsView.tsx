@@ -1,12 +1,12 @@
 "use client";
 
-import { useEffect, useRef, useState, useSyncExternalStore } from "react";
-import Link from "next/link";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { fmt } from "@/lib/i18n/dict";
 import { initials, tint } from "@/lib/format";
 import { useShell } from "@/components/shell/ShellProvider";
 import { IconClose, IconDots, IconSearch } from "@/components/icons";
+import { DataCount, DataHead, DataMenus, useDataTable, type DataColumn, type DataRow } from "@/components/DataTable";
 import { bulkBlockContacts, bulkTagContacts, mergeContacts, setContactBlocked } from "./actions";
 import { DeleteContactButton } from "./DeleteContactButton";
 
@@ -21,6 +21,8 @@ export type ContactRow = {
   tags: { id: string; name: string; color: string }[];
   last: { body: string; inbound: boolean } | null;
   updated: string;
+  /** Last activity, for sorting. */
+  updatedTs: number;
   email: string | null;
   source: string | null;
   sourceId: string | null;
@@ -28,6 +30,7 @@ export type ContactRow = {
   company: string | null;
   remarks: string | null;
   created: string;
+  createdTs: number;
 };
 
 export type DupPair = {
@@ -196,7 +199,6 @@ export function ContactsView({
     timer.current = setTimeout(() => go({ q: v.trim() || null }), 400);
   }
 
-  const allOnPage = rows.length > 0 && rows.every((r) => selected.has(r.id));
   const toggle = (id: string) =>
     setSelected((prev) => {
       const next = new Set(prev);
@@ -247,6 +249,53 @@ export function ContactsView({
   };
   const th = "px-3 py-2.5 text-left text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--color-faint)]";
 
+  // Header sort and funnels over the contacts on this page (the search box and
+  // the Tag / Sales / State pills above still reach the whole book).
+  const columns: DataColumn[] = [
+    { key: "name", label: s.colName },
+    { key: "order", label: s.colOrder },
+    { key: "sales", label: s.colSales },
+    { key: "tags", label: s.colTags },
+    { key: "last", label: s.colLast, filter: false },
+    { key: "updated", label: s.colUpdated, filter: false },
+    ...extra.map((c) => ({ key: c, label: colLabel[c], filter: c !== "created" && c !== "remarks" && c !== "sourceUrl" })),
+  ];
+  const dataRows = useMemo<DataRow[]>(
+    () =>
+      rows.map((r) => ({
+        id: r.id,
+        cells: {},
+        search: [r.phone, r.email, r.orderSub].filter(Boolean).join(" "),
+        sort: {
+          name: r.name,
+          order: r.orderRef,
+          sales: r.sales,
+          tags: r.tags.map((x) => x.name).join(", "),
+          last: r.last?.body ?? null,
+          updated: r.updatedTs,
+          email: r.email,
+          source: r.source ? (s.sources[r.source] ?? r.source) : null,
+          sourceId: r.sourceId,
+          sourceUrl: r.sourceUrl,
+          company: r.company,
+          remarks: r.remarks,
+          created: r.createdTs,
+          blocked: r.blocked ? 1 : 0,
+        },
+        text: {
+          tags: r.tags.map((x) => x.name),
+          blocked: r.blocked ? s.blockedBadge : "\u2014",
+          updated: r.updated,
+          created: r.created,
+        },
+      })),
+    [rows, s]
+  );
+  const table = useDataTable(dataRows, columns, { stateKey: "contacts" });
+  const byId = new Map(rows.map((r) => [r.id, r]));
+  const visible = table.shown.map((d) => byId.get(d.id)).filter((r): r is ContactRow => !!r);
+  const allOnPage = visible.length > 0 && visible.every((r) => selected.has(r.id));
+
   return (
     <div className="flex min-w-0 flex-1 flex-col gap-3 p-4">
       {/* Search · filters · columns */}
@@ -282,6 +331,7 @@ export function ContactsView({
           onChange={(v) => go({ state: v || null })}
           anyLabel={s.any}
         />
+        <DataCount table={table} />
         <div ref={colsRef} className="relative ml-auto">
           <button
             type="button"
@@ -392,29 +442,26 @@ export function ContactsView({
                     type="checkbox"
                     aria-label="Select all"
                     checked={allOnPage}
-                    onChange={() => setSelected(allOnPage ? new Set() : new Set(rows.map((r) => r.id)))}
+                    onChange={() => setSelected(allOnPage ? new Set() : new Set(visible.map((r) => r.id)))}
                     className="h-4 w-4 accent-[var(--color-accent)]"
                   />
                 </th>
-                <th className={th}>{s.colName}</th>
-                <th className={th}>{s.colOrder}</th>
-                <th className={th}>{s.colSales}</th>
-                <th className={th}>{s.colTags}</th>
-                <th className={th}>{s.colLast}</th>
-                <th className={th}>
-                  <Link href={`${path}?${new URLSearchParams({ ...Object.fromEntries(params), sort: "updated", dir: params.get("dir") === "asc" ? "desc" : "asc" }).toString()}`}>
-                    {s.colUpdated} {params.get("dir") === "asc" ? "↑" : "↓"}
-                  </Link>
-                </th>
-                {extra.map((c) => (
-                  <th key={c} className={th}>
-                    {colLabel[c]}
+                {columns.map((c) => (
+                  <th key={c.key} className={th}>
+                    <DataHead column={c} table={table} />
                   </th>
                 ))}
                 <th className="w-10" />
               </tr>
             </thead>
             <tbody>
+              {rows.length > 0 && visible.length === 0 && (
+                <tr>
+                  <td colSpan={8 + extra.length} className="px-4 py-10 text-center text-[var(--color-faint)]">
+                    {t.table.noMatch}
+                  </td>
+                </tr>
+              )}
               {rows.length === 0 && (
                 <tr>
                   <td colSpan={8 + extra.length} className="px-4 py-10 text-center text-[var(--color-faint)]">
@@ -422,7 +469,7 @@ export function ContactsView({
                   </td>
                 </tr>
               )}
-              {rows.map((r) => {
+              {visible.map((r) => {
                 const on = r.id === activeId;
                 const sel = selected.has(r.id);
                 return (
@@ -535,6 +582,7 @@ export function ContactsView({
         </div>
       </div>
 
+      <DataMenus table={table} />
       {dupOpen && <DupReview pairs={duplicates} onClose={() => setDupOpen(false)} />}
       {mergeKeep && (
         <DupReview

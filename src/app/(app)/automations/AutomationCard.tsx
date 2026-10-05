@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState, useTransition } from "react";
+import { useState, useTransition, type ReactNode } from "react";
 import { ActionConfirm, ActionDialog } from "@/components/ActionConfirm";
 import { IconBolt, IconDots } from "@/components/icons";
 import { fmt } from "@/lib/i18n/dict";
@@ -17,11 +17,13 @@ import {
 } from "./actions";
 
 /**
- * One automation in the list, with every control the server already supported
- * but nothing on screen exposed: publish, unpublish, rename, duplicate, delete,
- * and an explanation of the "Approximations: N" note the importer left behind.
+ * The interactive cells of one automation's row in the list's DataTable, with
+ * every control the server already supported but nothing on screen exposed:
+ * publish, unpublish, rename, duplicate, delete, and an explanation of the
+ * "Approximations: N" note the importer left behind. The page renders the plain
+ * cells (trigger, runs, edited) itself.
  *
- * Everything it receives is plain serialisable data — no callbacks are passed
+ * Everything they receive is plain serialisable data — no callbacks are passed
  * down into rendered arrays, which is what the repo's `react-hooks/refs` rule
  * objects to. The dialogs are driven by one `mode` string and a switch, for the
  * same reason.
@@ -45,6 +47,8 @@ export interface AutomationCardData {
   edgeCount: number;
   runCount: number;
   updatedLabel: string;
+  /** Last edit, epoch ms — what the Edited column sorts by. */
+  updatedAt: number;
   messageSteps: number;
   apiSteps: number;
   gaps: FlowGap[];
@@ -55,9 +59,105 @@ export interface AutomationCardData {
   triggerDetail: string | null;
 }
 
+function gapTotals(gaps: FlowGap[]) {
+  return {
+    gapCount: gaps.reduce((n, g) => n + g.count, 0),
+    stopCount: gaps.filter((g) => g.severity === "stops").reduce((n, g) => n + g.count, 0),
+  };
+}
+
+/**
+ * A cell's root. The dialogs below render on <body> through a portal, but React
+ * still bubbles their clicks up the component tree, to the table row's own
+ * click handler; only clicks that land inside this cell's DOM go on to the row.
+ */
+function Cell({ className, children }: { className?: string; children: ReactNode }) {
+  return (
+    <div
+      className={className}
+      onClick={(e) => {
+        if (!e.currentTarget.contains(e.target as Node)) e.stopPropagation();
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+
+/** Name column: icon, name (opens the builder), steps and the "needs checking" badges. */
+export function AutomationName({ a }: { a: AutomationCardData }) {
+  const { t } = useShell();
+  const L = t.autos;
+  // The "what needs checking" explainer opens from the yellow badge.
+  const [showChecks, setShowChecks] = useState(false);
+  const { gapCount } = gapTotals(a.gaps);
+
+  return (
+    <Cell className="flex min-w-0 items-center gap-3">
+      <span
+        className={`grid h-9 w-9 shrink-0 place-items-center rounded-[10px] ${
+          a.enabled ? "bg-[var(--color-accent-soft)] text-[var(--color-accent)]" : "bg-[var(--color-surface-2)] text-[var(--color-faint)]"
+        }`}
+      >
+        <IconBolt width={17} height={17} />
+      </span>
+      <div className="min-w-0">
+        <Link href={`/automations/${a.id}`} className="block truncate text-[13.5px] font-semibold text-[var(--color-ink)] hover:underline">
+          {a.name}
+        </Link>
+        <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[11.5px] text-[var(--color-faint)]">
+          {fmt(L.steps, { n: a.nodeCount })}
+          {gapCount > 0 && (
+            <button type="button" onClick={() => setShowChecks((v) => !v)} className="rounded-full bg-[var(--color-warning-soft)] px-1.5 text-[10.5px] font-semibold text-[var(--color-warning)] hover:underline">
+              {fmt(L.needAgent, { n: gapCount })}
+            </button>
+          )}
+          {a.importApproximations != null && (
+            <button type="button" onClick={() => setShowChecks((v) => !v)} className="rounded-full bg-[var(--color-warning-soft)] px-1.5 text-[10.5px] font-semibold text-[var(--color-warning)] hover:underline">
+              {fmt(L.imported, { n: a.importApproximations })}
+            </button>
+          )}
+        </div>
+        {(a.gaps.length > 0 || a.importApproximations != null) && showChecks && (
+          <div className="mt-1.5">
+            <FlowChecks name={a.name} gaps={a.gaps} importApproximations={a.importApproximations} />
+          </div>
+        )}
+      </div>
+    </Cell>
+  );
+}
+
+/** Status column: the Live/Draft switch (it asks before it changes anything). */
+export function AutomationStatus({ a }: { a: AutomationCardData }) {
+  const { t } = useShell();
+  const L = t.autos;
+  const { gapCount, stopCount } = gapTotals(a.gaps);
+  return (
+    <Cell className="inline-flex">
+      <PublishControl
+        size="toggle"
+        liveLabel={L.live}
+        draftLabel={L.draft}
+        facts={{
+          id: a.id,
+          name: a.name,
+          enabled: a.enabled,
+          triggerSentence: a.triggerSentence,
+          messageSteps: a.messageSteps,
+          apiSteps: a.apiSteps,
+          gapCount,
+          stopCount,
+        }}
+      />
+    </Cell>
+  );
+}
+
 type Mode = "none" | "delete" | "edit";
 
-export function AutomationCard({ a }: { a: AutomationCardData }) {
+/** The ⋯ column: open, rename, duplicate, delete, and what came of the last one. */
+export function AutomationActions({ a }: { a: AutomationCardData }) {
   const router = useRouter();
   const [mode, setMode] = useState<Mode>("none");
   const [pending, startTransition] = useTransition();
@@ -68,18 +168,17 @@ export function AutomationCard({ a }: { a: AutomationCardData }) {
   const [menu, setMenu] = useState(false);
   const { t } = useShell();
   const L = t.autos;
-  // The "what needs checking" explainer opens from the yellow badge.
-  const [showChecks, setShowChecks] = useState(false);
 
   const close = () => {
     setMode("none");
     setError(null);
   };
 
-  // One dispatcher for every dialog's confirm button, so the card renders no
+  // One dispatcher for every dialog's confirm button, so the cell renders no
   // per-item callback objects.
   const run = (which: Mode) => {
     setError(null);
+    setFlash(null);
     startTransition(async () => {
       switch (which) {
         case "delete": {
@@ -103,6 +202,7 @@ export function AutomationCard({ a }: { a: AutomationCardData }) {
 
   const duplicate = () => {
     setError(null);
+    setFlash(null);
     startTransition(async () => {
       const res = await duplicateAutomation(a.id);
       if (!res.ok) return setError("Could not copy this automation.");
@@ -118,129 +218,61 @@ export function AutomationCard({ a }: { a: AutomationCardData }) {
     setMode("edit");
   };
 
-  const gapCount = a.gaps.reduce((n, g) => n + g.count, 0);
-  const stopCount = a.gaps
-    .filter((g) => g.severity === "stops")
-    .reduce((n, g) => n + g.count, 0);
-
-  const max = Math.max(1, ...a.daily);
-  const spark = a.daily
-    .map((v, i) => `${(i / Math.max(1, a.daily.length - 1)) * 56},${18 - (v / max) * 16}`)
-    .join(" ");
-
   return (
-    <div className="relative grid grid-cols-[minmax(0,2.4fr)_minmax(0,1.7fr)_minmax(0,1.1fr)_minmax(0,0.8fr)_minmax(0,0.9fr)_36px] items-center gap-3 border-b border-[var(--color-border-subtle)] px-4 py-3.5 last:border-b-0 hover:bg-[var(--color-surface-2)]">
-      <div className="flex min-w-0 items-center gap-3">
-        <span
-          className={`grid h-9 w-9 shrink-0 place-items-center rounded-[10px] ${
-            a.enabled ? "bg-[var(--color-accent-soft)] text-[var(--color-accent)]" : "bg-[var(--color-surface-2)] text-[var(--color-faint)]"
-          }`}
-        >
-          <IconBolt width={17} height={17} />
-        </span>
-        <div className="min-w-0">
-          <Link href={`/automations/${a.id}`} className="block truncate text-[13.5px] font-semibold text-[var(--color-ink)] hover:underline">
-            {a.name}
-          </Link>
-          <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[11.5px] text-[var(--color-faint)]">
-            {fmt(L.steps, { n: a.nodeCount })}
-            {gapCount > 0 && (
-              <button type="button" onClick={() => setShowChecks((v) => !v)} className="rounded-full bg-[var(--color-warning-soft)] px-1.5 text-[10.5px] font-semibold text-[var(--color-warning)] hover:underline">
-                {fmt(L.needAgent, { n: gapCount })}
+    <Cell className="relative">
+      <button
+        type="button"
+        aria-label="Actions"
+        onClick={() => setMenu((v) => !v)}
+        className="grid h-7 w-7 place-items-center rounded-[6px] text-[var(--color-muted)] hover:bg-[var(--color-surface-dim)]"
+      >
+        <IconDots width={15} height={15} />
+      </button>
+      {menu && (
+        <>
+          <div data-row-ignore="" className="fixed inset-0 z-20" onClick={() => setMenu(false)} />
+          <div className="absolute right-0 z-30 mt-1 w-44 rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)] py-1 shadow-[var(--shadow-popover)]">
+            <Link href={`/automations/${a.id}`} className="block px-3 py-2 text-[13px] text-[var(--color-ink)] hover:bg-[var(--color-surface-2)]">
+              {L.open}
+            </Link>
+            {[
+              [L.rename, () => { setMenu(false); openEdit(); }],
+              [L.duplicate, () => { setMenu(false); duplicate(); }],
+              [L.delete, () => { setMenu(false); setMode("delete"); }],
+            ].map(([label, fn]) => (
+              <button
+                key={label as string}
+                type="button"
+                onClick={fn as () => void}
+                className={`block w-full px-3 py-2 text-left text-[13px] hover:bg-[var(--color-surface-2)] ${
+                  label === L.delete ? "text-[var(--color-danger)]" : "text-[var(--color-ink)]"
+                }`}
+              >
+                {label as string}
               </button>
-            )}
-            {a.importApproximations != null && (
-              <button type="button" onClick={() => setShowChecks((v) => !v)} className="rounded-full bg-[var(--color-warning-soft)] px-1.5 text-[10.5px] font-semibold text-[var(--color-warning)] hover:underline">
-                {fmt(L.imported, { n: a.importApproximations })}
-              </button>
-            )}
+            ))}
           </div>
-        </div>
-      </div>
-
-      <div className="min-w-0">
-        <div className="truncate text-[12.5px] text-[var(--color-ink)]">{L.triggers[a.triggerLabel] ?? a.triggerLabel}</div>
-        <div className="truncate text-[11.5px] text-[var(--color-faint)]" title={a.triggerSentence}>
-          {a.triggerDetail ?? L.triggerSub[a.triggerLabel] ?? a.channelName}
-        </div>
-      </div>
-
-      <div className="flex items-center gap-2.5">
-        <svg width="56" height="20" viewBox="0 0 56 20" className="shrink-0" aria-hidden>
-          <polyline points={spark} fill="none" stroke={a.runs7 ? "var(--color-accent)" : "var(--color-border-strong)"} strokeWidth="1.4" strokeLinejoin="round" />
-        </svg>
-        <div className="leading-tight">
-          <div className="text-[12.5px] font-semibold tabular-nums text-[var(--color-ink)]">{a.runs7}</div>
-          <div className="text-[10.5px] text-[var(--color-faint)]">{L.last7}</div>
-        </div>
-      </div>
-
-      <div className="leading-tight">
-        <div className="text-[12.5px] text-[var(--color-ink)]">{a.updatedLabel}</div>
-        <div className="text-[10.5px] text-[var(--color-faint)]">v{a.version}</div>
-      </div>
-
-      <PublishControl
-        size="toggle"
-        liveLabel={L.live}
-        draftLabel={L.draft}
-        facts={{
-          id: a.id,
-          name: a.name,
-          enabled: a.enabled,
-          triggerSentence: a.triggerSentence,
-          messageSteps: a.messageSteps,
-          apiSteps: a.apiSteps,
-          gapCount,
-          stopCount,
-        }}
-      />
-
-      <div className="relative">
-        <button
-          type="button"
-          aria-label="Actions"
-          onClick={() => setMenu((v) => !v)}
-          className="grid h-7 w-7 place-items-center rounded-[6px] text-[var(--color-muted)] hover:bg-[var(--color-surface-dim)]"
-        >
-          <IconDots width={15} height={15} />
-        </button>
-        {menu && (
-          <>
-            <div className="fixed inset-0 z-20" onClick={() => setMenu(false)} />
-            <div className="absolute right-0 z-30 mt-1 w-44 rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)] py-1 shadow-[var(--shadow-popover)]">
-              <Link href={`/automations/${a.id}`} className="block px-3 py-2 text-[13px] text-[var(--color-ink)] hover:bg-[var(--color-surface-2)]">
-                {L.open}
-              </Link>
-              {[
-                [L.rename, () => { setMenu(false); openEdit(); }],
-                [L.duplicate, () => { setMenu(false); duplicate(); }],
-                [L.delete, () => { setMenu(false); setMode("delete"); }],
-              ].map(([label, fn]) => (
-                <button
-                  key={label as string}
-                  type="button"
-                  onClick={fn as () => void}
-                  className={`block w-full px-3 py-2 text-left text-[13px] hover:bg-[var(--color-surface-2)] ${
-                    label === L.delete ? "text-[var(--color-danger)]" : "text-[var(--color-ink)]"
-                  }`}
-                >
-                  {label as string}
-                </button>
-              ))}
-            </div>
-          </>
-        )}
-      </div>
-
-      {(error || flash) && (
-        <div className={`col-span-6 text-[11.5px] ${error ? "text-[var(--color-danger)]" : "text-[var(--color-muted)]"}`}>
-          {error ?? flash}
-        </div>
+        </>
       )}
-      {(a.gaps.length > 0 || a.importApproximations != null) && showChecks && (
-        <div className="col-span-6">
-          <FlowChecks name={a.name} gaps={a.gaps} importApproximations={a.importApproximations} />
+
+      {/* What the last action did: next to the ⋯ button, over the row, until dismissed. */}
+      {(error || flash) && mode === "none" && (
+        <div
+          role="status"
+          className="absolute right-full top-1/2 z-10 mr-2 flex w-max max-w-[260px] -translate-y-1/2 items-start gap-2 rounded-[8px] border border-[var(--color-border)] bg-[var(--color-surface)] px-2.5 py-1.5 text-left text-[11.5px] shadow-[var(--shadow-popover)]"
+        >
+          <span className={error ? "text-[var(--color-danger)]" : "text-[var(--color-muted)]"}>{error ?? flash}</span>
+          <button
+            type="button"
+            aria-label="Dismiss"
+            onClick={() => {
+              setError(null);
+              setFlash(null);
+            }}
+            className="shrink-0 text-[13px] leading-none text-[var(--color-faint)] hover:text-[var(--color-ink)]"
+          >
+            ×
+          </button>
         </div>
       )}
 
@@ -269,6 +301,7 @@ export function AutomationCard({ a }: { a: AutomationCardData }) {
           If you only want it to stop running, press Cancel and use “Switch off”
           instead.
         </p>
+        {error && <p className="mt-2 text-[11.5px] text-[var(--color-danger)]">{error}</p>}
       </ActionConfirm>
 
       {/* ── Rename / note ───────────────────────────────────────── */}
@@ -320,7 +353,6 @@ export function AutomationCard({ a }: { a: AutomationCardData }) {
           </button>
         </div>
       </ActionDialog>
-
-    </div>
+    </Cell>
   );
 }

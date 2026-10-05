@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { DataTable, type DataColumn, type DataRow } from "@/components/DataTable";
 import { PageChrome } from "@/components/PageChrome";
 import { FilterPill } from "@/components/shell/FilterPill";
 import { IconSearch } from "@/components/icons";
@@ -69,7 +70,97 @@ export default async function MessageHistoryPage({ searchParams }: { searchParam
   const pct = (v: number) => (stats.sent ? `${((v / stats.sent) * 100).toFixed(1)}%` : "");
   const statusOf = (r: { direction: string; status: string }) => (r.direction === "IN" ? "RECEIVED" : r.status);
   const time = (d: Date) => shortWhen(d, t.pay.yesterday);
-  const cols = "grid-cols-[minmax(0,1.5fr)_minmax(0,2.1fr)_minmax(0,0.9fr)_minmax(0,0.9fr)_minmax(0,0.6fr)_minmax(0,1fr)]";
+
+  // The rows the server filters below (search, pills) let through, newest
+  // first and at most 200; the table sorts them and narrows them further by
+  // its header funnels. Its own search box stays off: `q` reaches past the 200.
+  const columns: DataColumn[] = [
+    // max-w-0 + a width: the name / preview truncate instead of widening the table.
+    { key: "customer", label: L.colCustomer, className: "w-[22%] max-w-0" },
+    { key: "message", label: L.colMessage, className: "w-[32%] max-w-0", filter: false },
+    { key: "type", label: L.colType, className: "whitespace-nowrap" },
+    { key: "direction", label: L.colDirection, className: "whitespace-nowrap" },
+    { key: "time", label: L.colTime, className: "whitespace-nowrap", filter: false },
+    { key: "status", label: L.colStatus, className: "whitespace-nowrap" },
+  ];
+  const tableRows: DataRow[] = rows.map((r) => {
+    const who = r.name || formatPhone(r.phone);
+    const c = tint(r.phone);
+    const st = statusOf(r);
+    const err = st === "FAILED" ? (r.sendError ?? reasons.get(r.id) ?? null) : null;
+    const preview = previewText(r, t.service);
+    const tone = TYPE_TONE[r.type] ?? "blue";
+    const typeLabel = L.ty[r.type] ?? r.type;
+    const dirLabel = r.direction === "IN" ? L.incoming : L.outgoing;
+    const stLabel = L.st[st] ?? st;
+    const href = keep({ m: r.id });
+    return {
+      id: r.id,
+      href,
+      active: r.id === selected?.id,
+      search: `${r.phone} ${formatPhone(r.phone)}`,
+      sort: { customer: who, message: preview, type: typeLabel, direction: dirLabel, time: r.createdAt.getTime(), status: stLabel },
+      // Time's text is what the cell shows, so a search for digits never matches the raw timestamp.
+      text: {
+        customer: who,
+        message: [preview, err].filter(Boolean).join(" "),
+        type: typeLabel,
+        direction: dirLabel,
+        time: time(r.createdAt),
+        status: stLabel,
+      },
+      cells: {
+        customer: (
+          <span className="flex min-w-0 items-center gap-2.5">
+            <span
+              className="grid h-7 w-7 shrink-0 place-items-center rounded-full text-[10px] font-bold"
+              style={{ background: `color-mix(in srgb, ${c} 14%, white)`, color: c }}
+            >
+              {initials(who)}
+            </span>
+            <span className="min-w-0">
+              {/* A real link for keyboard / new-tab use; the rest of the row opens the same URL. */}
+              <Link href={href} scroll={false} className="block truncate text-[13px] font-semibold text-[var(--color-ink)] hover:underline">
+                {who}
+              </Link>
+              <span className="block truncate text-[11.5px] tabular-nums text-[var(--color-faint)]">{formatPhone(r.phone)}</span>
+            </span>
+          </span>
+        ),
+        message: (
+          <span className="block min-w-0">
+            <span className="block truncate text-[13px] text-[var(--color-ink)]">{preview || "—"}</span>
+            {err && <span className="block truncate text-[11.5px] text-[var(--color-danger)]">{err}</span>}
+          </span>
+        ),
+        type: (
+          <span
+            className="rounded-[4px] px-1.5 py-px text-[11px] font-semibold"
+            style={{ background: `var(--color-pastel-${tone})`, color: `var(--color-pastel-${tone}-ink)` }}
+          >
+            {typeLabel}
+          </span>
+        ),
+        direction: (
+          <span className="flex items-center gap-1.5 text-[12.5px] text-[var(--color-muted)]">
+            <span className={r.direction === "IN" ? "text-[var(--color-success)]" : "text-[var(--color-pastel-orange-ink)]"}>
+              {r.direction === "IN" ? "↙" : "↗"}
+            </span>
+            {dirLabel}
+          </span>
+        ),
+        time: <span className="text-[12px] tabular-nums text-[var(--color-muted)]">{time(r.createdAt)}</span>,
+        status: (
+          <span className="flex items-center gap-1.5">
+            <span className={`rounded-full px-[7px] py-px text-[10px] font-semibold uppercase tracking-[0.06em] ${STATUS_TONE[st] ?? STATUS_TONE.SENT}`}>
+              {stLabel}
+            </span>
+            {(st === "READ" || st === "DELIVERED" || st === "SENT") && <Ticks status={st} />}
+          </span>
+        ),
+      },
+    };
+  });
 
   return (
     <PageChrome
@@ -112,117 +203,52 @@ export default async function MessageHistoryPage({ searchParams }: { searchParam
           ))}
         </div>
 
+        <div className="flex flex-wrap items-center gap-2">
+          <form className="flex h-[34px] w-full max-w-[260px] items-center gap-2 rounded-[8px] border border-[var(--color-border)] bg-[var(--color-surface)] px-3 focus-within:border-[var(--color-accent)]">
+            {["status", "direction", "type", "when"].map((k) =>
+              one(sp[k]) ? <input key={k} type="hidden" name={k} value={one(sp[k])} /> : null
+            )}
+            <IconSearch width={14} height={14} className="text-[var(--color-faint)]" />
+            <input name="q" defaultValue={f.q} placeholder={L.search} className="w-full bg-transparent text-[13px] outline-none placeholder:text-[var(--color-faint)]" />
+          </form>
+          <FilterPill
+            param="status"
+            label={L.status}
+            anyLabel={L.any}
+            options={["READ", "DELIVERED", "SENT", "QUEUED", "FAILED"].map((v) => ({ value: v, label: L.st[v] }))}
+          />
+          <FilterPill
+            param="direction"
+            label={L.direction}
+            anyLabel={L.any}
+            options={[
+              { value: "OUT", label: L.outgoing },
+              { value: "IN", label: L.incoming },
+            ]}
+          />
+          <FilterPill param="type" label={L.type} anyLabel={L.any} options={Object.keys(L.ty).map((v) => ({ value: v, label: L.ty[v] }))} />
+          <FilterPill
+            param="when"
+            label={L.when}
+            anyLabel={L.any}
+            options={[
+              { value: "today", label: L.today },
+              { value: "7d", label: L.d7 },
+              { value: "30d", label: L.d30 },
+            ]}
+          />
+        </div>
+
         <div className="flex gap-3.5">
-          <div className="min-w-0 flex-1 overflow-hidden rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)]">
-            <div className="flex flex-wrap items-center gap-2 border-b border-[var(--color-border)] p-3">
-              <form className="flex h-[34px] w-full max-w-[260px] items-center gap-2 rounded-[8px] border border-[var(--color-border)] px-3 focus-within:border-[var(--color-accent)]">
-                {["status", "direction", "type", "when"].map((k) =>
-                  one(sp[k]) ? <input key={k} type="hidden" name={k} value={one(sp[k])} /> : null
-                )}
-                <IconSearch width={14} height={14} className="text-[var(--color-faint)]" />
-                <input name="q" defaultValue={f.q} placeholder={L.search} className="w-full bg-transparent text-[13px] outline-none placeholder:text-[var(--color-faint)]" />
-              </form>
-              <FilterPill
-                param="status"
-                label={L.status}
-                anyLabel={L.any}
-                options={["READ", "DELIVERED", "SENT", "QUEUED", "FAILED"].map((v) => ({ value: v, label: L.st[v] }))}
-              />
-              <FilterPill
-                param="direction"
-                label={L.direction}
-                anyLabel={L.any}
-                options={[
-                  { value: "OUT", label: L.outgoing },
-                  { value: "IN", label: L.incoming },
-                ]}
-              />
-              <FilterPill param="type" label={L.type} anyLabel={L.any} options={Object.keys(L.ty).map((v) => ({ value: v, label: L.ty[v] }))} />
-              <FilterPill
-                param="when"
-                label={L.when}
-                anyLabel={L.any}
-                options={[
-                  { value: "today", label: L.today },
-                  { value: "7d", label: L.d7 },
-                  { value: "30d", label: L.d30 },
-                ]}
-              />
-            </div>
-            <div className="overflow-x-auto">
-              <div className="min-w-[740px]">
-                <div className={`grid ${cols} gap-3 border-b border-[var(--color-border)] bg-[var(--color-surface-2)] px-4 py-2.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--color-faint)]`}>
-                  <span>{L.colCustomer}</span>
-                  <span>{L.colMessage}</span>
-                  <span>{L.colType}</span>
-                  <span>{L.colDirection}</span>
-                  <span>{L.colTime}</span>
-                  <span>{L.colStatus}</span>
-                </div>
-                {rows.length === 0 && (
-                  <p className="px-4 py-10 text-center text-[13px] text-[var(--color-faint)]">
-                    {f.q || f.status || f.direction || f.type || f.days ? L.noMatch : L.none}
-                  </p>
-                )}
-                {rows.map((r) => {
-                  const who = r.name || formatPhone(r.phone);
-                  const c = tint(r.phone);
-                  const st = statusOf(r);
-                  const err = r.sendError ?? reasons.get(r.id) ?? null;
-                  const tone = TYPE_TONE[r.type] ?? "blue";
-                  const on = r.id === selected?.id;
-                  return (
-                    <Link
-                      key={r.id}
-                      href={keep({ m: r.id })}
-                      scroll={false}
-                      className={`grid ${cols} items-center gap-3 border-b border-[var(--color-border-subtle)] px-4 py-2.5 last:border-b-0 ${
-                        on ? "bg-[var(--color-accent-soft)]/50 shadow-[inset_3px_0_0_var(--color-accent)]" : "hover:bg-[var(--color-surface-2)]"
-                      }`}
-                    >
-                      <span className="flex min-w-0 items-center gap-2.5">
-                        <span
-                          className="grid h-7 w-7 shrink-0 place-items-center rounded-full text-[10px] font-bold"
-                          style={{ background: `color-mix(in srgb, ${c} 14%, white)`, color: c }}
-                        >
-                          {initials(who)}
-                        </span>
-                        <span className="min-w-0">
-                          <span className="block truncate text-[13px] font-semibold text-[var(--color-ink)]">{who}</span>
-                          <span className="block truncate text-[11.5px] tabular-nums text-[var(--color-faint)]">{formatPhone(r.phone)}</span>
-                        </span>
-                      </span>
-                      <span className="min-w-0">
-                        <span className="block truncate text-[13px] text-[var(--color-ink)]">{previewText(r, t.service) || "—"}</span>
-                        {err && st === "FAILED" && <span className="block truncate text-[11.5px] text-[var(--color-danger)]">{err}</span>}
-                      </span>
-                      <span>
-                        <span
-                          className="rounded-[4px] px-1.5 py-px text-[11px] font-semibold"
-                          style={{ background: `var(--color-pastel-${tone})`, color: `var(--color-pastel-${tone}-ink)` }}
-                        >
-                          {L.ty[r.type] ?? r.type}
-                        </span>
-                      </span>
-                      <span className="flex items-center gap-1.5 text-[12.5px] text-[var(--color-muted)]">
-                        <span className={r.direction === "IN" ? "text-[var(--color-success)]" : "text-[var(--color-pastel-orange-ink)]"}>
-                          {r.direction === "IN" ? "↙" : "↗"}
-                        </span>
-                        {r.direction === "IN" ? L.incoming : L.outgoing}
-                      </span>
-                      <span className="text-[12px] tabular-nums text-[var(--color-muted)]">{time(r.createdAt)}</span>
-                      <span className="flex items-center gap-1.5">
-                        <span className={`rounded-full px-[7px] py-px text-[10px] font-semibold uppercase tracking-[0.06em] ${STATUS_TONE[st] ?? STATUS_TONE.SENT}`}>
-                          {L.st[st] ?? st}
-                        </span>
-                        {(st === "READ" || st === "DELIVERED" || st === "SENT") && <Ticks status={st} />}
-                      </span>
-                    </Link>
-                  );
-                })}
-              </div>
-            </div>
-          </div>
+          <DataTable
+            columns={columns}
+            rows={tableRows}
+            search={false}
+            minWidth={740}
+            stateKey="logs-messages"
+            empty={f.q || f.status || f.direction || f.type || f.days ? L.noMatch : L.none}
+            className="min-w-0 flex-1"
+          />
 
           <aside className="hidden w-[320px] shrink-0 flex-col overflow-hidden rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)] xl:flex">
             {!selected ? (

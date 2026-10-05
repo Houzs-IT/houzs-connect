@@ -46,7 +46,7 @@ export default async function TeamPage() {
             <p className="text-[13px] text-[var(--color-muted)]">{L.onlyAdmins}</p>
           </div>
         ) : (
-          <TeamClient companies={view.companies} people={view.people} L={L} canSuper={canSuper} requests={block} />
+          <TeamClient companies={view.companies} people={view.people} L={L} roles={t.role} canSuper={canSuper} requests={block} />
         )}
       </div>
     </PageChrome>

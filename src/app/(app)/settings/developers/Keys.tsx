@@ -3,13 +3,26 @@
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { ActionConfirm, ActionDialog } from "@/components/ActionConfirm";
+import { DataTable, type DataColumn, type DataRow } from "@/components/DataTable";
 import { useShell } from "@/components/shell/ShellProvider";
 import { fmt } from "@/lib/i18n/dict";
 import { newApiKey, revokeApiKey } from "./actions";
 
-type Row = { id: string; name: string; prefix: string; created: string; lastUsed: string | null; revoked: boolean; createdBy: string | null };
+type Row = {
+  id: string;
+  name: string;
+  prefix: string;
+  created: string;
+  /** Epoch ms, for sorting. */
+  createdAt: number;
+  lastUsed: string | null;
+  /** Epoch ms, for sorting; null when never used. */
+  lastUsedAt: number | null;
+  revoked: boolean;
+  createdBy: string | null;
+};
 
-/** The key list, "New API key" (shown once), and Revoke. */
+/** The key list (search, sort, filter), "New API key" (shown once), and Revoke. */
 export function Keys({ rows, canManage }: { rows: Row[]; canManage: boolean }) {
   const router = useRouter();
   const { t } = useShell();
@@ -22,53 +35,85 @@ export function Keys({ rows, canManage }: { rows: Row[]; canManage: boolean }) {
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
 
-  return (
-    <section className="overflow-hidden rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)]">
-      <div className="flex items-center gap-3 px-4 py-3.5">
-        <span className="grid h-8 w-8 place-items-center rounded-full bg-[var(--color-pastel-blue)] text-[12px] font-bold text-[var(--color-pastel-blue-ink)]">‹›</span>
-        <div className="min-w-0 flex-1 text-[14px] font-semibold text-[var(--color-ink)]">API keys</div>
-        {canManage && (
-          <button
-            type="button"
-            onClick={() => {
-              setOpen(true);
-              setKey(null);
-              setName("");
-              setError(null);
-            }}
-            className="h-[34px] rounded-[8px] bg-[var(--color-accent)] px-3.5 text-[13px] font-semibold text-white shadow-[var(--shadow-primary)]"
-          >
-            + {L.devNew}
-          </button>
-        )}
-      </div>
-      {!canManage && <p className="border-t border-[var(--color-border-subtle)] px-4 py-2.5 text-[12px] text-[var(--color-faint)]">{L.devOnly}</p>}
-      {rows.length === 0 && <p className="border-t border-[var(--color-border-subtle)] px-4 py-4 text-[12.5px] text-[var(--color-faint)]">{L.noKeys}</p>}
-      {rows.map((r) => (
-        <div key={r.id} className="flex flex-wrap items-center gap-3 border-t border-[var(--color-border-subtle)] px-4 py-3">
-          <div className="min-w-0 flex-1">
-            <div className={`text-[13.5px] font-semibold ${r.revoked ? "text-[var(--color-faint)] line-through" : "text-[var(--color-ink)]"}`}>{r.name}</div>
-            <div className="text-[11.5px] text-[var(--color-faint)]">
-              <span className="font-code">{r.prefix}…</span> · {r.created}
-              {r.createdBy ? ` · ${r.createdBy}` : ""}
-            </div>
-          </div>
-          <span className="text-[12px] text-[var(--color-muted)]">{r.lastUsed ? fmt(L.lastUsed, { when: r.lastUsed }) : L.neverUsed}</span>
-          {r.revoked ? (
-            <span className="rounded-full bg-[var(--color-surface-2)] px-2 py-0.5 text-[10.5px] font-semibold uppercase text-[var(--color-muted)]">{L.revokedL}</span>
-          ) : (
-            canManage && (
-              <button
-                type="button"
-                onClick={() => setRevoking(r)}
-                className="h-[30px] rounded-[8px] bg-[var(--color-danger-soft)] px-3 text-[12.5px] font-semibold text-[var(--color-danger)]"
-              >
-                {L.revoke}
-              </button>
-            )
-          )}
+  const columns: DataColumn[] = [
+    { key: "name", label: L.keyName, filter: false },
+    { key: "created", label: t.contacts.colCreated, filter: false },
+    { key: "lastUsed", label: fmt(L.lastUsed, { when: "" }).trim() },
+    { key: "status", label: t.logs.colStatus },
+    ...(canManage ? [{ key: "actions", label: "", align: "right" as const, sort: false, filter: false }] : []),
+  ];
+  const table: DataRow[] = rows.map((r) => ({
+    id: r.id,
+    search: [r.prefix, r.createdBy].filter(Boolean).join(" "),
+    // Never used sorts as the oldest use.
+    sort: { name: r.name, created: r.createdAt, lastUsed: r.lastUsedAt ?? 0, status: r.revoked ? 1 : 0 },
+    text: {
+      name: r.name,
+      created: r.created,
+      lastUsed: r.lastUsed ?? L.neverUsed,
+      status: r.revoked ? L.revokedL : t.tf.inUse,
+    },
+    cells: {
+      name: (
+        <div className="min-w-0">
+          <div className={`truncate font-semibold ${r.revoked ? "text-[var(--color-faint)] line-through" : "text-[var(--color-ink)]"}`}>{r.name}</div>
+          <div className="font-code text-[11.5px] text-[var(--color-faint)]">{r.prefix}…</div>
         </div>
-      ))}
+      ),
+      created: (
+        <div className="whitespace-nowrap">
+          <div className="text-[var(--color-ink)]">{r.created}</div>
+          {r.createdBy && <div className="text-[11.5px] text-[var(--color-faint)]">{r.createdBy}</div>}
+        </div>
+      ),
+      lastUsed: <span className="whitespace-nowrap text-[12.5px] text-[var(--color-muted)]">{r.lastUsed ?? L.neverUsed}</span>,
+      status: r.revoked ? (
+        <span className="rounded-full bg-[var(--color-surface-2)] px-2 py-0.5 text-[10.5px] font-semibold uppercase text-[var(--color-muted)]">{L.revokedL}</span>
+      ) : (
+        <span className="rounded-full bg-[var(--color-pastel-green)] px-2 py-0.5 text-[10.5px] font-semibold uppercase text-[var(--color-pastel-green-ink)]">{t.tf.inUse}</span>
+      ),
+      actions: r.revoked ? <span /> : (
+        <button
+          type="button"
+          onClick={() => setRevoking(r)}
+          className="h-[30px] rounded-[8px] bg-[var(--color-danger-soft)] px-3 text-[12.5px] font-semibold text-[var(--color-danger)]"
+        >
+          {L.revoke}
+        </button>
+      ),
+    },
+  }));
+
+  return (
+    <section className="flex flex-col gap-2.5">
+      <div className="flex items-center gap-3">
+        <span className="grid h-8 w-8 place-items-center rounded-full bg-[var(--color-pastel-blue)] text-[12px] font-bold text-[var(--color-pastel-blue-ink)]">‹›</span>
+        <h3 className="min-w-0 flex-1 text-[14px] font-semibold text-[var(--color-ink)]">API keys</h3>
+      </div>
+      {!canManage && <p className="text-[12px] text-[var(--color-faint)]">{L.devOnly}</p>}
+      <DataTable
+        columns={columns}
+        rows={table}
+        minWidth={640}
+        stateKey="settings-api-keys"
+        empty={L.noKeys}
+        toolbar={
+          canManage && (
+            <button
+              type="button"
+              onClick={() => {
+                setOpen(true);
+                setKey(null);
+                setName("");
+                setError(null);
+              }}
+              className="h-[34px] rounded-[8px] bg-[var(--color-accent)] px-3.5 text-[13px] font-semibold text-white shadow-[var(--shadow-primary)]"
+            >
+              + {L.devNew}
+            </button>
+          )
+        }
+      />
 
       <ActionDialog open={open} title={L.devNew} onClose={() => setOpen(false)}>
         {key ? (

@@ -3,7 +3,8 @@
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useState } from "react";
-import { IconClose, IconSearch } from "@/components/icons";
+import { DataCount, DataHead, DataMenus, DataSearch, useDataTable, type DataColumn, type DataRow } from "@/components/DataTable";
+import { IconClose } from "@/components/icons";
 import { useShell } from "@/components/shell/ShellProvider";
 import { formatPhone, initials, tint } from "@/lib/format";
 
@@ -40,7 +41,23 @@ function matches(m: CampaignMsg, f: Filter): boolean {
   }
 }
 
-/** The campaign's messages: filter chips, search, a paged table and a detail modal. */
+/** Pending first, then sent, then failed, when sorting by send status. */
+function sendRank(status: string): number {
+  return status === "QUEUED" ? 0 : status === "FAILED" ? 2 : 1;
+}
+
+/** Sent < delivered < viewed, a reply above all; none while pending or failed. */
+function readRank(m: CampaignMsg): number | null {
+  if (m.status === "FAILED" || m.status === "QUEUED") return null;
+  const level = m.status === "READ" ? 3 : m.status === "DELIVERED" ? 2 : 1;
+  return m.replied ? level + 3 : level;
+}
+
+/**
+ * The campaign's messages: filter chips (the KPI tiles link to them), then a
+ * table to search, sort by any header and filter by each header's funnel, in
+ * pages, with a detail modal per message.
+ */
 export function MessagesTab({
   rows,
   channelName,
@@ -56,18 +73,91 @@ export function MessagesTab({
   const params = useSearchParams();
   const initialF = params.get("f") as Filter | null;
   const [filter, setFilter] = useState<Filter>(initialF && FILTERS.includes(initialF) ? initialF : "all");
-  const [q, setQ] = useState("");
   const [size, setSize] = useState(10);
   const [page, setPage] = useState(0);
   const [open, setOpen] = useState<CampaignMsg | null>(null);
 
-  const needle = q.trim().toLowerCase();
-  const digits = needle.replace(/\D/g, "");
-  const shown = rows.filter(
-    (m) =>
-      matches(m, filter) &&
-      (!needle || (m.name ?? "").toLowerCase().includes(needle) || (digits && m.phone.includes(digits)))
-  );
+  const sendLabel = (status: string) => (status === "FAILED" ? L.stFailed : status === "QUEUED" ? L.stQueued : L.stSent);
+  const readLabel = (status: string) =>
+    status === "FAILED" || status === "QUEUED" ? null : status === "READ" ? L.stRead : status === "DELIVERED" ? L.stDelivered : L.stSent;
+  const when = (at: string) =>
+    new Date(at).toLocaleString("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", timeZone: TZ }).replace("Sept", "Sep");
+
+  const columns: DataColumn[] = [
+    { key: "customer", label: L.customer, filter: false },
+    { key: "phone", label: L.phone, filter: false },
+    { key: "send", label: L.sendStatus },
+    { key: "read", label: L.readStatusCol },
+    { key: "time", label: L.time, filter: false },
+    { key: "actions", label: "", sort: false, filter: false, align: "right", className: "w-[80px]" },
+  ];
+
+  // The chip narrows the rows first; search and funnels work within it.
+  const tableRows: DataRow[] = rows
+    .filter((m) => matches(m, filter))
+    .map((m) => {
+      const who = m.name || formatPhone(m.phone);
+      const c = tint(m.phone);
+      const rl = readLabel(m.status);
+      return {
+        id: m.id,
+        // The bare digits too, so "0123…" or "60123…" finds the number.
+        search: m.phone,
+        sort: {
+          customer: who,
+          phone: m.phone,
+          send: sendRank(m.status),
+          read: readRank(m),
+          time: Date.parse(m.at),
+        },
+        text: {
+          customer: who,
+          phone: formatPhone(m.phone),
+          send: sendLabel(m.status),
+          read: rl && m.replied ? [rl, L.repliedF] : rl,
+          time: when(m.at),
+        },
+        cells: {
+          customer: (
+            <span className="flex min-w-0 max-w-[280px] items-center gap-2.5">
+              <span
+                className="grid h-7 w-7 shrink-0 place-items-center rounded-full text-[10px] font-bold"
+                style={{ background: `color-mix(in srgb, ${c} 14%, white)`, color: c }}
+              >
+                {initials(who)}
+              </span>
+              <span className="truncate text-[13px] font-medium uppercase text-[var(--color-ink)]">{who}</span>
+            </span>
+          ),
+          phone: <span className="whitespace-nowrap text-[12.5px] tabular-nums text-[var(--color-muted)]">{formatPhone(m.phone)}</span>,
+          send: <SendStatus status={m.status} L={L} />,
+          read: <ReadStatus status={m.status} replied={m.replied} L={L} />,
+          time: <span className="whitespace-nowrap text-[12.5px] text-[var(--color-muted)]">{when(m.at)}</span>,
+          actions: (
+            <span className="flex items-center justify-end gap-3 text-[var(--color-accent)]">
+              <button type="button" aria-label={L.msgDetails} onClick={() => setOpen(m)}>
+                <Eye />
+              </button>
+              <Link href={`/inbox/${m.conversationId}`} aria-label={L.openConvo}>
+                <Chat />
+              </Link>
+            </span>
+          ),
+        },
+      };
+    });
+
+  const table = useDataTable(tableRows, columns);
+  const { shown } = table;
+
+  // Back to the first page whenever the search, a funnel or the sort changes.
+  const narrowing = JSON.stringify([table.q, table.filters, table.sort]);
+  const [seen, setSeen] = useState(narrowing);
+  if (seen !== narrowing) {
+    setSeen(narrowing);
+    setPage(0);
+  }
+
   const pages = Math.max(1, Math.ceil(shown.length / size));
   const cur = Math.min(page, pages - 1);
   const slice = shown.slice(cur * size, cur * size + size);
@@ -90,23 +180,11 @@ export function MessagesTab({
     );
   }
 
-  const cols = "grid-cols-[minmax(0,2fr)_minmax(0,1.2fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_64px]";
-
   return (
     <div className="flex min-h-full flex-col rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)]">
       <div className="flex flex-wrap items-center gap-2 border-b border-[var(--color-border)] px-4 py-3">
-        <div className="flex h-[36px] w-full max-w-[280px] items-center gap-2 rounded-[8px] border border-[var(--color-border)] px-3 focus-within:border-[var(--color-accent)]">
-          <IconSearch width={14} height={14} className="text-[var(--color-faint)]" />
-          <input
-            value={q}
-            onChange={(e) => {
-              setQ(e.target.value);
-              setPage(0);
-            }}
-            placeholder={L.searchMsg}
-            className="w-full bg-transparent text-[13px] outline-none placeholder:text-[var(--color-faint)]"
-          />
-        </div>
+        <DataSearch table={table} placeholder={L.searchMsg} />
+        <DataCount table={table} />
         <div className="ml-auto flex flex-wrap gap-1.5">
           {FILTERS.map((f) => (
             <button
@@ -130,48 +208,42 @@ export function MessagesTab({
       </div>
 
       <div className="overflow-x-auto">
-        <div className="min-w-[820px]">
-          <div className={`grid ${cols} gap-3 border-b border-[var(--color-border)] px-4 py-2.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--color-faint)]`}>
-            <span>{L.customer}</span>
-            <span>{L.phone}</span>
-            <span>{L.sendStatus}</span>
-            <span>{L.readStatusCol}</span>
-            <span>{L.time}</span>
-            <span />
-          </div>
-          {slice.length === 0 && <p className="px-4 py-10 text-center text-[13px] text-[var(--color-faint)]">{L.noMessages}</p>}
-          {slice.map((m) => {
-            const who = m.name || formatPhone(m.phone);
-            const c = tint(m.phone);
-            return (
-              <div key={m.id} className={`grid ${cols} items-center gap-3 border-b border-[var(--color-border-subtle)] px-4 py-3 hover:bg-[var(--color-surface-2)]`}>
-                <span className="flex min-w-0 items-center gap-2.5">
-                  <span
-                    className="grid h-7 w-7 shrink-0 place-items-center rounded-full text-[10px] font-bold"
-                    style={{ background: `color-mix(in srgb, ${c} 14%, white)`, color: c }}
+        <table className="w-full min-w-[820px] text-left text-[13px]">
+          <thead>
+            <tr className="border-b border-[var(--color-border)]">
+              {columns.map((c) => {
+                const sorted = table.sort?.key === c.key ? table.sort.dir : null;
+                return (
+                  <th
+                    key={c.key}
+                    aria-sort={sorted === "asc" ? "ascending" : sorted === "desc" ? "descending" : undefined}
+                    className={`whitespace-nowrap px-4 py-2.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--color-faint)] ${c.className ?? ""}`}
                   >
-                    {initials(who)}
-                  </span>
-                  <span className="truncate text-[13px] font-medium uppercase text-[var(--color-ink)]">{who}</span>
-                </span>
-                <span className="text-[12.5px] tabular-nums text-[var(--color-muted)]">{formatPhone(m.phone)}</span>
-                <SendStatus status={m.status} L={L} />
-                <ReadStatus status={m.status} replied={m.replied} L={L} />
-                <span className="text-[12.5px] text-[var(--color-muted)]">
-                  {new Date(m.at).toLocaleString("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", timeZone: TZ }).replace("Sept", "Sep")}
-                </span>
-                <span className="flex items-center justify-end gap-3 text-[var(--color-accent)]">
-                  <button type="button" aria-label={L.msgDetails} onClick={() => setOpen(m)}>
-                    <Eye />
-                  </button>
-                  <Link href={`/inbox/${m.conversationId}`} aria-label={L.openConvo}>
-                    <Chat />
-                  </Link>
-                </span>
-              </div>
-            );
-          })}
-        </div>
+                    <DataHead column={c} table={table} />
+                  </th>
+                );
+              })}
+            </tr>
+          </thead>
+          <tbody>
+            {slice.map((r) => (
+              <tr key={r.id} className="border-b border-[var(--color-border-subtle)] align-middle hover:bg-[var(--color-surface-2)]">
+                {columns.map((c) => (
+                  <td key={c.key} className={`px-4 py-3 ${c.align === "right" ? "text-right" : ""} ${c.className ?? ""}`}>
+                    {r.cells[c.key]}
+                  </td>
+                ))}
+              </tr>
+            ))}
+            {slice.length === 0 && (
+              <tr>
+                <td colSpan={columns.length} className="px-4 py-10 text-center text-[13px] text-[var(--color-faint)]">
+                  {L.noMessages}
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
       </div>
 
       <div className="mt-auto flex items-center gap-2 px-4 py-3 text-[12px] text-[var(--color-muted)]">
@@ -211,6 +283,7 @@ export function MessagesTab({
         </div>
       </div>
 
+      <DataMenus table={table} />
       {open && <Detail m={open} channelName={channelName} L={L} onClose={() => setOpen(null)} />}
     </div>
   );
