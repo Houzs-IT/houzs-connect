@@ -608,6 +608,35 @@ export const templateBinding = connect.table(
   })
 );
 
+/**
+ * A template's header file (image / PDF), kept so every send can attach it:
+ * Meta refuses a send of a media-header template that carries no header.
+ * Keyed by the template itself (WABA + name + language), not by company — a
+ * template is a WABA asset. `uploads` caches the media id per sending number.
+ * Migration 0016; self-applied by db/ensure-template-media.ts.
+ */
+export const templateMedia = connect.table(
+  "template_media",
+  {
+    id: id(),
+    wabaId: text("waba_id").notNull(),
+    templateName: text("template_name").notNull(),
+    language: text("language").notNull(),
+    /** IMAGE or DOCUMENT. */
+    format: text("format").notNull(),
+    mimeType: text("mime_type").notNull(),
+    fileName: text("file_name").notNull(),
+    /** The file, base64. At most 5 MB before encoding (template-media-limits.ts). */
+    data: text("data").notNull(),
+    uploads: jsonb("uploads").notNull().default({}),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedBy: text("updated_by"),
+  },
+  (t) => ({
+    templateKey: uniqueIndex("template_media_template_key").on(t.wabaId, t.templateName, t.language),
+  })
+);
+
 // ─────────────────────────── Quick replies ───────────────────────────
 
 export const quickReply = connect.table(

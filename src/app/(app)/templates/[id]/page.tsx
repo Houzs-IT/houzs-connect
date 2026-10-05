@@ -32,6 +32,7 @@ export default async function EditTemplatePage({ params }: { params: Promise<{ i
         footer: x.footer,
         buttons: x.buttons,
         mediaHeader: x.mediaHeader,
+        headerFormat: x.headerFormat,
         rejectedReason: x.rejectedReason,
         bindings: bindings.map.get(bindingKey(x.name, x.language))?.bindings ?? [],
         editBlocked: editBlockedReason(x.status as TemplateStatus),

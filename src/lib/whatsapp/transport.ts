@@ -11,6 +11,7 @@ import {
   type WaContactCard,
 } from "./media";
 import { senderForChannel, UNASSIGNED_SENDER } from "./channels";
+import { headerForSend } from "./templateMedia";
 
 /**
  * WhatsApp transport. DEMO mode records messages in the DB (no Meta). LIVE mode
@@ -174,22 +175,30 @@ export async function sendOutbound(
       // it is what made a whole day of undelivered messages undiagnosable: the
       // row said FAILED and nothing said why.
       const outcome: SendOutcome = {};
+      // An image / PDF header template carries its file on every send
+      // (templateMedia.ts); a file that will not upload fails the send with
+      // that reason instead of letting Meta refuse it for a missing header.
+      const header = opts.template ? await headerForSend(db, opts.template.name, opts.template.lang ?? "en", from) : null;
+      if (header && !header.ok) outcome.error = header.error;
+      const components = opts.template
+        ? [
+            ...(header?.ok ? [header.component] : []),
+            ...(opts.template.params?.length
+              ? [{ type: "body", parameters: opts.template.params.map((text) => ({ type: "text", text })) }]
+              : []),
+          ]
+        : [];
       const waId = opts.template
-        ? await sendTemplate(
-            convo.contact.phone,
-            opts.template.name,
-            opts.template.lang ?? "en",
-            opts.template.params?.length
-              ? [
-                  {
-                    type: "body",
-                    parameters: opts.template.params.map((text) => ({ type: "text", text })),
-                  },
-                ]
-              : undefined,
-            outcome,
-            from
-          )
+        ? header && !header.ok
+          ? null
+          : await sendTemplate(
+              convo.contact.phone,
+              opts.template.name,
+              opts.template.lang ?? "en",
+              components.length ? components : undefined,
+              outcome,
+              from
+            )
         : opts.flow
           ? await sendFlow(convo.contact.phone, body, opts.flow, outcome, from)
           : interactive

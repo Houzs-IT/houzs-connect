@@ -49,6 +49,10 @@ export interface TemplateRowData {
   buttons: string[];
   /** Meta holds a media header this editor cannot round-trip — blocks editing. */
   mediaHeader: boolean;
+  /** TEXT, IMAGE, DOCUMENT, VIDEO…; null when the template has no header. */
+  headerFormat: string | null;
+  /** The file Connect attaches when sending an image / PDF header template; the list page fills it. */
+  headerFile?: { url: string; fileName: string; format: "IMAGE" | "DOCUMENT" } | null;
   rejectedReason?: string | null;
   /** Saved mapping for this exact (name, language). Empty when never mapped. */
   bindings: VarBinding[];

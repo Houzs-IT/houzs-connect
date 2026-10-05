@@ -1,11 +1,15 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { getDb } from "@/db/client";
 import { getCurrentMember } from "@/lib/current-member";
+import { headerFileProblem, isHeaderMediaFormat } from "@/lib/template-media-limits";
+import { saveTemplateMedia } from "@/lib/whatsapp/templateMedia";
 import {
   createTemplate,
   deleteTemplate,
   listTemplates,
+  normaliseTemplateName,
   templateConfig,
   templateRequest,
   updateTemplate,
@@ -78,6 +82,30 @@ export interface ComposerPayload {
   kind?: "standard" | "call_permission" | "carousel";
   /** Carousel cards without their images (for Copy as cURL). */
   cards?: { body: string; buttons: string[] }[];
+  /** An image / PDF header; the file itself goes through submitMediaHeaderTemplate. */
+  headerFormat?: "IMAGE" | "DOCUMENT";
+}
+
+/** The draft a standard / call-permission composer payload describes. */
+function draftOf(payload: ComposerPayload): TemplateDraft {
+  return {
+    name: payload.name,
+    language: payload.language,
+    category: payload.category,
+    header: payload.header?.trim() || undefined,
+    body: payload.body,
+    footer: payload.footer?.trim() || undefined,
+    examples: payload.examples,
+    buttons: payload.buttons.slice(0, 3).map((text) => ({ type: "QUICK_REPLY" as const, text })),
+    kind: payload.kind === "call_permission" ? "call_permission" : "standard",
+  };
+}
+
+/** Save the payload's {{n}} mapping under the name Meta will store. */
+async function saveComposerBinding(companyId: string, payload: ComposerPayload) {
+  const bindings = asBindings(payload.bindings);
+  const key = normaliseTemplateName(payload.name);
+  if (bindings.length > 0 && key) await saveTemplateBinding(companyId, key, payload.language, bindings);
 }
 
 /**
@@ -95,31 +123,97 @@ export async function submitTemplateWithBinding(
   const me = await requireMember();
   if (!me) return { ok: false, error: "Not signed in." };
 
-  const draft: TemplateDraft = {
-    name: payload.name,
-    language: payload.language,
-    category: payload.category,
-    header: payload.header?.trim() || undefined,
-    body: payload.body,
-    footer: payload.footer?.trim() || undefined,
-    examples: payload.examples,
-    buttons: payload.buttons.slice(0, 3).map((text) => ({ type: "QUICK_REPLY" as const, text })),
-    kind: payload.kind === "call_permission" ? "call_permission" : "standard",
-  };
+  // Keyed by the name Meta will actually store (createTemplate normalises it too).
+  await saveComposerBinding(me.companyId, payload);
+  return await submitTemplate(draftOf(payload));
+}
 
-  const bindings = asBindings(payload.bindings);
-  if (bindings.length > 0) {
-    // normaliseTemplateName runs inside createTemplate; mirror it here so the
-    // mapping is keyed by the name Meta will actually store.
-    const key = payload.name
-      .trim()
-      .toLowerCase()
-      .replace(/[^a-z0-9_]+/g, "_")
-      .replace(/^_+|_+$/g, "");
-    if (key) await saveTemplateBinding(me.companyId, key, payload.language, bindings);
+/**
+ * Submit a template whose header is an image or a PDF. `payload` is the
+ * ComposerPayload as JSON (with headerFormat); the file arrives as `header`.
+ *
+ * The file goes to Meta twice over its life: here, as the sample Meta reviews
+ * (a Resumable Upload handle), and on every send, where Meta wants it again.
+ * So once Meta accepts the template, Connect keeps the file for the sends.
+ */
+export async function submitMediaHeaderTemplate(fd: FormData): Promise<SubmitResult> {
+  const me = await requireMember();
+  if (!me) return { ok: false, error: "Not signed in." };
+  const cfg = templateConfig();
+  if (!cfg) return { ok: false, error: "WhatsApp is not connected yet — WHATSAPP_WABA_ID and WHATSAPP_TOKEN are not set on the Worker." };
+  let payload: ComposerPayload;
+  try {
+    payload = JSON.parse(String(fd.get("payload") ?? "{}")) as ComposerPayload;
+  } catch {
+    return { ok: false, error: "The template could not be read." };
   }
+  const format = payload.headerFormat;
+  if (!isHeaderMediaFormat(format)) return { ok: false, error: "The header type is missing." };
+  const file = fd.get("header");
+  if (!(file instanceof File)) return { ok: false, error: "Choose the header file." };
+  const problem = headerFileProblem(format, file);
+  if (problem) return { ok: false, error: problem };
 
-  return await submitTemplate(draft);
+  const bytes = await file.arrayBuffer();
+  const fileName = file.name || (format === "IMAGE" ? "header.jpg" : "header.pdf");
+  const up = await uploadForHandle(cfg, bytes, file.type, fileName);
+  if (!up.ok) return { ok: false, error: `Header file: ${up.error}` };
+
+  await saveComposerBinding(me.companyId, payload);
+  const res = await submitTemplate({ ...draftOf(payload), header: undefined, kind: "standard", headerMedia: { format, handle: up.data } });
+  if (!res.ok) return res;
+  try {
+    await saveTemplateMedia(getDb(), {
+      name: normaliseTemplateName(payload.name),
+      language: payload.language,
+      format,
+      mimeType: file.type,
+      fileName,
+      bytes,
+      by: me.id,
+    });
+  } catch (e) {
+    console.warn("[templates] header file not kept:", e);
+    return {
+      ok: false,
+      error: "Meta accepted the template, but Connect could not keep its header file. Add the file again from the template's panel on the Templates page before sending it.",
+    };
+  }
+  return res;
+}
+
+/**
+ * Give an existing image / PDF header template the file Connect attaches when
+ * sending it: one made outside Connect, or one whose file should change. Meta
+ * is not asked to review anything; this only changes what each send carries.
+ */
+export async function setTemplateHeaderFile(fd: FormData): Promise<{ ok: boolean; error?: string }> {
+  const me = await requireMember();
+  if (!me) return { ok: false, error: "Not signed in." };
+  const name = String(fd.get("name") ?? "").trim();
+  const language = String(fd.get("language") ?? "").trim();
+  const format = String(fd.get("format") ?? "");
+  const file = fd.get("file");
+  if (!name || !language || !isHeaderMediaFormat(format)) return { ok: false, error: "The template could not be read." };
+  if (!(file instanceof File)) return { ok: false, error: "Choose the header file." };
+  const problem = headerFileProblem(format, file);
+  if (problem) return { ok: false, error: problem };
+  try {
+    await saveTemplateMedia(getDb(), {
+      name,
+      language,
+      format,
+      mimeType: file.type,
+      fileName: file.name || (format === "IMAGE" ? "header.jpg" : "header.pdf"),
+      bytes: await file.arrayBuffer(),
+      by: me.id,
+    });
+  } catch (e) {
+    console.warn("[templates] header file not saved:", e);
+    return { ok: false, error: "The file could not be saved. Try again." };
+  }
+  revalidatePath("/templates");
+  return { ok: true };
 }
 
 /**
@@ -140,6 +234,8 @@ export async function templateCurl(payload: ComposerPayload): Promise<{ ok: bool
     kind: payload.kind ?? "standard",
     // A card's image handle only exists after the upload; the command shows where it goes.
     cards: payload.cards?.map((c) => ({ ...c, imageHandle: "<IMAGE_HANDLE>" })),
+    // Same for a header file.
+    headerMedia: payload.headerFormat ? { format: payload.headerFormat, handle: "<HEADER_HANDLE>" } : undefined,
   });
   if (!req.ok) return { ok: false, error: req.error };
   // Close the shell's single quote, emit an escaped quote, reopen: ' -> '\''
@@ -320,9 +416,7 @@ export async function submitCarouselTemplate(fd: FormData): Promise<SubmitResult
     if (!up.ok) return { ok: false, error: `Card ${i + 1}: ${up.error}` };
     withImages.push({ imageHandle: up.data, body: cards[i].body, buttons: cards[i].buttons.filter((b) => b.trim()) });
   }
-  const bindings = asBindings(payload.bindings);
-  const key = payload.name.trim().toLowerCase().replace(/[^a-z0-9_]+/g, "_").replace(/^_+|_+$/g, "");
-  if (bindings.length > 0 && key) await saveTemplateBinding(me.companyId, key, payload.language, bindings);
+  await saveComposerBinding(me.companyId, payload);
   return await submitTemplate({
     name: payload.name,
     language: payload.language,
