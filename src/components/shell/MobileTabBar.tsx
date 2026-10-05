@@ -61,7 +61,7 @@ function TabCell({
  * Hidden inside an open conversation (`/inbox/<id>`): the thread carries its own
  * back control and needs the height for the composer.
  */
-export function MobileTabBar({ unread }: { unread?: number }) {
+export function MobileTabBar({ unread, internalUnread }: { unread?: number; internalUnread?: number }) {
   const path = usePathname();
   const params = useSearchParams();
   const { t } = useShell();
@@ -81,7 +81,7 @@ export function MobileTabBar({ unread }: { unread?: number }) {
 
   const tabs: Tab[] = [
     { href: "/inbox", label: t.tab.inbox, Icon: IconInbox, match: ["/inbox"], badge: unread },
-    { href: "/internal", label: t.tab.internal, Icon: IconInternal, match: ["/internal"] },
+    { href: "/internal", label: t.tab.internal, Icon: IconInternal, match: ["/internal"], badge: internalUnread },
     { href: "/dashboard", label: t.tab.home, Icon: IconDashboard, match: ["/dashboard"] },
     { href: "/automations", label: t.tab.flows, Icon: IconAutomation, match: ["/automations"] },
   ];

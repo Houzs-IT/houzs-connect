@@ -20,6 +20,7 @@ import {
   getVisibility,
 } from "@/lib/access";
 import { can } from "@/lib/permissions";
+import { internalUnreadTotal } from "./internal/data";
 
 // This is a live, data-driven console backed by per-request Cloudflare bindings
 // (Hyperdrive). Nothing here is static — force dynamic rendering for the whole
@@ -65,6 +66,9 @@ export default async function AppLayout({
     )
   );
 
+  // Internal's badge: unread messages in my channels and DMs.
+  const internalUnread = await internalUnreadTotal(me.companyId, me.id);
+
   const live = process.env.WHATSAPP_MODE === "LIVE";
 
   // Shell: 64px rail · [module secondary menu] · page column, with the phone
@@ -77,10 +81,10 @@ export default async function AppLayout({
       <NotifyPoller />
       <div data-shell className="flex h-dvh flex-col overflow-hidden">
         <div className="flex min-h-0 flex-1">
-          <Sidebar unread={unread} live={live} me={{ name: me.name, photo: await getMyPhotoSrc() }} />
+          <Sidebar unread={unread} internalUnread={internalUnread} live={live} me={{ name: me.name, photo: await getMyPhotoSrc() }} />
           <div className="flex min-w-0 flex-1">{children}</div>
         </div>
-        <MobileTabBar unread={unread} />
+        <MobileTabBar unread={unread} internalUnread={internalUnread} />
       </div>
     </ShellProvider>
   );

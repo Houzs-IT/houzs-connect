@@ -59,10 +59,13 @@ function RailTile({
  */
 export function Sidebar({
   unread,
+  internalUnread,
   live,
   me,
 }: {
   unread?: number;
+  /** Unread Internal messages in my channels and DMs. */
+  internalUnread?: number;
   live?: boolean;
   me: { name: string; photo?: string | null };
 }) {
@@ -97,7 +100,7 @@ export function Sidebar({
       </Link>
 
       <nav className="flex flex-col items-center gap-1">
-        {NAV.map((item) => tile(item, item.key === "inbox" ? unread : undefined))}
+        {NAV.map((item) => tile(item, item.key === "inbox" ? unread : item.key === "internal" ? internalUnread : undefined))}
       </nav>
 
       <div className="mt-auto flex flex-col items-center gap-2.5">
