@@ -64,6 +64,11 @@ _Once you submit your preferred date, our team will review and plan according to
 
 📌 _Important: once the final date is confirmed, it cannot be amended or cancelled. Please ensure the site is ready and someone is available to avoid additional charges (re-delivery or extra storage fees)._`;
 
+// Fallback when the "New Delivery Date" Flow form is not published on Meta (the
+// send_form node then skips): the customer types the date instead, and the same
+// confirmation step reads it back. Same DD/MM/YYYY the form's DatePicker shows.
+export const TYPE_DATE = `Please type your preferred new delivery date in the format DD/MM/YYYY (for example 20/10/2026).`;
+
 export const CONFIRM_NEW_DATE = `*Delivery Confirmation*
 
 For your order *{ref_1}*, is this the correct desired date?
@@ -276,6 +281,26 @@ export function buildDeliveryGraph(opts: {
         y: 620,
         data: { formId: formIds[DATE_FORM_KEY], flowCta: "Choose date", message: CHOOSE_DATE },
       },
+      // The form writes amended_delivery_date when it is published and the
+      // customer submits it. When it is NOT published (send_form skips) or the
+      // customer declined the date, the field is empty and we ask in text.
+      {
+        id: "date_router",
+        type: "criteria_router",
+        x: 1690,
+        y: 620,
+        data: { rules: [{ branch: "have_date", field: "amended_delivery_date", op: "set" }] },
+      },
+      {
+        id: "type_new_date",
+        type: "collect_input",
+        x: 1690,
+        y: 760,
+        data: { message: TYPE_DATE, saveTo: "amended_delivery_date" },
+      },
+      // "No" on the confirmation clears the date before asking again, or the
+      // router would hand the rejected date straight back to the confirmation.
+      { id: "clear_new_date", type: "set_attribute", x: 1800, y: 760, data: { key: "amended_delivery_date", value: "" } },
       {
         id: "confirm_new_date",
         type: "ask_buttons",
@@ -338,9 +363,13 @@ export function buildDeliveryGraph(opts: {
       { from: "ask_reason", to: "reason_unavail", branch: "date_unavail" },
       { from: "reason_reno", to: "ask_new_date" },
       { from: "reason_unavail", to: "ask_new_date" },
-      { from: "ask_new_date", to: "confirm_new_date" },
+      { from: "ask_new_date", to: "date_router" },
+      { from: "date_router", to: "confirm_new_date", branch: "have_date" },
+      { from: "date_router", to: "type_new_date", branch: "default" },
+      { from: "type_new_date", to: "confirm_new_date" },
       { from: "confirm_new_date", to: "set_pending", branch: "yes" },
-      { from: "confirm_new_date", to: "ask_new_date", branch: "no" },
+      { from: "confirm_new_date", to: "clear_new_date", branch: "no" },
+      { from: "clear_new_date", to: "ask_new_date" },
       { from: "set_pending", to: "tag_resched" },
       { from: "tag_resched", to: "cb_amend" },
       { from: "cb_amend", to: "amend_submitted" },
