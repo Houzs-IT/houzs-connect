@@ -457,3 +457,24 @@ export async function markRead(channelId: string, meId: string): Promise<void> {
     where channel_id = ${channelId} and member_id = ${meId} and state = 'member'
   `);
 }
+
+/**
+ * Unread Internal messages for the rail and the phone tab bar: the sum of the
+ * badges the Internal menu shows, over the channels and DMs I am in. Fresh
+ * (db/fresh.ts) so it drops as soon as a channel is read; 0 when Internal has
+ * never been opened (no tables yet) rather than an error in every page.
+ */
+export async function internalUnreadTotal(companyId: string, meId: string): Promise<number> {
+  try {
+    await ensureInternalTables(getDb());
+    const r = await rows<{ n: number }>(sql`
+      select coalesce(sum(${unread(meId)}), 0)::int as n
+      from connect.internal_channel c
+      join connect.internal_channel_member cm on cm.channel_id = c.id and cm.member_id = ${meId} and cm.state = 'member'
+      where c.company_id = ${companyId} and now() is not null
+    `);
+    return Number(r[0]?.n ?? 0);
+  } catch {
+    return 0;
+  }
+}
