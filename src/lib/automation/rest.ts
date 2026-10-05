@@ -1,5 +1,6 @@
 import type { FlowNode } from "./types";
 import { interpolate, type VarContext } from "./vars";
+import { rawFetch } from "@/lib/raw-fetch";
 
 /**
  * Outbound HTTP for the `call_rest_api` node.
@@ -168,7 +169,9 @@ export async function callRestApi(
   }
 
   try {
-    const res = await fetch(url, {
+    // rawFetch, not fetch: through Next's wrapper this POST came back as an
+    // empty 400 that never reached the ERP (see lib/raw-fetch.ts).
+    const res = await rawFetch()(url, {
       method,
       headers,
       body: sendBody ? body : undefined,

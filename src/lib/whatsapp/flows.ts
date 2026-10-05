@@ -5,6 +5,7 @@
 // Docs: https://developers.facebook.com/docs/whatsapp/flows/reference/flowsapi
 import { isLive } from "./cloud-api";
 import { metaToken } from "./token";
+import { rawFetch } from "@/lib/raw-fetch";
 import { readFields, keyFromLabel } from "@/app/(app)/forms/fields";
 
 const GRAPH = "https://graph.facebook.com/v23.0";
@@ -119,7 +120,9 @@ async function graphCall(
     headers["Content-Type"] = "application/json";
     body = JSON.stringify(init.json);
   }
-  const res = await fetch(`${GRAPH}/${path}`, { method: init.method ?? "GET", headers, body }).catch(
+  // rawFetch: the Meta Graph calls here (assets upload is multipart) must not go
+  // through Next's fetch wrapper either — see lib/raw-fetch.ts.
+  const res = await rawFetch()(`${GRAPH}/${path}`, { method: init.method ?? "GET", headers, body }).catch(
     () => null
   );
   if (!res) return null;
