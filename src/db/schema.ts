@@ -525,6 +525,8 @@ export const internalChannel = connect.table(
     kind: text("kind").notNull().default("channel"),
     /** "open": anyone in the company joins; "approval": a request an admin approves. Null = not settled yet. */
     access: text("access"),
+    /** Membership rule the channel was settled under (2 = department channels hold the department only). */
+    settled: integer("settled").notNull().default(0),
     name: text("name").notNull(),
     topic: text("topic"),
     departmentId: text("department_id"),

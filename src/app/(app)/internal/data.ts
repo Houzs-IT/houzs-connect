@@ -69,15 +69,21 @@ export async function ensureInternal(companyId: string, memberId: string): Promi
 }
 
 
-/** Company admins: in every department channel, and they approve any request. */
+/** Company admins: they join any channel without approval and manage every channel. */
 const ADMIN_ROLES = sql`('SUPER_ADMIN', 'OWNER', 'ADMIN')`;
 
 /**
  * Members for channels made before membership existed (access is null), once
  * (owner's choice, 2026-10-05): a department channel keeps that department
- * plus the company's admins and needs approval to join; #general keeps
- * everyone and is open; any other channel keeps whoever already had it open,
- * its maker as admin, and stays open. Read positions survive.
+ * and needs approval to join; #general keeps everyone and is open; any other
+ * channel keeps whoever already had it open, its maker as admin, and stays
+ * open. Read positions survive.
+ *
+ * Company admins are not put in department channels (owner, 2026-10-05: a
+ * small department's channel was mostly admins, all getting its unread
+ * badge). They join any channel directly when they want to. Department
+ * channels settled before that rule (settled < 2) lose the admins who are not
+ * in the department, are not the channel's own admins and never posted there.
  */
 async function settleMembership(tx: { execute: (q: ReturnType<typeof sql>) => Promise<unknown> }, companyId: string) {
   const legacy = (await tx.execute(sql`
@@ -87,7 +93,7 @@ async function settleMembership(tx: { execute: (q: ReturnType<typeof sql>) => Pr
   for (const ch of legacy) {
     if (ch.department_id || ch.name === "general") {
       const who = ch.department_id
-        ? sql`m.department_id = ${ch.department_id} or m.role::text in ${ADMIN_ROLES}`
+        ? sql`m.department_id = ${ch.department_id}`
         : sql`true`;
       await tx.execute(sql`
         insert into connect.internal_channel_member (channel_id, member_id, state, role)
@@ -103,7 +109,7 @@ async function settleMembership(tx: { execute: (q: ReturnType<typeof sql>) => Pr
         )
       `);
       await tx.execute(sql`
-        update connect.internal_channel set access = ${ch.department_id ? "approval" : "open"} where id = ${ch.id}
+        update connect.internal_channel set access = ${ch.department_id ? "approval" : "open"}, settled = 2 where id = ${ch.id}
       `);
     } else {
       if (ch.created_by_member_id) {
@@ -113,9 +119,26 @@ async function settleMembership(tx: { execute: (q: ReturnType<typeof sql>) => Pr
           on conflict (channel_id, member_id) do update set state = 'member', role = 'admin'
         `);
       }
-      await tx.execute(sql`update connect.internal_channel set access = 'open' where id = ${ch.id}`);
+      await tx.execute(sql`update connect.internal_channel set access = 'open', settled = 2 where id = ${ch.id}`);
     }
   }
+
+  // Department channels settled under the first rule (company admins in all of them).
+  await tx.execute(sql`
+    delete from connect.internal_channel_member x
+    using connect.internal_channel c, connect.member m
+    where x.channel_id = c.id and m.id = x.member_id
+      and c.company_id = ${companyId} and c.kind = 'channel' and c.department_id is not null
+      and c.access is not null and c.settled < 2
+      and x.role = 'member'
+      and m.department_id is distinct from c.department_id
+      and m.role::text in ${ADMIN_ROLES}
+      and not exists (select 1 from connect.internal_message im where im.channel_id = c.id and im.author_member_id = m.id)
+  `);
+  await tx.execute(sql`
+    update connect.internal_channel set settled = 2
+    where company_id = ${companyId} and kind = 'channel' and access is not null and settled < 2
+  `);
 }
 
 /** Companies already checked by this worker. */
