@@ -6,6 +6,7 @@ import { sql } from "drizzle-orm";
 import { getDb } from "@/db/client";
 import { ensureInternalTables } from "@/db/ensure-internal";
 import { getCurrentMember } from "@/lib/current-member";
+import { isAdminRole } from "@/lib/permissions";
 import { channelInfo, markRead, slug } from "./data";
 
 type Rows<T> = T[];
@@ -98,6 +99,60 @@ export async function createChannel(name: string, topic: string): Promise<{ ok: 
   `);
   revalidatePath("/internal", "layout");
   return { ok: true, id };
+}
+
+/** A channel (not a DM) this person may rename or delete: admins any, others their own. */
+async function ownChannel(me: { companyId: string; id: string; role: string }, id: string) {
+  const r = await q<{ id: string; created_by: string | null }>(sql`
+    select id, created_by_member_id as created_by from connect.internal_channel
+    where id = ${id} and company_id = ${me.companyId} and kind = 'channel'
+  `);
+  const ch = r[0];
+  if (!ch) return { error: "Channel not found." } as const;
+  if (!isAdminRole(me.role) && ch.created_by !== me.id) return { error: "Only an admin or the person who made this channel can change it." } as const;
+  return { ch } as const;
+}
+
+export async function updateChannel(id: string, name: string, topic: string): Promise<{ ok: boolean; error?: string }> {
+  const me = await ctx();
+  if (!me) return { ok: false, error: "Not signed in." };
+  if (!name.trim()) return { ok: false, error: "Give the channel a name." };
+  const own = await ownChannel(me, id);
+  if ("error" in own) return { ok: false, error: own.error };
+  const clean = slug(name);
+  const dup = await q<{ id: string }>(sql`
+    select id from connect.internal_channel
+    where company_id = ${me.companyId} and kind = 'channel' and name = ${clean} and id <> ${id}
+  `);
+  if (dup[0]) return { ok: false, error: `#${clean} already exists.` };
+  await getDb().execute(sql`
+    update connect.internal_channel set name = ${clean}, topic = ${topic.trim().slice(0, 120) || null} where id = ${id}
+  `);
+  revalidatePath("/internal", "layout");
+  return { ok: true };
+}
+
+/**
+ * Delete a channel with its messages and read markers. The last channel stays:
+ * a company with none gets the default set made again on its next visit
+ * (data.ts ensureInternal), which would look like the delete did not happen.
+ */
+export async function deleteChannel(id: string): Promise<{ ok: boolean; error?: string }> {
+  const me = await ctx();
+  if (!me) return { ok: false, error: "Not signed in." };
+  const own = await ownChannel(me, id);
+  if ("error" in own) return { ok: false, error: own.error };
+  const n = await q<{ n: number }>(sql`
+    select count(*)::int as n from connect.internal_channel where company_id = ${me.companyId} and kind = 'channel'
+  `);
+  if ((n[0]?.n ?? 0) <= 1) return { ok: false, error: "Keep at least one channel." };
+  await getDb().transaction(async (tx) => {
+    await tx.execute(sql`delete from connect.internal_message where channel_id = ${id}`);
+    await tx.execute(sql`delete from connect.internal_channel_member where channel_id = ${id}`);
+    await tx.execute(sql`delete from connect.internal_channel where id = ${id} and company_id = ${me.companyId}`);
+  });
+  revalidatePath("/internal", "layout");
+  return { ok: true };
 }
 
 /** The DM between me and a colleague — created on first use, one per pair. */

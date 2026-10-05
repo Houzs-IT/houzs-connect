@@ -3,6 +3,7 @@ import { attrs, formatPhone, initials, tint, waIdentifier } from "@/lib/format";
 import { fmt, type Dict } from "@/lib/i18n/dict";
 import { IconClose } from "@/components/icons";
 import { DeleteContactButton } from "./DeleteContactButton";
+import { ContactTags } from "./ContactTags";
 import { contactDetail, shortWhen } from "./queries";
 
 const EYEBROW = "text-[10.5px] font-semibold uppercase tracking-[0.14em] text-[var(--color-faint)]";
@@ -30,7 +31,7 @@ export async function ContactDetail({
 }) {
   const d = await contactDetail(companyId, id);
   if (!d) return null;
-  const { c, convos, fields } = d;
+  const { c, convos, fields, allTags } = d;
   const a = attrs(c.attributes);
   const name = c.name ?? c.phone;
   const ident = waIdentifier(c.phone);
@@ -101,6 +102,14 @@ export async function ContactDetail({
       </div>
 
       <div className="flex flex-col gap-4 border-t border-[var(--color-border-subtle)] px-4 py-4">
+        <section>
+          <div className={`mb-2 ${EYEBROW}`}>{s.tags}</div>
+          <ContactTags
+            contactId={c.id}
+            tags={c.tagLinks.map((l) => ({ id: l.tag.id, name: l.tag.name, color: l.tag.color }))}
+            all={allTags.map((tg) => ({ id: tg.id, name: tg.name, color: tg.color }))}
+          />
+        </section>
         <section>
           <div className={`mb-2 ${EYEBROW}`}>{s.orders}</div>
           {orders.length === 0 ? (

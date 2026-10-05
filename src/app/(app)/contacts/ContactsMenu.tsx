@@ -1,6 +1,8 @@
 import { getCurrentMember } from "@/lib/current-member";
 import { getDict } from "@/lib/i18n/server";
 import { SecondaryMenu } from "@/components/shell/SecondaryMenu";
+import { can } from "@/lib/permissions";
+import { ManageTags } from "./ManageTags";
 import { menuCounts } from "./queries";
 
 /** Contacts' secondary menu: segments, tags and sources, with real counts. */
@@ -9,7 +11,7 @@ export async function ContactsMenu() {
   if (!me) return null;
   const t = await getDict();
   const s = t.contacts;
-  const m = await menuCounts(me.companyId);
+  const [m, canManage] = await Promise.all([menuCounts(me.companyId), can(me, "settings")]);
   const fmtN = (n: number) => n.toLocaleString("en-MY");
   return (
     <SecondaryMenu
@@ -25,11 +27,12 @@ export async function ContactsMenu() {
             { href: "?segment=blocked", label: s.blocked, count: fmtN(m.blocked) },
           ],
         },
-        ...(m.tags.length
+        ...(m.tags.length || canManage
           ? [
               {
                 title: s.tags,
                 items: m.tags.map((tg) => ({ href: `?tag=${encodeURIComponent(tg.id)}`, label: tg.name, dot: tg.color })),
+                action: canManage ? <ManageTags tags={m.tags.map((tg) => ({ id: tg.id, name: tg.name, color: tg.color, n: Number(tg.n) }))} /> : undefined,
               },
             ]
           : []),

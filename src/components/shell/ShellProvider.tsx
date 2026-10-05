@@ -2,7 +2,7 @@
 
 import { createContext, useCallback, useContext, useState } from "react";
 import { useRouter } from "next/navigation";
-import { DICTS, LANG_COOKIE, MENU_COOKIE, type Dict, type Lang } from "@/lib/i18n/dict";
+import { DICTS, LANG_COOKIE, MENU_COOKIE, PANEL_COOKIE, type Dict, type Lang } from "@/lib/i18n/dict";
 
 type Shell = {
   lang: Lang;
@@ -10,6 +10,9 @@ type Shell = {
   setLang: (l: Lang) => void;
   menuCollapsed: boolean;
   setMenuCollapsed: (v: boolean) => void;
+  /** The customer panel beside a conversation is put away. */
+  panelCollapsed: boolean;
+  setPanelCollapsed: (v: boolean) => void;
 };
 
 const Ctx = createContext<Shell | null>(null);
@@ -28,15 +31,18 @@ function writeCookie(name: string, value: string) {
 export function ShellProvider({
   lang: initialLang,
   menuCollapsed: initialCollapsed,
+  panelCollapsed: initialPanel = false,
   children,
 }: {
   lang: Lang;
   menuCollapsed: boolean;
+  panelCollapsed?: boolean;
   children: React.ReactNode;
 }) {
   const router = useRouter();
   const [lang, setLangState] = useState(initialLang);
   const [menuCollapsed, setCollapsed] = useState(initialCollapsed);
+  const [panelCollapsed, setPanel] = useState(initialPanel);
 
   const setLang = useCallback(
     (l: Lang) => {
@@ -54,9 +60,14 @@ export function ShellProvider({
     setCollapsed(v);
   }, []);
 
+  const setPanelCollapsed = useCallback((v: boolean) => {
+    writeCookie(PANEL_COOKIE, v ? "0" : "1");
+    setPanel(v);
+  }, []);
+
   return (
     <Ctx.Provider
-      value={{ lang, t: DICTS[lang], setLang, menuCollapsed, setMenuCollapsed }}
+      value={{ lang, t: DICTS[lang], setLang, menuCollapsed, setMenuCollapsed, panelCollapsed, setPanelCollapsed }}
     >
       {children}
     </Ctx.Provider>

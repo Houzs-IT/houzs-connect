@@ -6,7 +6,7 @@ import { ShellProvider } from "@/components/shell/ShellProvider";
 import { PresencePing } from "@/components/shell/PresencePing";
 import { NotifyPoller } from "@/components/shell/NotifyPoller";
 import { touchPresence } from "@/lib/presence";
-import { getLang, getMenuCollapsed } from "@/lib/i18n/server";
+import { getLang, getMenuCollapsed, getPanelCollapsed } from "@/lib/i18n/server";
 import { getDb } from "@/db/client";
 import { ensureContactColumns } from "@/db/ensure";
 import { ensureChannelColumns } from "@/db/ensure-channel";
@@ -72,7 +72,7 @@ export default async function AppLayout({
   // as the first child of the row; every page renders its own column
   // (PageChrome), so the two simply sit side by side.
   return (
-    <ShellProvider lang={await getLang()} menuCollapsed={await getMenuCollapsed()}>
+    <ShellProvider lang={await getLang()} menuCollapsed={await getMenuCollapsed()} panelCollapsed={await getPanelCollapsed()}>
       <PresencePing />
       <NotifyPoller />
       <div data-shell className="flex h-dvh flex-col overflow-hidden">
