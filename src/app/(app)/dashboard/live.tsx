@@ -5,6 +5,7 @@ import { Skel } from "@/components/skeleton";
 import { LiveRefresh } from "@/components/inbox/LiveRefresh";
 import { SLA_MINUTES } from "@/lib/sla";
 import { liveNow } from "./queries";
+import { photoSrcs } from "@/lib/member-photo";
 import { Avatar, Card, EYEBROW, Empty } from "./ui";
 import { humanDuration } from "./util";
 
@@ -17,6 +18,7 @@ type S = Dict["dash"];
  */
 export async function LiveTab({ companyId, s }: { companyId: string; s: S }) {
   const l = await liveNow(companyId);
+  const photos = await photoSrcs(l.people.map((p) => p.id));
   const now = l.now;
   const kpis = [
     { label: s.l1, hint: s.l1Hint, value: l.onlineAgents, dot: "#2f8a5b", bg: "linear-gradient(135deg,#ffffff 40%,#e3f5ea)" },
@@ -151,7 +153,7 @@ export async function LiveTab({ companyId, s }: { companyId: string; s: S }) {
               {l.people.map((a) => (
                 <li key={a.id} className="flex items-center gap-2.5 py-1.5 text-[12.5px]">
                   <span className="relative">
-                    <Avatar name={a.name} size={26} />
+                    <Avatar name={a.name} photo={photos.get(a.id)} size={26} />
                     <span
                       className={`absolute -bottom-px -right-px h-[9px] w-[9px] rounded-full border-2 border-white ${
                         a.online ? "bg-[var(--color-success)]" : "bg-[var(--color-border-strong)]"

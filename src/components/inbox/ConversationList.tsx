@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useParams, useSearchParams } from "next/navigation";
 import { initials, listTime, previewText, shortDay, tint } from "@/lib/format";
 import { fmt } from "@/lib/i18n/dict";
+import { PersonAvatar } from "@/components/PersonAvatar";
 import { IconClose, IconSearch } from "@/components/icons";
 import { useShell } from "@/components/shell/ShellProvider";
 import { SlaTimer, isOverdue } from "./SlaTimer";
@@ -25,6 +26,8 @@ export type ConversationListItem = {
   waitingSince: string | null;
   agent: string | null;
   agentId: string | null;
+  /** The assignee's profile photo URL, or null. */
+  agentPhoto: string | null;
   departmentId: string | null;
   department: string | null;
   tags: { id: string; name: string; color: string }[];
@@ -509,7 +512,7 @@ function Row({
               title={c.agent ?? undefined}
               className="ml-auto hidden min-w-0 items-center gap-1 overflow-hidden whitespace-nowrap text-[10.5px] text-[var(--color-faint)] md:flex"
             >
-              {c.agent && <Avatar name={c.agent} size={16} />}
+              {c.agent && <Avatar name={c.agent} photo={c.agentPhoto} size={16} />}
               <span className="truncate">{c.department ?? c.agent}</span>
             </span>
           )}
@@ -519,19 +522,22 @@ function Row({
   );
 }
 
-function Avatar({ name, size }: { name: string; size: number }) {
+/** `photo` is for staff (the assignee); customers have none. */
+function Avatar({ name, size, photo }: { name: string; size: number; photo?: string | null }) {
   return (
-    <span
-      className="grid shrink-0 place-items-center rounded-full font-semibold text-white"
-      style={{
-        background: tint(name),
-        width: size,
-        height: size,
-        fontSize: size >= 36 ? 11 : size >= 30 ? 10 : 8,
-      }}
-    >
-      {initials(name).toUpperCase()}
-    </span>
+    <PersonAvatar name={name} photo={photo} size={size}>
+      <span
+        className="grid shrink-0 place-items-center rounded-full font-semibold text-white"
+        style={{
+          background: tint(name),
+          width: size,
+          height: size,
+          fontSize: size >= 36 ? 11 : size >= 30 ? 10 : 8,
+        }}
+      >
+        {initials(name).toUpperCase()}
+      </span>
+    </PersonAvatar>
   );
 }
 

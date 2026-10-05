@@ -181,7 +181,7 @@ export async function messagesByAgent(companyId: string, w: PeriodWindow) {
     .orderBy(desc(count()))
     .limit(8);
   const names = await memberNames(companyId);
-  return rows.map((r) => ({ name: names.get(r.memberId ?? "") ?? "—", sent: r.sent }));
+  return rows.map((r) => ({ memberId: r.memberId, name: names.get(r.memberId ?? "") ?? "—", sent: r.sent }));
 }
 
 // ─────────────────────────── Conversations ───────────────────────────

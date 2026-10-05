@@ -12,6 +12,8 @@ import { AssignButton, ResolveButton } from "@/components/inbox/HeaderActions";
 import { DemoReplyBar } from "@/components/inbox/DemoReplyBar";
 import { WindowTimer } from "@/components/inbox/WindowTimer";
 import { getCurrentMember } from "@/lib/current-member";
+import { photoSrcs } from "@/lib/member-photo";
+import { PersonAvatar } from "@/components/PersonAvatar";
 import { ensureConversationMemberTable } from "@/db/ensure-conversation-member";
 import { isLive } from "@/lib/whatsapp/cloud-api";
 import { attrs, displayName, initials, stamp, tint, waIdentifier } from "@/lib/format";
@@ -128,9 +130,11 @@ export default async function ConversationPage({
   // The whole history is on screen when it fits, so flow starts before the
   // first message (the trigger) still show.
   const since = convo.messages.length < THREAD_LIMIT ? new Date(0) : (messages[0]?.createdAt ?? convo.createdAt);
-  const [automationEvents, automation] = await Promise.all([
+  const [automationEvents, automation, memberPhotos] = await Promise.all([
     getAutomationEvents(convo.contact.id, since),
     getAutomationProgress(convo.contact.id),
+    // Only the three faces the header shows.
+    photoSrcs(chatMembers.slice(0, 3).map((m) => m.id)),
   ]);
 
   const items: ThreadItem[] = [
@@ -236,13 +240,20 @@ export default async function ConversationPage({
             {chatMembers.length > 0 && (
               <div className="hidden -space-x-1.5 lg:flex" title={chatMembers.map((m) => m.name).join(", ")}>
                 {chatMembers.slice(0, 3).map((m) => (
-                  <span
+                  <PersonAvatar
                     key={m.id}
-                    className="grid h-6 w-6 place-items-center rounded-full border border-[var(--color-surface)] text-[9px] font-semibold text-white"
-                    style={{ background: tint(m.name) }}
+                    name={m.name}
+                    photo={memberPhotos.get(m.id)}
+                    size={24}
+                    className="border border-[var(--color-surface)]"
                   >
-                    {initials(m.name).toUpperCase()}
-                  </span>
+                    <span
+                      className="grid h-6 w-6 place-items-center rounded-full border border-[var(--color-surface)] text-[9px] font-semibold text-white"
+                      style={{ background: tint(m.name) }}
+                    >
+                      {initials(m.name).toUpperCase()}
+                    </span>
+                  </PersonAvatar>
                 ))}
               </div>
             )}

@@ -19,6 +19,7 @@ import { VolumeCard } from "./VolumeCard";
 import { SoonButton } from "./SoonButton";
 import { formatPhone } from "@/lib/format";
 import { companyPresence } from "@/lib/presence";
+import { photoSrcs } from "@/lib/member-photo";
 
 type S = Dict["dash"];
 type Props = { companyId: string; w: PeriodWindow; s: S };
@@ -319,6 +320,7 @@ export async function VolumeSection({ companyId, w }: Omit<Props, "s">) {
   ]);
   const rate = cur.asked ? (cur.answered / cur.asked) * 100 : null;
   const prevRate = prev.asked ? (prev.answered / prev.asked) * 100 : null;
+  const photos = await photoSrcs(agents.map((a) => a.memberId));
   return (
     <VolumeCard
       labels={w.buckets.map((b) => b.label)}
@@ -328,7 +330,7 @@ export async function VolumeSection({ companyId, w }: Omit<Props, "s">) {
       prev={vol.prev}
       rate={rate}
       ratePts={rate != null && prevRate != null ? rate - prevRate : null}
-      agents={agents}
+      agents={agents.map((a) => ({ name: a.name, sent: a.sent, photo: (a.memberId && photos.get(a.memberId)) || null }))}
     />
   );
 }
@@ -338,6 +340,7 @@ export async function VolumeSection({ companyId, w }: Omit<Props, "s">) {
 export async function TeamCard({ companyId, w, s }: Props) {
   const [rows, people] = await Promise.all([teamLoad(companyId, w), companyPresence(companyId)]);
   const online = new Set(people.filter((p) => p.online).map((p) => p.id));
+  const photos = await photoSrcs(rows.map((r) => r.id));
   const max = Math.max(1, ...rows.map((r) => r.n));
   return (
     <Card>
@@ -357,7 +360,7 @@ export async function TeamCard({ companyId, w, s }: Props) {
           {rows.map((r) => (
             <li key={r.name} className="flex items-center gap-2.5">
               <span className="relative">
-                <Avatar name={r.name} size={26} />
+                <Avatar name={r.name} photo={photos.get(r.id)} size={26} />
                 <span
                   className={`absolute -bottom-px -right-px h-[9px] w-[9px] rounded-full border-2 border-white ${
                     online.has(r.id) ? "bg-[var(--color-success)]" : "bg-[var(--color-border-strong)]"
