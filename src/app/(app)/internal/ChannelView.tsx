@@ -10,16 +10,19 @@ import { getDict } from "@/lib/i18n/server";
 import { photoSrcs } from "@/lib/member-photo";
 import { companyPresence } from "@/lib/presence";
 import { isAdminRole } from "@/lib/permissions";
-import { channelInfo, channelMembers, channelMessages, ensureInternal, threadMessages } from "./data";
+import { channelEvents, channelInfo, channelMembers, channelMessages, channelShared, ensureInternal, threadMessages } from "./data";
+import { ChannelIcon, ChannelInfo } from "./ChannelInfo";
 import { Composer } from "./Composer";
 import { ChannelMenu } from "./ChannelMenu";
 import { JoinGate } from "./JoinGate";
-import { MembersDialog } from "./MembersDialog";
 import { LiveRefresh } from "./LiveRefresh";
 import { Avatar, MessageRow, dayKey } from "./parts";
 
-/** One channel or DM: the timeline, the composer, and an open thread beside it. */
-export async function ChannelView({ channelId, threadId }: { channelId: string; threadId?: string | null }) {
+/**
+ * One channel or DM: the timeline, the composer, and beside it an open thread
+ * or (?info=1) the channel's info panel.
+ */
+export async function ChannelView({ channelId, threadId, info = false }: { channelId: string; threadId?: string | null; info?: boolean }) {
   const me = await getCurrentMember();
   if (!me) return null;
   const t = await getDict();
@@ -30,6 +33,12 @@ export async function ChannelView({ channelId, threadId }: { channelId: string; 
   const companyAdmin = isAdminRole(me.role);
   const isChannel = ch.kind === "channel";
   const canManage = isChannel && (companyAdmin || ch.isChannelAdmin);
+  // What the channel's permissions let this member do (channel and company admins always may).
+  const canEdit = canManage || (isChannel && ch.isMember && ch.permEdit === "all");
+  const canAdd = canManage || (isChannel && ch.isMember && ch.permAdd === "all");
+  const canPost = !isChannel || ch.permPost === "all" || canManage;
+  const showInfo = isChannel && info;
+  const infoHref = showInfo ? `/internal/${ch.id}` : `/internal/${ch.id}?info=1`;
   const title = isChannel ? `# ${ch.name}` : ch.name;
 
   // Not in this channel: what it is, and Join / Request to join, instead of its messages.
@@ -58,11 +67,13 @@ export async function ChannelView({ channelId, threadId }: { channelId: string; 
     );
   }
 
-  const [msgs, people, thread, members] = await Promise.all([
+  const [msgs, people, thread, members, events, shared] = await Promise.all([
     channelMessages(ch.id),
     companyPresence(me.companyId),
-    threadId ? threadMessages(ch.id, threadId) : Promise.resolve([]),
+    threadId && !showInfo ? threadMessages(ch.id, threadId) : Promise.resolve([]),
     isChannel ? channelMembers(ch.id) : Promise.resolve([]),
+    showInfo ? channelEvents(ch.id) : Promise.resolve([]),
+    showInfo ? channelShared(ch.id) : Promise.resolve({ links: [], conversations: [] }),
   ]);
   const names = people.map((p) => p.name);
   const inChannel = members.filter((m) => m.state === "member");
@@ -73,6 +84,7 @@ export async function ChannelView({ channelId, threadId }: { channelId: string; 
   const today = dayKey(new Date());
   const memberCount = isChannel ? inChannel.length : 2;
   const root = thread[0] ?? null;
+  const side = root !== null || showInfo;
   // The panel button opens the latest thread, or closes the open one.
   const latestThread = [...msgs].reverse().find((m) => m.replies > 0);
   const panelHref = root ? `/internal/${ch.id}` : latestThread ? `/internal/${ch.id}?t=${latestThread.id}` : null;
@@ -80,26 +92,47 @@ export async function ChannelView({ channelId, threadId }: { channelId: string; 
   return (
     <div className="flex min-w-0 flex-1">
       <LiveRefresh channelId={ch.id} count={msgs.length + thread.length} />
-      <div className={`min-w-0 flex-1 flex-col ${root ? "hidden lg:flex" : "flex"}`}>
+      <div className={`min-w-0 flex-1 flex-col ${side ? "hidden lg:flex" : "flex"}`}>
         <header className="flex h-14 shrink-0 items-center gap-3 border-b border-[var(--color-border)] bg-[var(--color-surface)] px-4">
           <Link href="/internal" className="grid h-8 w-8 place-items-center text-[18px] text-[var(--color-muted)] md:hidden" aria-label={L.back}>
             ‹
           </Link>
-          <div className="min-w-0 flex-1 leading-tight md:flex md:items-baseline md:gap-2.5">
-            <h1 className="truncate text-[16px] font-semibold text-[var(--color-ink)]">{title}</h1>
-            {ch.topic && <p className="hidden truncate text-[12.5px] text-[var(--color-faint)] md:block">{ch.topic}</p>}
-            <p className="text-[11.5px] text-[var(--color-faint)] md:hidden">{fmt(L.members, { n: memberCount })}</p>
-          </div>
           {isChannel ? (
-            <MembersDialog
-              channelId={ch.id}
-              members={members}
-              people={people.map((p) => ({ id: p.id, name: p.name, photo: photos.get(p.id) ?? null }))}
-              photos={Object.fromEntries(members.map((m) => [m.id, photos.get(m.id) ?? null]))}
-              meId={me.id}
-              canManage={canManage}
-              faces={faces}
-            />
+            // The name opens the channel's info, like tapping a WhatsApp group's name.
+            <Link href={infoHref} scroll={false} title={L.openInfo} className="flex min-w-0 flex-1 items-center gap-2.5">
+              <ChannelIcon icon={ch.icon} size={32} />
+              <span className="min-w-0 flex-1 leading-tight md:flex md:items-baseline md:gap-2.5">
+                <h1 className="truncate text-[16px] font-semibold text-[var(--color-ink)]">{title}</h1>
+                {ch.topic && <p className="hidden truncate text-[12.5px] text-[var(--color-faint)] md:block">{ch.topic.split("\n")[0]}</p>}
+                <p className="text-[11.5px] text-[var(--color-faint)] md:hidden">{fmt(L.members, { n: memberCount })}</p>
+              </span>
+            </Link>
+          ) : (
+            <div className="min-w-0 flex-1 leading-tight">
+              <h1 className="truncate text-[16px] font-semibold text-[var(--color-ink)]">{title}</h1>
+            </div>
+          )}
+          {isChannel ? (
+            <Link
+              href={infoHref}
+              scroll={false}
+              title={L.openInfo}
+              className={`hidden items-center gap-2 rounded-[8px] border px-2 py-1 md:flex ${
+                showInfo ? "border-[var(--color-accent)] bg-[var(--color-accent-soft)]" : "border-[var(--color-border)] hover:bg-[var(--color-surface-2)]"
+              }`}
+            >
+              <span className="flex -space-x-1.5">
+                {faces.map((p) => (
+                  <span key={p.id} className="rounded-full ring-2 ring-white">
+                    <Avatar name={p.name} photo={p.photo} size={20} />
+                  </span>
+                ))}
+              </span>
+              <span className="text-[12.5px] text-[var(--color-muted)]">{fmt(L.members, { n: memberCount })}</span>
+              {canManage && ch.pendingCount > 0 && (
+                <span className="rounded-full bg-[var(--color-warning)] px-1.5 text-[10.5px] font-semibold text-white">{ch.pendingCount}</span>
+              )}
+            </Link>
           ) : (
             <span className="hidden items-center gap-2 rounded-[8px] border border-[var(--color-border)] px-2 py-1 md:flex">
               <span className="flex -space-x-1.5">
@@ -114,8 +147,7 @@ export async function ChannelView({ channelId, threadId }: { channelId: string; 
           )}
           <CompanySwitcher companies={await companyChoices(getDb(), me)} className="hidden md:block" />
           <LangToggle className="hidden md:flex" />
-          {canManage && <ChannelMenu id={ch.id} name={ch.name} topic={ch.topic} access={ch.access} />}
-          {panelHref && (
+          {panelHref && !showInfo && (
             <Link
               href={panelHref}
               scroll={false}
@@ -165,12 +197,16 @@ export async function ChannelView({ channelId, threadId }: { channelId: string; 
         </div>
 
         <div className="border-t border-[var(--color-border-subtle)] bg-[var(--color-surface)] p-3 md:px-5 md:pb-4">
-          <Composer
-            channelId={ch.id}
-            channelName={ch.name}
-            people={mentionable}
-            placeholder={ch.kind === "channel" ? fmt(L.msgPh, { c: ch.name }) : fmt(L.msgPhDm, { name: ch.name })}
-          />
+          {canPost ? (
+            <Composer
+              channelId={ch.id}
+              channelName={ch.name}
+              people={mentionable}
+              placeholder={ch.kind === "channel" ? fmt(L.msgPh, { c: ch.name }) : fmt(L.msgPhDm, { name: ch.name })}
+            />
+          ) : (
+            <p className="rounded-[10px] bg-[var(--color-surface-2)] px-4 py-3 text-center text-[13px] text-[var(--color-muted)]">{L.onlyAdminsPost}</p>
+          )}
         </div>
       </div>
 
@@ -195,16 +231,50 @@ export async function ChannelView({ channelId, threadId }: { channelId: string; 
             ))}
           </div>
           <div className="border-t border-[var(--color-border-subtle)] p-3">
-            <Composer
-              channelId={ch.id}
-              channelName={ch.name}
-              parentId={root.id}
-              people={mentionable}
-              placeholder={L.replyPh}
-              thread
-            />
+            {canPost ? (
+              <Composer
+                channelId={ch.id}
+                channelName={ch.name}
+                parentId={root.id}
+                people={mentionable}
+                placeholder={L.replyPh}
+                thread
+              />
+            ) : (
+              <p className="px-2 py-2 text-center text-[12.5px] text-[var(--color-muted)]">{L.onlyAdminsPost}</p>
+            )}
           </div>
         </aside>
+      )}
+
+      {showInfo && (
+        <ChannelInfo
+          channel={{
+            id: ch.id,
+            name: ch.name,
+            topic: ch.topic,
+            icon: ch.icon,
+            access: ch.access,
+            permEdit: ch.permEdit,
+            permPost: ch.permPost,
+            permAdd: ch.permAdd,
+            createdByName: ch.createdByName,
+            createdAt: ch.createdAt.toISOString(),
+            companyName: ch.companyName,
+            channelCount: ch.channelCount,
+          }}
+          members={members}
+          photos={Object.fromEntries(members.map((m) => [m.id, photos.get(m.id) ?? null]))}
+          people={people.map((p) => ({ id: p.id, name: p.name, photo: photos.get(p.id) ?? null }))}
+          events={events}
+          shared={shared}
+          meId={me.id}
+          canManage={canManage}
+          canEdit={canEdit}
+          canAdd={canAdd}
+          muted={ch.muted}
+          closeHref={`/internal/${ch.id}`}
+        />
       )}
     </div>
   );

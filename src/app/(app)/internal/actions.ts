@@ -52,6 +52,9 @@ export async function postMessage(input: {
   const ch = await channelInfo(me.companyId, input.channelId, me.id);
   if (!ch) return { ok: false, error: "Channel not found." };
   if (!ch.isMember) return { ok: false, error: "Join this channel to post in it." };
+  if (ch.kind === "channel" && ch.permPost === "admins" && !ch.isChannelAdmin && !isAdminRole(me.role)) {
+    return { ok: false, error: "Only admins can send messages in this channel." };
+  }
 
   let parentId: string | null = null;
   if (input.parentId) {
@@ -85,7 +88,47 @@ export async function postMessage(input: {
 }
 
 type Access = "open" | "approval";
+type Who = "all" | "admins";
 const cleanAccess = (a: unknown): Access => (a === "approval" ? "approval" : "open");
+const cleanWho = (w: unknown): Who => (w === "all" ? "all" : "admins");
+type Result = { ok: boolean; error?: string };
+type Me = { companyId: string; id: string; role: string };
+
+/** A line in "Member changes". */
+async function logEvent(channelId: string, actorId: string | null, action: string, targetId?: string | null, detail?: string | null) {
+  await getDb()
+    .execute(sql`
+      insert into connect.internal_channel_event (id, channel_id, actor_member_id, action, target_member_id, detail)
+      values (${createId()}, ${channelId}, ${actorId}, ${action}, ${targetId ?? null}, ${detail ?? null})
+    `)
+    .catch((e) => console.warn("[internal] event not logged:", e));
+}
+
+/**
+ * What I may do in a channel. Company admins and the channel's admins manage
+ * it (members, permissions, delete); members may also edit its info or add
+ * people when the channel's permissions allow it, like a WhatsApp group.
+ */
+async function rights(me: Me, id: string) {
+  const r = await q<{ id: string; name: string; perm_edit: string; perm_add: string; perm_post: string; my_role: string | null; my_state: string | null }>(sql`
+    select c.id, c.name, c.perm_edit, c.perm_add, c.perm_post, x.role as my_role, x.state as my_state
+    from connect.internal_channel c
+    left join connect.internal_channel_member x on x.channel_id = c.id and x.member_id = ${me.id}
+    where c.id = ${id} and c.company_id = ${me.companyId} and c.kind = 'channel'
+  `);
+  const ch = r[0];
+  if (!ch) return null;
+  const member = ch.my_state === "member";
+  const manage = isAdminRole(me.role) || (member && ch.my_role === "admin");
+  return {
+    ch,
+    member,
+    manage,
+    edit: manage || (member && ch.perm_edit === "all"),
+    add: manage || (member && ch.perm_add === "all"),
+  };
+}
+const NO_RIGHT = "Only an admin of this channel, or a company admin, can do that.";
 
 /**
  * Make a channel. Whoever makes it is its admin; `memberIds` are added as
@@ -106,16 +149,16 @@ export async function createChannel(
   `);
   if (dup[0]) return { ok: false, error: `#${clean} already exists.` };
   const id = createId();
+  const others = [...new Set(memberIds)].filter((m) => m && m !== me.id).slice(0, 500);
   await getDb().transaction(async (tx) => {
     await tx.execute(sql`
-      insert into connect.internal_channel (id, company_id, kind, name, topic, created_by_member_id, access)
-      values (${id}, ${me.companyId}, 'channel', ${clean}, ${topic.trim().slice(0, 120) || null}, ${me.id}, ${cleanAccess(access)})
+      insert into connect.internal_channel (id, company_id, kind, name, topic, created_by_member_id, access, settled)
+      values (${id}, ${me.companyId}, 'channel', ${clean}, ${topic.trim().slice(0, 1000) || null}, ${me.id}, ${cleanAccess(access)}, 2)
     `);
     await tx.execute(sql`
       insert into connect.internal_channel_member (channel_id, member_id, state, role, last_read_at)
       values (${id}, ${me.id}, 'member', 'admin', now())
     `);
-    const others = [...new Set(memberIds)].filter((m) => m && m !== me.id).slice(0, 500);
     if (others.length) {
       await tx.execute(sql`
         insert into connect.internal_channel_member (channel_id, member_id, state, role)
@@ -125,46 +168,87 @@ export async function createChannel(
       `);
     }
   });
+  await logEvent(id, me.id, "created");
+  for (const o of others) await logEvent(id, me.id, "added", o);
   revalidatePath("/internal", "layout");
   return { ok: true, id };
 }
 
-/**
- * A channel this person may manage (members, settings, delete): a company
- * admin any channel, otherwise an admin of that channel.
- */
-async function managed(me: { companyId: string; id: string; role: string }, id: string) {
-  const r = await q<{ id: string; my_role: string | null; my_state: string | null }>(sql`
-    select c.id, x.role as my_role, x.state as my_state
-    from connect.internal_channel c
-    left join connect.internal_channel_member x on x.channel_id = c.id and x.member_id = ${me.id}
-    where c.id = ${id} and c.company_id = ${me.companyId} and c.kind = 'channel'
-  `);
-  const ch = r[0];
-  if (!ch) return { error: "Channel not found." } as const;
-  if (!isAdminRole(me.role) && !(ch.my_role === "admin" && ch.my_state === "member")) {
-    return { error: "Only an admin of this channel, or a company admin, can do that." } as const;
-  }
-  return { ch } as const;
-}
-
-export async function updateChannel(id: string, name: string, topic: string, access?: Access): Promise<{ ok: boolean; error?: string }> {
+/** Name and description (and, for managers, who can join). */
+export async function updateChannel(id: string, name: string, topic: string, access?: Access): Promise<Result> {
   const me = await ctx();
   if (!me) return { ok: false, error: "Not signed in." };
   if (!name.trim()) return { ok: false, error: "Give the channel a name." };
-  const own = await managed(me, id);
-  if ("error" in own) return { ok: false, error: own.error };
+  const r = await rights(me, id);
+  if (!r) return { ok: false, error: "Channel not found." };
+  if (!r.edit) return { ok: false, error: "Only admins can edit this channel's info." };
+  if (access && !r.manage) return { ok: false, error: NO_RIGHT };
   const clean = slug(name);
   const dup = await q<{ id: string }>(sql`
     select id from connect.internal_channel
     where company_id = ${me.companyId} and kind = 'channel' and name = ${clean} and id <> ${id}
   `);
   if (dup[0]) return { ok: false, error: `#${clean} already exists.` };
+  const prev = await q<{ name: string; topic: string | null }>(sql`select name, topic from connect.internal_channel where id = ${id}`);
+  const desc = topic.trim().slice(0, 1000) || null;
   await getDb().execute(sql`
     update connect.internal_channel
-    set name = ${clean}, topic = ${topic.trim().slice(0, 120) || null}
+    set name = ${clean}, topic = ${desc}
       ${access ? sql`, access = ${cleanAccess(access)}` : sql``}
     where id = ${id}
+  `);
+  if (prev[0] && prev[0].name !== clean) await logEvent(id, me.id, "renamed", null, clean);
+  if (prev[0] && (prev[0].topic ?? null) !== desc) await logEvent(id, me.id, "described");
+  revalidatePath("/internal", "layout");
+  return { ok: true };
+}
+
+/** The channel's photo: a small JPEG data URL from the browser, or null to remove it. */
+export async function setChannelIcon(id: string, dataUrl: string | null): Promise<Result> {
+  const me = await ctx();
+  if (!me) return { ok: false, error: "Not signed in." };
+  const r = await rights(me, id);
+  if (!r) return { ok: false, error: "Channel not found." };
+  if (!r.edit) return { ok: false, error: "Only admins can change this channel's photo." };
+  if (dataUrl && (!/^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/.test(dataUrl) || dataUrl.length > 300_000)) {
+    return { ok: false, error: "That photo could not be used. Try a smaller picture." };
+  }
+  await getDb().execute(sql`update connect.internal_channel set icon = ${dataUrl} where id = ${id}`);
+  await logEvent(id, me.id, dataUrl ? "photo" : "photo_removed");
+  revalidatePath("/internal", "layout");
+  return { ok: true };
+}
+
+/** Group permissions: who may edit the info, post, add people; whether joining needs approval. */
+export async function setChannelPermissions(
+  id: string,
+  p: { edit?: Who; post?: Who; add?: Who; approval?: boolean }
+): Promise<Result> {
+  const me = await ctx();
+  if (!me) return { ok: false, error: "Not signed in." };
+  const r = await rights(me, id);
+  if (!r) return { ok: false, error: "Channel not found." };
+  if (!r.manage) return { ok: false, error: NO_RIGHT };
+  await getDb().execute(sql`
+    update connect.internal_channel set
+      perm_edit = ${p.edit ? cleanWho(p.edit) : sql`perm_edit`},
+      perm_post = ${p.post ? cleanWho(p.post) : sql`perm_post`},
+      perm_add = ${p.add ? cleanWho(p.add) : sql`perm_add`},
+      access = ${p.approval === undefined ? sql`access` : p.approval ? "approval" : "open"}
+    where id = ${id}
+  `);
+  await logEvent(id, me.id, "permissions", null, JSON.stringify(p));
+  revalidatePath("/internal", "layout");
+  return { ok: true };
+}
+
+/** Mute (no unread count, no notifications) or unmute a channel for me. */
+export async function setChannelMuted(id: string, muted: boolean): Promise<Result> {
+  const me = await ctx();
+  if (!me) return { ok: false, error: "Not signed in." };
+  await getDb().execute(sql`
+    update connect.internal_channel_member set muted = ${muted}
+    where channel_id = ${id} and member_id = ${me.id}
   `);
   revalidatePath("/internal", "layout");
   return { ok: true };
@@ -175,11 +259,12 @@ export async function updateChannel(id: string, name: string, topic: string, acc
  * a company with none gets the default set made again on its next visit
  * (data.ts ensureInternal), which would look like the delete did not happen.
  */
-export async function deleteChannel(id: string): Promise<{ ok: boolean; error?: string }> {
+export async function deleteChannel(id: string): Promise<Result> {
   const me = await ctx();
   if (!me) return { ok: false, error: "Not signed in." };
-  const own = await managed(me, id);
-  if ("error" in own) return { ok: false, error: own.error };
+  const r = await rights(me, id);
+  if (!r) return { ok: false, error: "Channel not found." };
+  if (!r.manage) return { ok: false, error: NO_RIGHT };
   const n = await q<{ n: number }>(sql`
     select count(*)::int as n from connect.internal_channel where company_id = ${me.companyId} and kind = 'channel'
   `);
@@ -187,6 +272,7 @@ export async function deleteChannel(id: string): Promise<{ ok: boolean; error?: 
   await getDb().transaction(async (tx) => {
     await tx.execute(sql`delete from connect.internal_message where channel_id = ${id}`);
     await tx.execute(sql`delete from connect.internal_channel_member where channel_id = ${id}`);
+    await tx.execute(sql`delete from connect.internal_channel_event where channel_id = ${id}`);
     await tx.execute(sql`delete from connect.internal_channel where id = ${id} and company_id = ${me.companyId}`);
   });
   revalidatePath("/internal", "layout");
@@ -209,12 +295,13 @@ export async function joinChannel(id: string): Promise<{ ok: boolean; state?: "m
     values (${id}, ${me.id}, ${direct ? "member" : "pending"}, 'member', now(), ${direct ? sql`now()` : sql`null`})
     on conflict (channel_id, member_id) do update set state = excluded.state, requested_at = now()
   `);
+  await logEvent(id, me.id, direct ? "joined" : "requested");
   revalidatePath("/internal", "layout");
   return { ok: true, state: direct ? "member" : "pending" };
 }
 
 /** Withdraw my request to join. */
-export async function cancelJoinRequest(id: string): Promise<{ ok: boolean; error?: string }> {
+export async function cancelJoinRequest(id: string): Promise<Result> {
   const me = await ctx();
   if (!me) return { ok: false, error: "Not signed in." };
   await getDb().execute(sql`
@@ -225,40 +312,42 @@ export async function cancelJoinRequest(id: string): Promise<{ ok: boolean; erro
 }
 
 /** Leave a channel (not a DM). */
-export async function leaveChannel(id: string): Promise<{ ok: boolean; error?: string }> {
+export async function leaveChannel(id: string): Promise<Result> {
   const me = await ctx();
   if (!me) return { ok: false, error: "Not signed in." };
-  await getDb().execute(sql`
-    delete from connect.internal_channel_member x
-    using connect.internal_channel c
-    where x.channel_id = c.id and c.id = ${id} and c.company_id = ${me.companyId} and c.kind = 'channel' and x.member_id = ${me.id}
-  `);
+  const r = await rights(me, id);
+  if (!r) return { ok: false, error: "Channel not found." };
+  await getDb().execute(sql`delete from connect.internal_channel_member where channel_id = ${id} and member_id = ${me.id}`);
+  await logEvent(id, me.id, "left");
   revalidatePath("/internal", "layout");
   return { ok: true };
 }
 
 /** Approve or decline a request to join. */
-export async function decideJoinRequest(id: string, memberId: string, approve: boolean): Promise<{ ok: boolean; error?: string }> {
+export async function decideJoinRequest(id: string, memberId: string, approve: boolean): Promise<Result> {
   const me = await ctx();
   if (!me) return { ok: false, error: "Not signed in." };
-  const own = await managed(me, id);
-  if ("error" in own) return { ok: false, error: own.error };
+  const r = await rights(me, id);
+  if (!r) return { ok: false, error: "Channel not found." };
+  if (!r.manage) return { ok: false, error: NO_RIGHT };
   await getDb().execute(
     approve
       ? sql`update connect.internal_channel_member set state = 'member', joined_at = now()
             where channel_id = ${id} and member_id = ${memberId} and state = 'pending'`
       : sql`delete from connect.internal_channel_member where channel_id = ${id} and member_id = ${memberId} and state = 'pending'`
   );
+  await logEvent(id, me.id, approve ? "approved" : "declined", memberId);
   revalidatePath("/internal", "layout");
   return { ok: true };
 }
 
 /** Add colleagues to a channel (a pending request among them is approved). */
-export async function addChannelMembers(id: string, memberIds: string[]): Promise<{ ok: boolean; error?: string }> {
+export async function addChannelMembers(id: string, memberIds: string[]): Promise<Result> {
   const me = await ctx();
   if (!me) return { ok: false, error: "Not signed in." };
-  const own = await managed(me, id);
-  if ("error" in own) return { ok: false, error: own.error };
+  const r = await rights(me, id);
+  if (!r) return { ok: false, error: "Channel not found." };
+  if (!r.add) return { ok: false, error: "Only admins can add people to this channel." };
   const ids = [...new Set(memberIds)].filter(Boolean).slice(0, 500);
   if (!ids.length) return { ok: true };
   await getDb().execute(sql`
@@ -267,31 +356,36 @@ export async function addChannelMembers(id: string, memberIds: string[]): Promis
     where m.company_id = ${me.companyId} and m.active = true and m.id in ${sql`(${sql.join(ids.map((x) => sql`${x}`), sql`, `)})`}
     on conflict (channel_id, member_id) do update set state = 'member'
   `);
+  for (const x of ids) await logEvent(id, me.id, "added", x);
   revalidatePath("/internal", "layout");
   return { ok: true };
 }
 
 /** Take someone out of a channel. */
-export async function removeChannelMember(id: string, memberId: string): Promise<{ ok: boolean; error?: string }> {
+export async function removeChannelMember(id: string, memberId: string): Promise<Result> {
   const me = await ctx();
   if (!me) return { ok: false, error: "Not signed in." };
-  const own = await managed(me, id);
-  if ("error" in own) return { ok: false, error: own.error };
+  const r = await rights(me, id);
+  if (!r) return { ok: false, error: "Channel not found." };
+  if (!r.manage) return { ok: false, error: NO_RIGHT };
   await getDb().execute(sql`delete from connect.internal_channel_member where channel_id = ${id} and member_id = ${memberId}`);
+  await logEvent(id, me.id, "removed", memberId);
   revalidatePath("/internal", "layout");
   return { ok: true };
 }
 
 /** Make a member an admin of the channel, or back to a member. */
-export async function setChannelRole(id: string, memberId: string, role: "admin" | "member"): Promise<{ ok: boolean; error?: string }> {
+export async function setChannelRole(id: string, memberId: string, role: "admin" | "member"): Promise<Result> {
   const me = await ctx();
   if (!me) return { ok: false, error: "Not signed in." };
-  const own = await managed(me, id);
-  if ("error" in own) return { ok: false, error: own.error };
+  const r = await rights(me, id);
+  if (!r) return { ok: false, error: "Channel not found." };
+  if (!r.manage) return { ok: false, error: NO_RIGHT };
   await getDb().execute(sql`
     update connect.internal_channel_member set role = ${role === "admin" ? "admin" : "member"}
     where channel_id = ${id} and member_id = ${memberId} and state = 'member'
   `);
+  await logEvent(id, me.id, role === "admin" ? "made_admin" : "removed_admin", memberId);
   revalidatePath("/internal", "layout");
   return { ok: true };
 }

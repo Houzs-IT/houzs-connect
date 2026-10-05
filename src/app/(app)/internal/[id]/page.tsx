@@ -7,9 +7,9 @@ export default async function ChannelPage({
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ t?: string }>;
+  searchParams: Promise<{ t?: string; info?: string }>;
 }) {
   const { id } = await params;
-  const { t } = await searchParams;
-  return <ChannelView channelId={id} threadId={t ?? null} />;
+  const { t, info } = await searchParams;
+  return <ChannelView channelId={id} threadId={t ?? null} info={info === "1"} />;
 }
