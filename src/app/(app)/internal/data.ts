@@ -47,28 +47,89 @@ export async function ensureInternal(companyId: string, memberId: string): Promi
     const have = (await tx.execute(sql`
       select count(*)::int as n from connect.internal_channel where company_id = ${companyId} and kind = 'channel'
     `)) as unknown as { n: number }[];
-    if ((have[0]?.n ?? 0) > 0) return;
-    const depts = (await tx.execute(sql`
-      select id, name from connect.department where company_id = ${companyId} order by name
-    `)) as unknown as { id: string; name: string }[];
-    const seeds = [...depts.map((d) => ({ name: slug(d.name), dept: d.id as string | null })), { name: "general", dept: null }];
-    const seen = new Set<string>();
-    for (const s of seeds) {
-      if (seen.has(s.name)) continue;
-      seen.add(s.name);
-      await tx.execute(sql`
-        insert into connect.internal_channel (id, company_id, kind, name, department_id, created_by_member_id)
-        values (${createId()}, ${companyId}, 'channel', ${s.name}, ${s.dept}, ${memberId})
-      `);
+    if ((have[0]?.n ?? 0) === 0) {
+      const depts = (await tx.execute(sql`
+        select id, name from connect.department where company_id = ${companyId} order by name
+      `)) as unknown as { id: string; name: string }[];
+      const seeds = [...depts.map((d) => ({ name: slug(d.name), dept: d.id as string | null })), { name: "general", dept: null }];
+      const seen = new Set<string>();
+      for (const s of seeds) {
+        if (seen.has(s.name)) continue;
+        seen.add(s.name);
+        await tx.execute(sql`
+          insert into connect.internal_channel (id, company_id, kind, name, department_id, created_by_member_id)
+          values (${createId()}, ${companyId}, 'channel', ${s.name}, ${s.dept}, ${memberId})
+        `);
+      }
     }
+    await settleMembership(tx, companyId);
   });
   seeded.add(companyId);
+}
+
+
+/** Company admins: in every department channel, and they approve any request. */
+const ADMIN_ROLES = sql`('SUPER_ADMIN', 'OWNER', 'ADMIN')`;
+
+/**
+ * Members for channels made before membership existed (access is null), once
+ * (owner's choice, 2026-10-05): a department channel keeps that department
+ * plus the company's admins and needs approval to join; #general keeps
+ * everyone and is open; any other channel keeps whoever already had it open,
+ * its maker as admin, and stays open. Read positions survive.
+ */
+async function settleMembership(tx: { execute: (q: ReturnType<typeof sql>) => Promise<unknown> }, companyId: string) {
+  const legacy = (await tx.execute(sql`
+    select id, name, department_id, created_by_member_id from connect.internal_channel
+    where company_id = ${companyId} and kind = 'channel' and access is null
+  `)) as unknown as { id: string; name: string; department_id: string | null; created_by_member_id: string | null }[];
+  for (const ch of legacy) {
+    if (ch.department_id || ch.name === "general") {
+      const who = ch.department_id
+        ? sql`m.department_id = ${ch.department_id} or m.role::text in ${ADMIN_ROLES}`
+        : sql`true`;
+      await tx.execute(sql`
+        insert into connect.internal_channel_member (channel_id, member_id, state, role)
+        select ${ch.id}, m.id, 'member', 'member' from connect.member m
+        where m.company_id = ${companyId} and m.active = true and (${who})
+        on conflict (channel_id, member_id) do update set state = 'member'
+      `);
+      await tx.execute(sql`
+        delete from connect.internal_channel_member x
+        where x.channel_id = ${ch.id} and not exists (
+          select 1 from connect.member m
+          where m.id = x.member_id and m.company_id = ${companyId} and m.active = true and (${who})
+        )
+      `);
+      await tx.execute(sql`
+        update connect.internal_channel set access = ${ch.department_id ? "approval" : "open"} where id = ${ch.id}
+      `);
+    } else {
+      if (ch.created_by_member_id) {
+        await tx.execute(sql`
+          insert into connect.internal_channel_member (channel_id, member_id, state, role)
+          values (${ch.id}, ${ch.created_by_member_id}, 'member', 'admin')
+          on conflict (channel_id, member_id) do update set state = 'member', role = 'admin'
+        `);
+      }
+      await tx.execute(sql`update connect.internal_channel set access = 'open' where id = ${ch.id}`);
+    }
+  }
 }
 
 /** Companies already checked by this worker. */
 const seeded = new Set<string>();
 
-export type SideChannel = { id: string; name: string; topic: string | null; unread: number; lastBy: string | null; lastBody: string | null };
+export type SideChannel = {
+  id: string;
+  name: string;
+  topic: string | null;
+  unread: number;
+  lastBy: string | null;
+  lastBody: string | null;
+  /** Requests to join waiting, shown to whoever can approve them. */
+  pending: number;
+};
 export type SideDm = { id: string; otherId: string; otherName: string; unread: number; lastBy: string | null; lastBody: string | null };
 export type SideDiscussion = { conversationId: string; name: string; orderRef: string | null; channelId: string; messageId: string };
 
@@ -89,12 +150,16 @@ const last = sql`(
 )`;
 type Last = { by: string | null; body: string | null } | null;
 
-export async function sidebar(companyId: string, meId: string) {
+export async function sidebar(companyId: string, meId: string, companyAdminFlag = false) {
+  const companyAdmin = companyAdminFlag ? sql`true` : sql`false`;
   const [channels, dms, discussions] = await Promise.all([
-    rows<{ id: string; name: string; topic: string | null; unread: number; last: Last }>(sql`
-      select c.id, c.name, c.topic, ${unread(meId)} as unread, ${last} as last
+    rows<{ id: string; name: string; topic: string | null; unread: number; last: Last; pending: number }>(sql`
+      select c.id, c.name, c.topic, ${unread(meId)} as unread, ${last} as last,
+        case when cm.role = 'admin' or ${companyAdmin} then (
+          select count(*)::int from connect.internal_channel_member p where p.channel_id = c.id and p.state = 'pending'
+        ) else 0 end as pending
       from connect.internal_channel c
-      left join connect.internal_channel_member cm on cm.channel_id = c.id and cm.member_id = ${meId}
+      join connect.internal_channel_member cm on cm.channel_id = c.id and cm.member_id = ${meId} and cm.state = 'member'
       where c.company_id = ${companyId} and c.kind = 'channel'
       order by (c.name = 'general'), c.created_at, c.name
     `),
@@ -112,6 +177,7 @@ export async function sidebar(companyId: string, meId: string) {
         coalesce(m.parent_id, m.id) as message_id
       from connect.internal_message m
       join connect.internal_channel c on c.id = m.channel_id and c.company_id = ${companyId}
+      join connect.internal_channel_member dm on dm.channel_id = c.id and dm.member_id = ${meId} and dm.state = 'member'
       join connect.conversation cv on cv.id = m.conversation_id
       join connect.contact ct on ct.id = cv.contact_id
       where m.conversation_id is not null
@@ -127,6 +193,7 @@ export async function sidebar(companyId: string, meId: string) {
       unread: c.unread,
       lastBy: c.last?.by ?? null,
       lastBody: c.last?.body ?? null,
+      pending: Number(c.pending ?? 0),
     })) as SideChannel[],
     dms: dms.map((d) => ({
       id: d.id,
@@ -243,18 +310,98 @@ async function withPhotos<T extends ChatMessage>(msgs: T[]): Promise<T[]> {
 }
 
 export async function channelInfo(companyId: string, channelId: string, meId: string) {
-  const r = await rows<{ id: string; kind: string; name: string; topic: string | null; created_by: string | null; other_name: string | null }>(sql`
-    select c.id, c.kind, c.name, c.topic, c.created_by_member_id as created_by,
+  const r = await rows<{
+    id: string;
+    kind: string;
+    name: string;
+    topic: string | null;
+    access: string | null;
+    created_by: string | null;
+    my_state: string | null;
+    my_role: string | null;
+    member_count: number;
+    pending_count: number;
+    other_name: string | null;
+  }>(sql`
+    select c.id, c.kind, c.name, c.topic, c.access, c.created_by_member_id as created_by,
+      me.state as my_state, me.role as my_role,
+      (select count(*)::int from connect.internal_channel_member x where x.channel_id = c.id and x.state = 'member') as member_count,
+      (select count(*)::int from connect.internal_channel_member x where x.channel_id = c.id and x.state = 'pending') as pending_count,
       (select mo.name from connect.internal_channel_member o join connect.member mo on mo.id = o.member_id
         where o.channel_id = c.id and o.member_id <> ${meId} limit 1) as other_name
     from connect.internal_channel c
+    left join connect.internal_channel_member me on me.channel_id = c.id and me.member_id = ${meId}
     where c.id = ${channelId} and c.company_id = ${companyId}
-      and (c.kind = 'channel' or exists (select 1 from connect.internal_channel_member x where x.channel_id = c.id and x.member_id = ${meId}))
+      and (c.kind = 'channel' or me.member_id is not null)
   `);
   const c = r[0];
-  return c
-    ? { id: c.id, kind: c.kind as "channel" | "dm", name: c.kind === "dm" ? (c.other_name ?? c.name) : c.name, topic: c.topic, createdBy: c.created_by }
-    : null;
+  if (!c) return null;
+  const isMember = c.kind === "dm" || c.my_state === "member";
+  return {
+    id: c.id,
+    kind: c.kind as "channel" | "dm",
+    name: c.kind === "dm" ? (c.other_name ?? c.name) : c.name,
+    topic: c.topic,
+    createdBy: c.created_by,
+    access: (c.access === "approval" ? "approval" : "open") as "open" | "approval",
+    isMember,
+    isPending: c.my_state === "pending",
+    /** Admin of this channel (a company admin manages every channel too: check the role as well). */
+    isChannelAdmin: isMember && c.my_role === "admin",
+    memberCount: Number(c.member_count ?? 0),
+    pendingCount: Number(c.pending_count ?? 0),
+  };
+}
+
+export type ChannelMember = { id: string; name: string; dept: string | null; role: "admin" | "member"; state: "member" | "pending" };
+
+/** Who is in a channel, and who asked to join: requests first, then admins, then by name. */
+export async function channelMembers(channelId: string): Promise<ChannelMember[]> {
+  const r = await rows<{ id: string; name: string; dept: string | null; role: string; state: string }>(sql`
+    select m.id, m.name, d.name as dept, x.role, x.state
+    from connect.internal_channel_member x
+    join connect.member m on m.id = x.member_id
+    left join connect.department d on d.id = m.department_id
+    where x.channel_id = ${channelId}
+    order by (x.state = 'pending') desc, (x.role = 'admin') desc, m.name
+  `);
+  return r.map((x) => ({
+    id: x.id,
+    name: x.name,
+    dept: x.dept,
+    role: x.role === "admin" ? "admin" : "member",
+    state: x.state === "pending" ? "pending" : "member",
+  }));
+}
+
+export type BrowseChannel = {
+  id: string;
+  name: string;
+  topic: string | null;
+  access: "open" | "approval";
+  members: number;
+  mine: "member" | "pending" | null;
+};
+
+/** Every channel in the company, for Browse channels. */
+export async function browseChannels(companyId: string, meId: string): Promise<BrowseChannel[]> {
+  const r = await rows<{ id: string; name: string; topic: string | null; access: string | null; members: number; mine: string | null }>(sql`
+    select c.id, c.name, c.topic, c.access,
+      (select count(*)::int from connect.internal_channel_member x where x.channel_id = c.id and x.state = 'member') as members,
+      me.state as mine
+    from connect.internal_channel c
+    left join connect.internal_channel_member me on me.channel_id = c.id and me.member_id = ${meId}
+    where c.company_id = ${companyId} and c.kind = 'channel'
+    order by (c.name = 'general') desc, c.name
+  `);
+  return r.map((x) => ({
+    id: x.id,
+    name: x.name,
+    topic: x.topic,
+    access: x.access === "approval" ? "approval" : "open",
+    members: Number(x.members ?? 0),
+    mine: x.mine === "member" ? "member" : x.mine === "pending" ? "pending" : null,
+  }));
 }
 
 /** The channel's timeline: top-level messages and replies also sent to it, oldest first. */
@@ -296,18 +443,17 @@ export async function searchMessages(companyId: string, meId: string, q: string)
     join connect.internal_channel c on c.id = m.channel_id and c.company_id = ${companyId}
     ${MESSAGE_JOINS}
     where m.body ilike ${like}
-      and (c.kind = 'channel' or exists (select 1 from connect.internal_channel_member x where x.channel_id = c.id and x.member_id = ${meId}))
+      and exists (select 1 from connect.internal_channel_member x where x.channel_id = c.id and x.member_id = ${meId} and x.state = 'member')
     order by m.created_at desc
     limit 50
   `);
   return withPhotos(r.map((x) => ({ ...toMessage(x), channelId: x.channel_id as string, channelName: x.channel_name as string })));
 }
 
-/** Mark a channel read for me (creates my row on first visit). */
+/** Mark a channel read for me. Only a member has a read position: opening a channel is not joining it. */
 export async function markRead(channelId: string, meId: string): Promise<void> {
   await getDb().execute(sql`
-    insert into connect.internal_channel_member (channel_id, member_id, last_read_at)
-    values (${channelId}, ${meId}, now())
-    on conflict (channel_id, member_id) do update set last_read_at = now()
+    update connect.internal_channel_member set last_read_at = now()
+    where channel_id = ${channelId} and member_id = ${meId} and state = 'member'
   `);
 }

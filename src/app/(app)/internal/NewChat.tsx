@@ -5,6 +5,7 @@ import { useState, useTransition } from "react";
 import { ActionDialog } from "@/components/ActionConfirm";
 import { useShell } from "@/components/shell/ShellProvider";
 import { createChannel, openDm } from "./actions";
+import { AccessChoice } from "./ChannelMenu";
 import { Avatar } from "./parts";
 
 /** The pencil in the Internal menu: start a DM with a colleague, or make a channel. */
@@ -16,6 +17,8 @@ export function NewChat({ people }: { people: { id: string; name: string; online
   const [tab, setTab] = useState<"dm" | "channel">("dm");
   const [name, setName] = useState("");
   const [topic, setTopic] = useState("");
+  const [access, setAccess] = useState<"open" | "approval">("open");
+  const [picked, setPicked] = useState<Set<string>>(new Set());
   const [filter, setFilter] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
@@ -93,6 +96,42 @@ export function NewChat({ people }: { people: { id: string; name: string; online
               placeholder={L.topic}
               className="h-[36px] w-full rounded-[8px] border border-[var(--color-border)] px-3 text-[13px] outline-none focus:border-[var(--color-accent)]"
             />
+            <AccessChoice value={access} onChange={setAccess} />
+            <div>
+              <div className="mb-1 flex items-center justify-between">
+                <span className="text-[12px] font-semibold text-[var(--color-ink)]">{L.pickMembers}</span>
+                <span className="text-[11.5px] text-[var(--color-faint)]">{picked.size ? `${picked.size} ✓` : L.youAreAdmin}</span>
+              </div>
+              <input
+                value={filter}
+                onChange={(e) => setFilter(e.target.value)}
+                placeholder={L.searchPeople}
+                className="mb-1.5 h-[32px] w-full rounded-[8px] border border-[var(--color-border)] px-2.5 text-[13px] outline-none focus:border-[var(--color-accent)]"
+              />
+              <div className="max-h-44 overflow-y-auto rounded-[8px] border border-[var(--color-border-subtle)]">
+                {people
+                  .filter((p) => p.name.toLowerCase().includes(filter.trim().toLowerCase()))
+                  .map((p) => (
+                    <label key={p.id} className="flex cursor-pointer items-center gap-2.5 px-2 py-1.5 hover:bg-[var(--color-surface-2)]">
+                      <input
+                        type="checkbox"
+                        checked={picked.has(p.id)}
+                        onChange={() =>
+                          setPicked((s) => {
+                            const n = new Set(s);
+                            if (n.has(p.id)) n.delete(p.id);
+                            else n.add(p.id);
+                            return n;
+                          })
+                        }
+                        className="accent-[var(--color-accent)]"
+                      />
+                      <Avatar name={p.name} photo={p.photo} size={22} />
+                      <span className="truncate text-[13px] text-[var(--color-ink)]">{p.name}</span>
+                    </label>
+                  ))}
+              </div>
+            </div>
             <div className="flex justify-end gap-2">
               <button
                 type="button"
@@ -104,7 +143,7 @@ export function NewChat({ people }: { people: { id: string; name: string; online
               <button
                 type="button"
                 disabled={pending || !name.trim()}
-                onClick={() => start(async () => go(await createChannel(name, topic)))}
+                onClick={() => start(async () => go(await createChannel(name, topic, access, [...picked])))}
                 className="h-[34px] rounded-[8px] bg-[var(--color-accent)] px-3.5 text-[13px] font-semibold text-white disabled:opacity-40"
               >
                 {L.create}
