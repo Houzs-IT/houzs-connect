@@ -1,4 +1,4 @@
-import type { FlowGraph } from "../types";
+import type { FlowEdge, FlowGraph, FlowNode } from "../types";
 import type { SeedForm } from "./types";
 
 /**
@@ -82,6 +82,24 @@ export const AMEND_SUBMITTED = `Thank you for submitting your desired delivery d
 // keep them identical to the approved template's button labels.
 export const OPENER_CONFIRM_BTN = "Confirm Date";
 export const OPENER_AMEND_BTN = "Amend Date";
+/* The multi-order openers' quick replies as the sheet-era flows named them
+   ("Confirm All Dates" / "Amend Date(s)"). A template tap reports its LABEL, and
+   the Meta template, not this graph, decides the label — so every opener node
+   carries edges for BOTH spellings and the first live tap tells which fired.
+   An unknown label falls to the node's default edge (nextNodeId), which for an
+   opener is the Confirm branch; the extra edges make that fallback unnecessary. */
+export const OPENER_CONFIRM_ALL_BTN = "Confirm All Dates";
+export const OPENER_AMEND_ANY_BTN = "Amend Date(s)";
+
+/** One approved opener template + its positional parameters, in order. */
+export interface OpenerTemplate {
+  templateName: string;
+  params: string[];
+}
+
+/** The openers for 2, 3 and 4+ orders. Keys = the `order_total` the ERP sends
+ *  ("2", "3"; anything else that is not "1" / unset → "4"). */
+export type OpenerFamily = Partial<Record<"2" | "3" | "4", OpenerTemplate>>;
 
 // Forms both flows send. `key` is the local handle the graph references; the
 // seed resolves it to the published form row id. `select` options are not yet
@@ -158,8 +176,9 @@ export function buildTemplateSendGraph(opts: {
  *   headers  X-Chat-Key = the ERP's CHAT_CALLBACK_KEY — here `{secret:ERP_CALLBACK_KEY}`,
  *            resolved by rest.ts from the Worker secret of that name, never from
  *            a contact attribute (an attribute is visible in the Contacts UI).
- *   body     { callback_id, event: "confirm"|"amend", ref, phone, delivery_date?, reason?, note? }
+ *   body     { callback_id, event: "confirm"|"amend", ref, refs, phone, delivery_date?, reason?, note? }
  *   ref      = ref_1 as the ERP sent it (doc_no OR AutoCount number; the ERP resolves both)
+ *   refs     = {refs_all}, every bundled order comma-joined — one tap answers for all of them
  *   callback_id = "{run_id}-<event>": the same on a retry of this run's step, different
  *            per conversation, so the ERP's duplicate probe keys on it.
  * The ERP answers {ok:true, recorded:true, applied:false}: it RECORDS the tap, a human
@@ -172,31 +191,74 @@ export function buildDeliveryGraph(opts: {
   openerTemplate: string;
   openerParams: string[];
   formIds: Record<string, string>;
+  /** Multi-order openers. Omitted = the single template serves every count. */
+  openers?: OpenerFamily;
 }): FlowGraph {
-  const { opening, openerTemplate, openerParams, formIds } = opts;
+  const { opening, openerTemplate, openerParams, formIds, openers } = opts;
+  const openerNode = (id: string, x: number, y: number, templateName: string, params: string[]): FlowNode => ({
+    // Business-initiated first message -> an approved template (the only
+    // thing Meta delivers to open a conversation). LIVE sends via the
+    // template path; DEMO records `opening` + the buttons so the simulator
+    // stays tappable. The run pauses for the Confirm / Amend tap.
+    id,
+    type: "send_template",
+    x,
+    y,
+    data: {
+      templateName,
+      templateLang: "en",
+      templateParams: params,
+      message: opening,
+      buttons: [
+        { id: OPENER_CONFIRM_BTN, label: OPENER_CONFIRM_BTN },
+        { id: OPENER_AMEND_BTN, label: OPENER_AMEND_BTN },
+      ],
+    },
+  });
+  // Every opener's taps go to the same two places; both label spellings.
+  const openerEdges = (id: string): FlowEdge[] => [
+    { from: id, to: "set_confirm", branch: OPENER_CONFIRM_BTN },
+    { from: id, to: "set_confirm", branch: OPENER_CONFIRM_ALL_BTN },
+    { from: id, to: "amend_guard", branch: OPENER_AMEND_BTN },
+    { from: id, to: "amend_guard", branch: OPENER_AMEND_ANY_BTN },
+  ];
+  const multi = (["2", "3", "4"] as const).filter((k) => openers?.[k]);
+  const openerNodes: FlowNode[] = [
+    openerNode("ask_date", 240, 320, openerTemplate, openerParams),
+    ...multi.map((k, i) => openerNode(`ask_date_${k}`, 240, 480 + i * 160, openers![k]!.templateName, openers![k]!.params)),
+  ];
+  // With a family, the ERP's order_total picks the template: "1" / unset →
+  // the single-order opener; "2", "3" → theirs; anything else (4, 5, …) →
+  // the 4+ template, which prints the first three and "you have N orders".
+  const countRouter: FlowNode[] = multi.length
+    ? [{
+        id: "count_router",
+        type: "criteria_router",
+        x: 140,
+        y: 320,
+        data: {
+          rules: [
+            { branch: "one", field: "order_total", op: "unset" },
+            { branch: "one", field: "order_total", op: "eq", value: "1" },
+            ...multi.filter((k) => k !== "4").map((k) => ({ branch: `n${k}`, field: "order_total", op: "eq" as const, value: k })),
+          ],
+        },
+      }]
+    : [];
+  const openerWiring: FlowEdge[] = multi.length
+    ? [
+        { from: "trigger", to: "count_router" },
+        { from: "count_router", to: "ask_date", branch: "one" },
+        ...multi.filter((k) => k !== "4").map((k) => ({ from: "count_router", to: `ask_date_${k}`, branch: `n${k}` })),
+        { from: "count_router", to: openers?.["4"] ? "ask_date_4" : "ask_date", branch: "default" },
+        ...openerNodes.flatMap((n) => openerEdges(n.id)),
+      ]
+    : [{ from: "trigger", to: "ask_date" }, ...openerEdges("ask_date")];
   return {
     nodes: [
       { id: "trigger", type: "trigger", data: {}, x: 40, y: 320 },
-      {
-        // Business-initiated first message -> an approved template (the only
-        // thing Meta delivers to open a conversation). LIVE sends via the
-        // template path; DEMO records `opening` + the buttons so the simulator
-        // stays tappable. The run pauses for the Confirm / Amend tap.
-        id: "ask_date",
-        type: "send_template",
-        x: 240,
-        y: 320,
-        data: {
-          templateName: openerTemplate,
-          templateLang: "en",
-          templateParams: openerParams,
-          message: opening,
-          buttons: [
-            { id: OPENER_CONFIRM_BTN, label: OPENER_CONFIRM_BTN },
-            { id: OPENER_AMEND_BTN, label: OPENER_AMEND_BTN },
-          ],
-        },
-      },
+      ...countRouter,
+      ...openerNodes,
 
       // ── Confirm branch ──
       { id: "set_confirm", type: "set_attribute", x: 480, y: 120, data: { key: "button_status", value: "Confirm" } },
@@ -211,7 +273,7 @@ export function buildDeliveryGraph(opts: {
           method: "POST",
           url: "{callback_url}",
           headers: ERP_CALLBACK_HEADERS,
-          body: `{"callback_id":"{run_id}-confirm","event":"confirm","ref":"{ref_1}","phone":"{phone}","note":"source=connect"}`,
+          body: `{"callback_id":"{run_id}-confirm","event":"confirm","ref":"{ref_1}","refs":"{refs_all}","phone":"{phone}","note":"source=connect"}`,
         },
       },
       { id: "thanks_confirm", type: "send_text", x: 1360, y: 120, data: { message: CONFIRM_THANKS } },
@@ -325,17 +387,16 @@ export function buildDeliveryGraph(opts: {
           method: "POST",
           url: "{callback_url}",
           headers: ERP_CALLBACK_HEADERS,
-          body: `{"callback_id":"{run_id}-amend","event":"amend","ref":"{ref_1}","phone":"{phone}","delivery_date":"{amended_delivery_date}","reason":"{amend_date_reason}","note":"source=connect"}`,
+          body: `{"callback_id":"{run_id}-amend","event":"amend","ref":"{ref_1}","refs":"{refs_all}","phone":"{phone}","delivery_date":"{amended_delivery_date}","reason":"{amend_date_reason}","note":"source=connect"}`,
         },
       },
       { id: "amend_submitted", type: "send_text", x: 2680, y: 620, data: { message: AMEND_SUBMITTED } },
       { id: "amend_end", type: "end", x: 2900, y: 620, data: {} },
     ],
     edges: [
-      { from: "trigger", to: "ask_date" },
+      ...openerWiring,
 
       // Confirm
-      { from: "ask_date", to: "set_confirm", branch: OPENER_CONFIRM_BTN },
       { from: "set_confirm", to: "set_done" },
       { from: "set_done", to: "tag_sched" },
       { from: "tag_sched", to: "cb_confirm" },
@@ -353,7 +414,6 @@ export function buildDeliveryGraph(opts: {
       { from: "generic_ack", to: "confirm_end" },
 
       // Amend
-      { from: "ask_date", to: "amend_guard", branch: OPENER_AMEND_BTN },
       { from: "amend_guard", to: "locked_msg", branch: "locked" },
       { from: "amend_guard", to: "set_amend", branch: "default" },
       { from: "locked_msg", to: "locked_end" },

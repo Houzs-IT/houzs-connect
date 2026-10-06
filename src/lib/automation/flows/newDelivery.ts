@@ -38,6 +38,24 @@ export const newDeliveryFlow: SeedFlow = {
       opening: OPENING,
       openerTemplate: "hc_order_delivery_follow_up_1_order",
       openerParams: ["{full_name}", "{ref_1}", "{delivery_date_1}", "{brand_1}"],
+      // Multi-order openers, routed on the ERP's order_total. Parameter ORDER
+      // is each template's approved positional order (Connect /templates
+      // bindings): the 2- and 3-order ones end with order_total, the 4+ one
+      // puts it second and prints only the first three orders.
+      openers: {
+        "2": {
+          templateName: "hc_order_delivery_follow_up_2_order",
+          params: ["{full_name}", "{ref_1}", "{delivery_date_1}", "{brand_1}", "{ref_2}", "{delivery_date_2}", "{brand_2}", "{order_total}"],
+        },
+        "3": {
+          templateName: "hc_order_delivery_follow_up_3_order",
+          params: ["{full_name}", "{ref_1}", "{delivery_date_1}", "{brand_1}", "{ref_2}", "{delivery_date_2}", "{brand_2}", "{ref_3}", "{delivery_date_3}", "{brand_3}", "{order_total}"],
+        },
+        "4": {
+          templateName: "hc_order_delivery_follow_up_4_order",
+          params: ["{full_name}", "{order_total}", "{ref_1}", "{delivery_date_1}", "{brand_1}", "{ref_2}", "{delivery_date_2}", "{brand_2}", "{ref_3}", "{delivery_date_3}", "{brand_3}"],
+        },
+      },
       formIds,
     }),
 };

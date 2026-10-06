@@ -39,6 +39,22 @@ export const newAmendFlow: SeedFlow = {
       opening: OPENING,
       openerTemplate: "hc_order_amend_follow_up_1_order",
       openerParams: ["{full_name}", "{ref_1}", "{delivery_date_1}", "{brand_1}"],
+      // The amend family puts order_total SECOND in every multi-order template
+      // (Connect /templates bindings) — unlike the delivery family.
+      openers: {
+        "2": {
+          templateName: "hc_order_amend_follow_up_2_order",
+          params: ["{full_name}", "{order_total}", "{ref_1}", "{delivery_date_1}", "{brand_1}", "{ref_2}", "{delivery_date_2}", "{brand_2}"],
+        },
+        "3": {
+          templateName: "hc_order_amend_follow_up_3_order",
+          params: ["{full_name}", "{order_total}", "{ref_1}", "{delivery_date_1}", "{brand_1}", "{ref_2}", "{delivery_date_2}", "{brand_2}", "{ref_3}", "{delivery_date_3}", "{brand_3}"],
+        },
+        "4": {
+          templateName: "hc_order_amend_follow_up_4_order",
+          params: ["{full_name}", "{order_total}", "{ref_1}", "{delivery_date_1}", "{brand_1}", "{ref_2}", "{delivery_date_2}", "{brand_2}", "{ref_3}", "{delivery_date_3}", "{brand_3}"],
+        },
+      },
       formIds,
     }),
 };
