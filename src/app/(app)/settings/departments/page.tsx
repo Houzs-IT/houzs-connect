@@ -58,7 +58,7 @@ export default async function DepartmentsPage() {
 
   return (
     <PageChrome section="settings" crumbs={[L.departments]}>
-      <div className="max-w-[1000px] p-4 md:p-6">
+      <div className="p-4 md:p-6">
         <SettingsHead title={L.departments} sub={L.deptSub} />
         <DataTable columns={columns} rows={rows} minWidth={420} stateKey="settings-departments" empty={L.noDepts} />
       </div>

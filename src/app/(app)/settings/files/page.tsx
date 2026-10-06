@@ -137,7 +137,7 @@ export default async function FilesPage({ searchParams }: { searchParams: Promis
 
   return (
     <PageChrome section="settings" crumbs={[L.files]}>
-      <div className="max-w-[1180px] p-4 md:p-6">
+      <div className="p-4 md:p-6">
         <SettingsHead title={L.files} sub={L.filesSub} />
         <div className="mb-4 flex flex-wrap items-center gap-2">
           {TABS.map((k) => (

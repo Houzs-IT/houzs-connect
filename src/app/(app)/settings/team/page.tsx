@@ -38,7 +38,7 @@ export default async function TeamPage() {
 
   return (
     <PageChrome section="settings" page="team" actions={view.permitted ? <InvitePerson /> : undefined}>
-      <div className="max-w-[1180px] p-4 md:p-6">
+      <div className="p-4 md:p-6">
         <SettingsHead title={L.teamTitle} sub={L.teamSub} />
         {!view.permitted ? (
           <div className="flex flex-col gap-4">
