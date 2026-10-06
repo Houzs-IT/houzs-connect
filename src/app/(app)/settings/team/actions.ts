@@ -57,6 +57,8 @@ export interface Person {
   /** The role shown in the row's dropdown — applied to manual grants. */
   role: string;
   department: string | null;
+  /** The ERP division: a sub-group within the department. */
+  division: string | null;
   reportsTo: string | null;
   /** companyId -> access, only for companies the person can currently read. */
   access: Record<string, PersonAccess>;
@@ -87,7 +89,7 @@ export async function fetchTeam(): Promise<TeamView> {
   const db = getDb();
   await ensureAccessTables(db);
 
-  const [companies, members, departments, overrides, removedRows] = await Promise.all([
+  const [companies, members, departments, overrides, removedRows, divisions] = await Promise.all([
     db.query.company.findMany({
       columns: { id: true, name: true },
       // Fresh (db/fresh.ts): a grant made a moment ago must show at once — without
@@ -123,7 +125,12 @@ export async function fetchTeam(): Promise<TeamView> {
       where ${bypassReadCache()}
       order by r.removed_at desc
     `) as unknown as Promise<{ email: string; name: string | null; removed_at: string; removed_by: string | null }[]>,
+    // Raw: division is not in db/schema.ts (migration 0022).
+    db.execute(sql`select id, division from connect.member where division is not null and ${bypassReadCache()}`) as unknown as Promise<
+      { id: string; division: string }[]
+    >,
   ]);
+  const divisionOf = new Map(divisions.map((d) => [d.id, d.division]));
   const setHere = new Set(overrides.map((o) => o.email));
 
   const deptName = new Map(departments.map((d) => [d.id, d.name]));
@@ -147,6 +154,7 @@ export async function fetchTeam(): Promise<TeamView> {
         email: m.email,
         role: m.role,
         department: m.departmentId ? deptName.get(m.departmentId) ?? null : null,
+        division: divisionOf.get(m.id) ?? null,
         reportsTo: m.managerId ? memberName.get(m.managerId) ?? null : null,
         access: {},
         photo: null,
@@ -161,6 +169,7 @@ export async function fetchTeam(): Promise<TeamView> {
     // The role dropdown edits manual grants, so a manual row's role wins for display.
     if (m.erpUserId == null) p.role = m.role;
     if (!p.department && m.departmentId) p.department = deptName.get(m.departmentId) ?? null;
+    if (!p.division && divisionOf.has(m.id)) p.division = divisionOf.get(m.id) ?? null;
     if (!p.reportsTo && m.managerId) p.reportsTo = memberName.get(m.managerId) ?? null;
     p.access[m.companyId] = {
       companyId: m.companyId,

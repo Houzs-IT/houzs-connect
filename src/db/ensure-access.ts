@@ -17,6 +17,8 @@ async function run(db: DB): Promise<void> {
   await db.execute(sql.raw("CREATE INDEX IF NOT EXISTS \"access_request_company_idx\" ON \"connect\".\"access_request\" (\"company_id\", \"status\")"));
   await db.execute(sql.raw("CREATE INDEX IF NOT EXISTS \"access_request_email_idx\" ON \"connect\".\"access_request\" (\"email\")"));
   await db.execute(sql.raw("CREATE TABLE IF NOT EXISTS \"connect\".\"access_removed\" (\n  \"email\" text PRIMARY KEY NOT NULL,\n  \"name\" text,\n  \"member_ids\" jsonb DEFAULT '[]'::jsonb NOT NULL,\n  \"removed_by_member_id\" text,\n  \"removed_at\" timestamp with time zone DEFAULT now() NOT NULL\n)"));
+  // The ERP division on a member (0022), read raw by the Team page.
+  await db.execute(sql.raw("ALTER TABLE \"connect\".\"member\" ADD COLUMN IF NOT EXISTS \"division\" text"));
   await db.execute(sql.raw("CREATE TABLE IF NOT EXISTS \"connect\".\"role_override\" (\n  \"email\" text PRIMARY KEY NOT NULL,\n  \"role\" text NOT NULL,\n  \"set_by_member_id\" text,\n  \"set_at\" timestamp with time zone DEFAULT now() NOT NULL\n)"));
 }
 
