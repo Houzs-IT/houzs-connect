@@ -21,6 +21,8 @@
 import { eq, sql } from "drizzle-orm";
 import { company, department, member } from "@/db/schema";
 import { roleFromErp } from "@/lib/erp-auth";
+import { enforceTeamAccess } from "@/lib/team-access";
+import { ensureAccessTables } from "@/db/ensure-access";
 import type { DB } from "@/db/client";
 
 // ─────────────────────────── ERP response shapes ───────────────────────────
@@ -496,6 +498,11 @@ export async function applyOrgSync(db: DB, plan: OrgSyncPlan): Promise<AppliedCo
   for (const m of plan.members.deactivate) {
     await db.update(member).set({ active: false }).where(eq(member.id, m.id));
   }
+
+  // Connect's own decisions outlive the mirror: people removed from Connect
+  // stay inactive, and roles set on the Team page win (lib/team-access.ts).
+  await ensureAccessTables(db);
+  await enforceTeamAccess(db);
 
   return {
     companiesInserted: plan.companies.insert.length,

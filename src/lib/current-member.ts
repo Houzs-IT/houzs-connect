@@ -5,6 +5,7 @@ import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { getDb } from "@/db/client";
 import { member } from "@/db/schema";
 import { SESSION_COOKIE, verifySession } from "@/lib/erp-auth";
+import { isAccessRemoved } from "@/lib/team-access";
 
 /**
  * The signed-in member, resolved from the session cookie (set at ERP login).
@@ -33,7 +34,10 @@ export const getCurrentMember = cache(async () => {
     where: eq(member.id, memberId),
     with: { department: true },
   });
-  return m ?? null;
+  if (!m) return null;
+  // Access removed on the Team page: signed out everywhere, not just at the next sign-in.
+  if (await isAccessRemoved(db, m.email)) return null;
+  return m;
 });
 
 export type CurrentMember = NonNullable<Awaited<ReturnType<typeof getCurrentMember>>>;
