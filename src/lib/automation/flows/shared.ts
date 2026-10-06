@@ -71,7 +71,7 @@ export const TYPE_DATE = `Please type your preferred new delivery date in the fo
 
 export const CONFIRM_NEW_DATE = `*Delivery Confirmation*
 
-For your order *{ref_1}*, is this the correct desired date?
+For your sales order *{ref_1}*, is this the correct desired date?
 
 📅 New Delivery Date: *{amended_delivery_date}*`;
 
