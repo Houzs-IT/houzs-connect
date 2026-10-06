@@ -2,8 +2,8 @@
 
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { useState } from "react";
-import { DataCount, DataHead, DataMenus, DataSearch, useDataTable, type DataColumn, type DataRow } from "@/components/DataTable";
+import { useRef, useState } from "react";
+import { DataCount, DataHead, DataMenus, DataSearch, useColumnWidths, useDataTable, type DataColumn, type DataRow } from "@/components/DataTable";
 import { IconClose } from "@/components/icons";
 import { useShell } from "@/components/shell/ShellProvider";
 import { formatPhone, initials, tint } from "@/lib/format";
@@ -148,6 +148,8 @@ export function MessagesTab({
     });
 
   const table = useDataTable(tableRows, columns);
+  const tableRef = useRef<HTMLTableElement>(null);
+  const cw = useColumnWidths(tableRef, "campaign-messages", columns.map((c) => c.key));
   const { shown } = table;
 
   // Back to the first page whenever the search, a funnel or the sort changes.
@@ -208,7 +210,7 @@ export function MessagesTab({
       </div>
 
       <div className="overflow-x-auto">
-        <table className="w-full min-w-[820px] text-left text-[13px]">
+        <table ref={tableRef} style={cw.tableStyle} className="w-full min-w-[820px] text-left text-[13px]">
           <thead>
             <tr className="border-b border-[var(--color-border)]">
               {columns.map((c) => {
@@ -216,28 +218,34 @@ export function MessagesTab({
                 return (
                   <th
                     key={c.key}
+                    {...cw.headProps(c.key)}
                     aria-sort={sorted === "asc" ? "ascending" : sorted === "desc" ? "descending" : undefined}
-                    className={`whitespace-nowrap px-4 py-2.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--color-faint)] ${c.className ?? ""}`}
+                    className={`group/th relative whitespace-nowrap px-4 py-2.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--color-faint)] ${
+                      cw.fixed ? "overflow-hidden" : ""
+                    } ${c.className ?? ""}`}
                   >
                     <DataHead column={c} table={table} />
+                    {cw.handle(c.key)}
                   </th>
                 );
               })}
+              {cw.fixed && <th aria-hidden className="p-0" />}
             </tr>
           </thead>
           <tbody>
             {slice.map((r) => (
               <tr key={r.id} className="border-b border-[var(--color-border-subtle)] align-middle hover:bg-[var(--color-surface-2)]">
                 {columns.map((c) => (
-                  <td key={c.key} className={`px-4 py-3 ${c.align === "right" ? "text-right" : ""} ${c.className ?? ""}`}>
+                  <td key={c.key} className={`px-4 py-3 ${c.align === "right" ? "text-right" : ""} ${cw.fixed ? "overflow-hidden break-words" : ""} ${c.className ?? ""}`}>
                     {r.cells[c.key]}
                   </td>
                 ))}
+                {cw.fixed && <td className="p-0" />}
               </tr>
             ))}
             {slice.length === 0 && (
               <tr>
-                <td colSpan={columns.length} className="px-4 py-10 text-center text-[13px] text-[var(--color-faint)]">
+                <td colSpan={columns.length + (cw.fixed ? 1 : 0)} className="px-4 py-10 text-center text-[13px] text-[var(--color-faint)]">
                   {L.noMessages}
                 </td>
               </tr>

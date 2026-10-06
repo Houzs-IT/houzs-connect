@@ -1,9 +1,9 @@
 "use client";
 
 // The list table every Connect page uses, after the Houzs ERP's DataTable:
-// a search box over the rows, click a header to sort, and a funnel on each
+// a search box over the rows, click a header to sort, a funnel on each
 // header to sort A→Z / Z→A or tick which values to show (with counts,
-// Select all / Invert / Clear).
+// Select all / Invert / Clear), and header edges to drag for column widths.
 //
 // Rows come in already rendered: a server page builds each cell as JSX and
 // passes it with the plain values this table sorts, searches and filters on.
@@ -162,6 +162,156 @@ export function useDataTable(
 
 export type DataTableState = ReturnType<typeof useDataTable>;
 
+// ── Column widths ───────────────────────────────────────────
+// As in the Houzs ERP: drag a header's right edge to resize a column,
+// double-click it to fit the column to its content. The table opens at its
+// natural layout; those header widths are read once and the table switches to
+// a fixed layout, so resizing one column never moves the others (a blank
+// last column takes the slack). Dragged widths are this viewer's, kept in
+// this browser per table (`dt:widths:<stateKey>`).
+
+const MIN_COL = 64;
+const MAX_FIT = 800;
+
+type Measured = { sig: string; widths: Record<string, number>; extra: number };
+
+/**
+ * Resizable columns for a table: pass the <table>'s ref, put `tableStyle` on
+ * it, `headProps(key)` and `handle(key)` on each data column's <th> (which
+ * needs `relative`), and a `<th />` / `<td />` filler before any trailing
+ * non-data column while `fixed`.
+ */
+export function useColumnWidths(
+  tableRef: React.RefObject<HTMLTableElement | null>,
+  stateKey: string | undefined,
+  keys: string[],
+  enabled = true
+) {
+  const { t } = useShell();
+  const storageKey = enabled && stateKey ? `dt:widths:${stateKey}` : null;
+  const [stored, setStored] = useState<Record<string, number>>({});
+  const storedRef = useRef(stored);
+  const [measured, setMeasured] = useState<Measured | null>(null);
+  const sig = keys.join("\u0001");
+  const fixed = enabled && measured?.sig === sig;
+
+  // Restore after mount: the server render has no storage, and the first
+  // client render must match it.
+  useEffect(() => {
+    if (!storageKey) return;
+    try {
+      const raw = JSON.parse(localStorage.getItem(storageKey) ?? "{}") as Record<string, unknown>;
+      const clean: Record<string, number> = {};
+      for (const [k, v] of Object.entries(raw)) if (typeof v === "number" && v >= MIN_COL && v <= 2000) clean[k] = Math.round(v);
+      storedRef.current = clean;
+      setStored(clean); // eslint-disable-line react-hooks/set-state-in-effect -- one-time restore from this browser's storage
+    } catch {}
+  }, [storageKey]);
+
+  // Read the natural layout once (again when the columns change), before paint.
+  useLayoutEffect(() => {
+    if (!enabled || fixed) return;
+    const table = tableRef.current;
+    const heads = table?.querySelectorAll<HTMLElement>("thead th[data-col-key]");
+    if (!table || !heads?.length) return;
+    const widths: Record<string, number> = {};
+    let sum = 0;
+    for (const th of heads) {
+      const w = th.getBoundingClientRect().width;
+      if (w <= 0) return; // not laid out yet (a hidden tab): try on a later render
+      widths[th.dataset.colKey!] = Math.max(MIN_COL, Math.round(w));
+      sum += w;
+    }
+    const extra = Math.max(0, Math.round(table.getBoundingClientRect().width - sum));
+    setMeasured({ sig, widths, extra });
+  }, [enabled, fixed, sig, tableRef]);
+
+  const save = (next: Record<string, number>, persist: boolean) => {
+    storedRef.current = next;
+    setStored(next);
+    if (persist && storageKey) {
+      try {
+        localStorage.setItem(storageKey, JSON.stringify(next));
+      } catch {}
+    }
+  };
+
+  const widthOf = (key: string): number | undefined => stored[key] ?? (fixed ? measured!.widths[key] : undefined);
+  const total = fixed ? keys.reduce((n, k) => n + (widthOf(k) ?? MIN_COL), 0) + measured!.extra : 0;
+
+  const start = (e: React.PointerEvent, key: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const th = (e.currentTarget as HTMLElement).closest("th");
+    if (!th) return;
+    const startX = e.clientX;
+    const startW = th.getBoundingClientRect().width;
+    const move = (ev: PointerEvent) => {
+      save({ ...storedRef.current, [key]: Math.max(MIN_COL, Math.round(startW + ev.clientX - startX)) }, false);
+    };
+    const end = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", end);
+      window.removeEventListener("pointercancel", end);
+      save(storedRef.current, true); // write storage once, when the drag ends
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", end);
+    window.addEventListener("pointercancel", end);
+  };
+
+  // Fit: lay the table out by content for a moment (no paint happens in
+  // between), with this column on one line, and read its natural width.
+  const fit = (key: string) => {
+    const table = tableRef.current;
+    const th = table?.querySelector<HTMLTableCellElement>(`thead th[data-col-key="${CSS.escape(key)}"]`);
+    if (!table || !th) return;
+    const idx = th.cellIndex;
+    const n = (th.parentElement as HTMLTableRowElement).cells.length;
+    const cells = [th, ...[...(table.tBodies[0]?.rows ?? [])].filter((r) => r.cells.length === n).map((r) => r.cells[idx])];
+    const was = { layout: table.style.tableLayout, width: table.style.width, min: table.style.minWidth, th: th.style.width };
+    const wraps = cells.map((c) => c.style.whiteSpace);
+    table.style.tableLayout = "auto";
+    table.style.width = "max-content";
+    table.style.minWidth = "0";
+    th.style.width = "";
+    for (const c of cells) c.style.whiteSpace = "nowrap";
+    const natural = th.getBoundingClientRect().width;
+    cells.forEach((c, i) => (c.style.whiteSpace = wraps[i]));
+    Object.assign(table.style, { tableLayout: was.layout, width: was.width, minWidth: was.min });
+    th.style.width = was.th;
+    save({ ...storedRef.current, [key]: Math.min(MAX_FIT, Math.max(MIN_COL, Math.ceil(natural))) }, true);
+  };
+
+  return {
+    /** Laid out at fixed widths (render the filler cells). */
+    fixed,
+    tableStyle: fixed ? ({ tableLayout: "fixed", width: "100%", minWidth: total } as const) : undefined,
+    headProps: (key: string) => {
+      const w = widthOf(key);
+      return { "data-col-key": key, style: w ? { width: w } : undefined };
+    },
+    handle: (key: string) =>
+      enabled ? (
+        <span
+          role="separator"
+          aria-orientation="vertical"
+          aria-label={t.table.resize}
+          title={t.table.resize}
+          onPointerDown={(e) => start(e, key)}
+          onClick={(e) => e.stopPropagation()}
+          onDoubleClick={(e) => {
+            e.stopPropagation();
+            fit(key);
+          }}
+          className="absolute right-0 top-0 z-10 h-full w-1.5 cursor-col-resize touch-none select-none opacity-0 transition-opacity hover:bg-[var(--color-accent)] hover:opacity-40 group-hover/th:opacity-100 group-hover/th:bg-[var(--color-border-strong)]"
+        />
+      ) : null,
+  };
+}
+
+export type ColumnWidths = ReturnType<typeof useColumnWidths>;
+
 /** A header's contents: the label (click to sort) and its funnel. Goes inside a <th>. */
 export function DataHead({ column: c, table }: { column: DataColumn; table: DataTableState }) {
   const { t } = useShell();
@@ -280,6 +430,7 @@ export function DataTable({
   minWidth = 720,
   stateKey,
   className = "",
+  resizable = true,
 }: {
   columns: DataColumn[];
   rows: DataRow[];
@@ -292,15 +443,19 @@ export function DataTable({
   /** Extra controls at the right of the search row. */
   toolbar?: ReactNode;
   minWidth?: number;
-  /** Remember search / sort / filters for this table in this browser tab. */
+  /** Remember search / sort / filters for this table in this browser tab (and column widths in this browser). */
   stateKey?: string;
   className?: string;
+  /** Drag a header edge to resize its column (on by default). */
+  resizable?: boolean;
 }) {
   const { t } = useShell();
   const L = t.table;
   const router = useRouter();
   const table = useDataTable(rows, columns, { initialSort, stateKey });
   const { shown, filtered } = table;
+  const tableRef = useRef<HTMLTableElement>(null);
+  const cw = useColumnWidths(tableRef, stateKey, columns.map((c) => c.key), resizable);
 
   return (
     <div className={`flex flex-col gap-2.5 ${className}`}>
@@ -313,7 +468,7 @@ export function DataTable({
       )}
 
       <div className="overflow-x-auto rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)]">
-        <table className="w-full text-left text-[13px]" style={{ minWidth }}>
+        <table ref={tableRef} className="w-full text-left text-[13px]" style={cw.tableStyle ?? { minWidth }}>
           <thead>
             <tr className="border-b border-[var(--color-border)]">
               {columns.map((c) => {
@@ -321,13 +476,18 @@ export function DataTable({
                 return (
                   <th
                     key={c.key}
+                    {...cw.headProps(c.key)}
                     aria-sort={sorted === "asc" ? "ascending" : sorted === "desc" ? "descending" : undefined}
-                    className={`whitespace-nowrap px-4 py-2.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--color-faint)] ${c.className ?? ""}`}
+                    className={`group/th relative whitespace-nowrap px-4 py-2.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--color-faint)] ${
+                      cw.fixed ? "overflow-hidden" : ""
+                    } ${c.className ?? ""}`}
                   >
                     <DataHead column={c} table={table} />
+                    {cw.handle(c.key)}
                   </th>
                 );
               })}
+              {cw.fixed && <th aria-hidden className="p-0" />}
             </tr>
           </thead>
           <tbody>
@@ -352,16 +512,19 @@ export function DataTable({
                 {columns.map((c) => (
                   <td
                     key={c.key}
-                    className={`px-4 py-2.5 ${c.align === "center" ? "text-center" : c.align === "right" ? "text-right" : ""} ${c.className ?? ""}`}
+                    className={`px-4 py-2.5 ${c.align === "center" ? "text-center" : c.align === "right" ? "text-right" : ""} ${
+                      cw.fixed ? "overflow-hidden break-words" : ""
+                    } ${c.className ?? ""}`}
                   >
                     {r.cells[c.key] ?? <span className="text-[var(--color-faint)]">—</span>}
                   </td>
                 ))}
+                {cw.fixed && <td className="p-0" />}
               </tr>
             ))}
             {shown.length === 0 && (
               <tr>
-                <td colSpan={columns.length} className="px-4 py-10 text-center text-[13px] text-[var(--color-faint)]">
+                <td colSpan={columns.length + (cw.fixed ? 1 : 0)} className="px-4 py-10 text-center text-[13px] text-[var(--color-faint)]">
                   {rows.length === 0 ? (empty ?? L.none) : L.noMatch}
                 </td>
               </tr>
