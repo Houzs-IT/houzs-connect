@@ -1,8 +1,10 @@
 import { DataTable, type DataColumn, type DataRow } from "@/components/DataTable";
 import { initials, tint } from "@/lib/format";
 import type { Dict } from "@/lib/i18n/dict";
-import { toggleAccess, type Person, type TeamCompany } from "./actions";
+import { fmt } from "@/lib/i18n/dict";
+import { restoreAccess, toggleAccess, type Person, type RemovedPerson, type TeamCompany } from "./actions";
 import { syncFromErp } from "../sync-actions";
+import { RemoveAccess } from "./RemoveAccess";
 import { RoleSelect } from "./RoleSelect";
 import { TeamPhoto } from "./TeamPhoto";
 
@@ -19,9 +21,14 @@ export function TeamClient({
   roles,
   canSuper,
   requests,
+  removed,
+  meEmail,
 }: {
   companies: TeamCompany[];
   people: Person[];
+  /** People taken out of Houzs Connect, to restore. */
+  removed: RemovedPerson[];
+  meEmail: string;
   L: Dict["set"];
   /** Role code → its name (t.role). */
   roles: Record<string, string>;
@@ -34,6 +41,7 @@ export function TeamClient({
     { key: "department", label: L.department },
     { key: "reportsTo", label: L.reportsTo },
     ...companies.map((c) => ({ key: `co:${c.id}`, label: c.name, align: "center" as const, className: "max-w-[130px]" })),
+    { key: "actions", label: "", sort: false, filter: false, align: "right" as const, className: "w-[72px]" },
   ];
   const rows: DataRow[] = people.map((p) => {
     const c = tint(p.email);
@@ -83,10 +91,14 @@ export function TeamClient({
             </span>
           </div>
         ),
-        role: <RoleSelect email={p.email} name={p.name} role={p.role} canSuper={canSuper} />,
+        role: <RoleSelect email={p.email} name={p.name} role={p.role} canSuper={canSuper} erpRole={p.erpRole} setHere={p.roleSetHere} />,
         department: <span className="text-[var(--color-ink)]">{p.department ?? "—"}</span>,
         reportsTo: <span className="text-[var(--color-ink)]">{p.reportsTo ?? "—"}</span>,
         ...Object.fromEntries(companies.map((co) => [`co:${co.id}`, accessCell(p, co, L)])),
+        actions:
+          p.email.toLowerCase() === meEmail.toLowerCase() || (p.role === "SUPER_ADMIN" && !canSuper) ? null : (
+            <RemoveAccess email={p.email} name={p.name} />
+          ),
       },
     };
   });
@@ -106,9 +118,43 @@ export function TeamClient({
         </button>
       </form>
 
-      <DataTable columns={columns} rows={rows} minWidth={760} stateKey="team" searchPlaceholder={L.teamSearch} />
+      <DataTable columns={columns} rows={rows} minWidth={860} stateKey="team" searchPlaceholder={L.teamSearch} />
 
       <p className="text-[12px] leading-relaxed text-[var(--color-faint)]">{L.teamHint}</p>
+
+      {removed.length > 0 && (
+        <details className="rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)]">
+          <summary className="cursor-pointer px-4 py-3 text-[13px] font-semibold text-[var(--color-ink)]">
+            {fmt(L.removedTitle, { n: removed.length })}
+            <span className="ml-2 font-normal text-[var(--color-faint)]">{L.removedHint}</span>
+          </summary>
+          <div className="border-t border-[var(--color-border-subtle)]">
+            {removed.map((r) => {
+              const d = new Date(r.removedAt).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "Asia/Kuala_Lumpur" }).replace("Sept", "Sep");
+              return (
+                <div key={r.email} className="flex items-center gap-3 border-b border-[var(--color-border-subtle)] px-4 py-2.5 last:border-b-0">
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-[13px] font-semibold text-[var(--color-ink)]">{r.name}</span>
+                    <span className="block truncate font-code text-[11px] text-[var(--color-faint)]">{r.email}</span>
+                  </span>
+                  <span className="hidden text-[12px] text-[var(--color-muted)] sm:block">
+                    {r.removedBy ? fmt(L.removedBy, { name: r.removedBy, d }) : fmt(L.removedOn, { d })}
+                  </span>
+                  <form action={restoreAccess}>
+                    <input type="hidden" name="email" value={r.email} />
+                    <button
+                      type="submit"
+                      className="h-[30px] rounded-[8px] border border-[var(--color-border)] px-3 text-[12.5px] font-semibold text-[var(--color-ink)] hover:bg-[var(--color-surface-2)]"
+                    >
+                      {L.restore}
+                    </button>
+                  </form>
+                </div>
+              );
+            })}
+          </div>
+        </details>
+      )}
     </div>
   );
 }

@@ -54,6 +54,8 @@ export async function approveFinal(id: string, role: string, companyIds: string[
   const chosen = [...new Set(companyIds)].filter((c) => valid.has(c));
   if (!chosen.length) return { ok: false, error: "Choose at least one company." };
 
+  // Approving someone whose access was removed earlier gives it back.
+  await x.db.execute(sql`delete from connect.access_removed where email = ${x.req.email.toLowerCase()}`);
   for (const companyId of chosen) {
     await x.db.execute(sql`
       insert into connect.member (id, company_id, name, email, role, active)

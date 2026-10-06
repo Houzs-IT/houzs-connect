@@ -4,6 +4,7 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { sql } from "drizzle-orm";
 import { getCloudflareContext } from "@opennextjs/cloudflare";
+import { isAccessRemoved, roleOverride } from "@/lib/team-access";
 import { getDb } from "@/db/client";
 import { member } from "@/db/schema";
 import {
@@ -67,7 +68,13 @@ export async function login(
   // (src/lib/sync/erp-org.ts); Connect does not build an org chart here. Conflict
   // target is (company_id, email) — member.email is no longer globally unique
   // (the same person recurs once per company via the sync's fan-out).
-  const role = roleFromErp(erp.role_name);
+  // Connect's own decisions (lib/team-access.ts): access removed here, or a
+  // role an admin picked here instead of the one the ERP maps to.
+  if (await isAccessRemoved(db, email)) {
+    return { error: "Your access to Houzs Connect was removed. Ask an admin to restore it." };
+  }
+  const override = await roleOverride(db, email);
+  const role = (override ?? roleFromErp(erp.role_name)) as ReturnType<typeof roleFromErp>;
   const [m] = await db
     .insert(member)
     .values({ companyId: co.id, email, name: erp.name ?? email, role, title: erp.role_name ?? null })

@@ -11,6 +11,10 @@
 // they survive every sign-in; ERP-granted access is the base and is shown locked
 // (the ERP decides it). One person = one row even though they hold a member row
 // per company.
+//
+// Two decisions are Connect's own and outlive every ERP sync and sign-in
+// (lib/team-access.ts): the role picked here wins over the ERP's, and a person
+// who does not need Connect can be removed (and restored).
 
 import { revalidatePath } from "next/cache";
 import { and, eq, isNull, sql } from "drizzle-orm";
@@ -19,6 +23,7 @@ import { getDb } from "@/db/client";
 import { bypassReadCache } from "@/db/fresh";
 import { company, member } from "@/db/schema";
 import { getCurrentMember } from "@/lib/current-member";
+import { roleFromErp } from "@/lib/erp-auth";
 import { photoSrcs } from "@/lib/member-photo";
 import { isAdminRole } from "@/lib/permissions";
 
@@ -57,19 +62,32 @@ export interface Person {
   access: Record<string, PersonAccess>;
   /** Profile photo URL (lib/member-photo.ts), or null. */
   photo: string | null;
+  /** The role the ERP maps this person to (null when they are not in the ERP). */
+  erpRole: string | null;
+  /** The role was set here and wins over the ERP's. */
+  roleSetHere: boolean;
+}
+/** Someone whose Connect access was removed. */
+export interface RemovedPerson {
+  email: string;
+  name: string;
+  removedBy: string | null;
+  removedAt: string;
 }
 export interface TeamView {
   permitted: boolean;
   companies: TeamCompany[];
   people: Person[];
+  removed: RemovedPerson[];
 }
 
 export async function fetchTeam(): Promise<TeamView> {
   const me = await manager();
-  if (!me) return { permitted: false, companies: [], people: [] };
+  if (!me) return { permitted: false, companies: [], people: [], removed: [] };
   const db = getDb();
+  await ensureAccessTables(db);
 
-  const [companies, members, departments] = await Promise.all([
+  const [companies, members, departments, overrides, removedRows] = await Promise.all([
     db.query.company.findMany({
       columns: { id: true, name: true },
       // Fresh (db/fresh.ts): a grant made a moment ago must show at once — without
@@ -89,6 +107,7 @@ export async function fetchTeam(): Promise<TeamView> {
         active: true,
         managerId: true,
         departmentId: true,
+        title: true,
       },
       where: bypassReadCache(),
     }),
@@ -96,7 +115,16 @@ export async function fetchTeam(): Promise<TeamView> {
       columns: { id: true, name: true },
       where: bypassReadCache(),
     }),
+    db.execute(sql`select email from connect.role_override where ${bypassReadCache()}`) as unknown as Promise<{ email: string }[]>,
+    db.execute(sql`
+      select r.email, r.name, r.removed_at, b.name as removed_by
+      from connect.access_removed r
+      left join connect.member b on b.id = r.removed_by_member_id
+      where ${bypassReadCache()}
+      order by r.removed_at desc
+    `) as unknown as Promise<{ email: string; name: string | null; removed_at: string; removed_by: string | null }[]>,
   ]);
+  const setHere = new Set(overrides.map((o) => o.email));
 
   const deptName = new Map(departments.map((d) => [d.id, d.name]));
   const memberName = new Map(members.map((m) => [m.id, m.name]));
@@ -122,9 +150,12 @@ export async function fetchTeam(): Promise<TeamView> {
         reportsTo: m.managerId ? memberName.get(m.managerId) ?? null : null,
         access: {},
         photo: null,
+        erpRole: null,
+        roleSetHere: setHere.has(key),
       };
       byKey.set(key, p);
     }
+    if (m.erpUserId != null && !p.erpRole) p.erpRole = roleFromErp(m.title);
     // Prefer a real name and the richest org detail from whichever row has it.
     if ((!p.name || p.name === p.email) && m.name) p.name = m.name;
     // The role dropdown edits manual grants, so a manual row's role wins for display.
@@ -150,7 +181,13 @@ export async function fetchTeam(): Promise<TeamView> {
   const photos = await photoSrcs(people.map(anyRow), { fresh: true });
   for (const p of people) p.photo = photos.get(anyRow(p) ?? "") ?? null;
 
-  return { permitted: true, companies, people };
+  const removed = removedRows.map((r) => ({
+    email: r.email,
+    name: r.name || r.email,
+    removedBy: r.removed_by,
+    removedAt: new Date(r.removed_at).toISOString(),
+  }));
+  return { permitted: true, companies, people, removed };
 }
 
 // Both mutations take a FormData and run from a plain <form action={...}>. That
@@ -198,8 +235,24 @@ export async function setRoleForm(formData: FormData): Promise<void> {
   const raw = String(formData.get("role") ?? "AGENT");
   if (!email) return;
   const db = getDb();
-  // SUPER_ADMIN is added to the Role enum by migration 0013 (or here, at runtime).
+  // SUPER_ADMIN is added to the Role enum by migration 0013 (or here, at runtime);
+  // role_override by 0021.
   await ensureAccessTables(db);
+
+  // "Use the ERP role": forget the Connect choice; ERP rows take the ERP's role
+  // back now (manual-only rows keep theirs — there is no ERP role for them).
+  if (raw === "ERP") {
+    const rs = await db.query.member.findMany({ where: eq(member.email, email) });
+    if (rs.some((r) => r.role === "SUPER_ADMIN")) return;
+    await db.execute(sql`delete from connect.role_override where email = ${email}`);
+    for (const r of rs) {
+      if (r.erpUserId != null) await db.update(member).set({ role: roleFromErp(r.title) }).where(eq(member.id, r.id));
+    }
+    revalidatePath("/settings/team");
+    revalidatePath("/inbox");
+    return;
+  }
+
   const rows = await db.query.member.findMany({ where: eq(member.email, email) });
   const wasSuper = rows.some((r) => r.role === "SUPER_ADMIN");
   const supers = await db.query.member.findMany({ columns: { email: true }, where: sql`${member.role}::text = 'SUPER_ADMIN'` });
@@ -219,14 +272,78 @@ export async function setRoleForm(formData: FormData): Promise<void> {
       .update(member)
       .set({ role: raw === "SUPER_ADMIN" ? "SUPER_ADMIN" : cleanRole(raw) })
       .where(eq(member.email, email));
+    // A Super Admin stepped down keeps the role picked here, not the ERP's.
+    if (raw === "SUPER_ADMIN") await db.execute(sql`delete from connect.role_override where email = ${email}`);
+    else await saveOverride(email, cleanRole(raw), me.id);
   } else {
-    // Manual grants only — an ERP-synced member's role is the ERP's, overwritten
-    // on their next sign-in.
-    await db
-      .update(member)
-      .set({ role: cleanRole(raw) })
-      .where(and(eq(member.email, email), isNull(member.erpUserId)));
+    // Every row, the ERP-synced ones too: the choice is remembered in
+    // role_override, so the next ERP sync or sign-in keeps it.
+    await db.update(member).set({ role: cleanRole(raw) }).where(eq(member.email, email));
+    await saveOverride(email, cleanRole(raw), me.id);
   }
+  revalidatePath("/settings/team");
+  revalidatePath("/inbox");
+}
+
+async function saveOverride(email: string, role: string, by: string) {
+  await getDb().execute(sql`
+    insert into connect.role_override (email, role, set_by_member_id) values (${email}, ${role}, ${by})
+    on conflict (email) do update set role = excluded.role, set_by_member_id = excluded.set_by_member_id, set_at = now()
+  `);
+}
+
+/**
+ * Take someone out of Houzs Connect: every member row goes inactive, they
+ * cannot sign in, an open session stops, and the ERP sync keeps them out.
+ * Nothing is deleted — chats assigned to them stay assigned (reassign in
+ * Service) and Restore puts back the rows that were active.
+ */
+export async function removeAccess(email: string): Promise<{ ok: boolean; error?: string }> {
+  const me = await manager();
+  if (!me) return { ok: false, error: "Only an admin can do this." };
+  const target = email.trim().toLowerCase();
+  if (!target) return { ok: false, error: "Not found." };
+  if (target === me.email.toLowerCase()) return { ok: false, error: "You cannot remove your own access." };
+  const db = getDb();
+  await ensureAccessTables(db);
+  const rs = await db.query.member.findMany({ where: and(eq(member.email, target), bypassReadCache()) });
+  const live = rs.filter((r) => r.active);
+  if (!live.length) return { ok: false, error: "Not found." };
+  if (rs.some((r) => r.role === "SUPER_ADMIN") && me.role !== "SUPER_ADMIN") {
+    return { ok: false, error: "Only a Super Admin can remove a Super Admin." };
+  }
+  await db.execute(sql`
+    insert into connect.access_removed (email, name, member_ids, removed_by_member_id)
+    values (${target}, ${live[0].name}, ${JSON.stringify(live.map((r) => r.id))}::jsonb, ${me.id})
+    on conflict (email) do update set name = excluded.name, member_ids = excluded.member_ids,
+      removed_by_member_id = excluded.removed_by_member_id, removed_at = now()
+  `);
+  await db.update(member).set({ active: false }).where(eq(member.email, target));
+  revalidatePath("/settings/team");
+  revalidatePath("/inbox");
+  return { ok: true };
+}
+
+/**
+ * Give Connect access back: the rows that were active (all of them when none
+ * were recorded), and the ERP's (the next sync settles those).
+ */
+export async function restoreAccess(formData: FormData): Promise<void> {
+  const me = await manager();
+  if (!me) return;
+  const target = String(formData.get("email") ?? "").trim().toLowerCase();
+  if (!target) return;
+  const db = getDb();
+  await ensureAccessTables(db);
+  const r = (await db.execute(sql`
+    delete from connect.access_removed where email = ${target} returning member_ids
+  `)) as unknown as { member_ids: string[] }[];
+  if (!r[0]) return;
+  const ids = Array.isArray(r[0].member_ids) ? r[0].member_ids : [];
+  await db.execute(sql`
+    update connect.member set active = true
+    where email = ${target} and (${ids.length === 0} or erp_user_id is not null or id in (select jsonb_array_elements_text(${JSON.stringify(ids)}::jsonb)))
+  `);
   revalidatePath("/settings/team");
   revalidatePath("/inbox");
 }
