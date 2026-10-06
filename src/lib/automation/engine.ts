@@ -344,6 +344,10 @@ async function execNode(
         response: res.snippet,
         ...(res.error ? { error: res.error } : {}),
         ...(res.missingSecrets ? { missingSecrets: res.missingSecrets } : {}),
+        // Who answered a failed call (edge vs the ERP worker) and which path it
+        // took — the two questions the 2026-10-05 callback hunt needed answered.
+        ...(res.via ? { via: res.via } : {}),
+        ...(res.responseHeaders ? { responseHeaders: res.responseHeaders } : {}),
       });
       // Only a successful call may overwrite an attribute — persisting an error
       // page would poison later criteria_router branches on that key.
