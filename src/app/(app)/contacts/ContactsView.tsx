@@ -6,7 +6,7 @@ import { fmt, type Dict } from "@/lib/i18n/dict";
 import { initials, tint } from "@/lib/format";
 import { useShell } from "@/components/shell/ShellProvider";
 import { IconClose, IconDots, IconSearch } from "@/components/icons";
-import { ColumnsList, DataCount, DataHead, DataMenus, useColumnLayout, useDataTable, type DataColumn, type DataRow } from "@/components/DataTable";
+import { ColumnsList, DataCount, DataHead, DataMenus, WrapButton, useColumnLayout, useDataTable, type DataColumn, type DataRow } from "@/components/DataTable";
 import { bulkBlockContacts, bulkTagContacts, mergeContacts, setContactBlocked } from "./actions";
 import { DeleteContactButton } from "./DeleteContactButton";
 
@@ -335,7 +335,10 @@ export function ContactsView({
           anyLabel={s.any}
         />
         <DataCount table={table} />
-        <div ref={colsRef} className="relative ml-auto">
+        <div className="ml-auto">
+          <WrapButton layout={cw} />
+        </div>
+        <div ref={colsRef} className="relative">
           <button
             type="button"
             onClick={() => setColsOpen((v) => !v)}
@@ -453,9 +456,9 @@ export function ContactsView({
                   />
                 </th>
                 {cw.cols.map((c) => {
-                  const { frozenClass, ...head } = cw.headProps(c.key);
+                  const { extraClass, ...head } = cw.headProps(c.key);
                   return (
-                    <th key={c.key} {...head} className={`${th} group/th relative ${cw.fixed ? "overflow-hidden" : ""} ${frozenClass}`}>
+                    <th key={c.key} {...head} className={`${th} group/th relative ${cw.fixed ? "overflow-hidden" : ""} ${extraClass}`}>
                       <DataHead column={c} table={table} />
                       {cw.handle(c.key)}
                     </th>
