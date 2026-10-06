@@ -269,17 +269,17 @@ export function useColumnWidths(
     const idx = th.cellIndex;
     const n = (th.parentElement as HTMLTableRowElement).cells.length;
     const cells = [th, ...[...(table.tBodies[0]?.rows ?? [])].filter((r) => r.cells.length === n).map((r) => r.cells[idx])];
-    const was = { layout: table.style.tableLayout, width: table.style.width, min: table.style.minWidth, th: th.style.width };
+    const was = { layout: table.style.tableLayout, width: table.style.width, min: table.style.minWidth, th: th.style.cssText };
     const wraps = cells.map((c) => c.style.whiteSpace);
     table.style.tableLayout = "auto";
     table.style.width = "max-content";
     table.style.minWidth = "0";
-    th.style.width = "";
+    Object.assign(th.style, { width: "", minWidth: "", maxWidth: "" });
     for (const c of cells) c.style.whiteSpace = "nowrap";
     const natural = th.getBoundingClientRect().width;
     cells.forEach((c, i) => (c.style.whiteSpace = wraps[i]));
     Object.assign(table.style, { tableLayout: was.layout, width: was.width, minWidth: was.min });
-    th.style.width = was.th;
+    th.style.cssText = was.th;
     save({ ...storedRef.current, [key]: Math.min(MAX_FIT, Math.max(MIN_COL, Math.ceil(natural))) }, true);
   };
 
@@ -287,9 +287,16 @@ export function useColumnWidths(
     /** Laid out at fixed widths (render the filler cells). */
     fixed,
     tableStyle: fixed ? ({ tableLayout: "fixed", width: "100%", minWidth: total } as const) : undefined,
+    /**
+     * For the <table> while fixed: lifts the columns' own max-widths. Pages
+     * size columns with `w-[36%] max-w-0` (truncate instead of grow) or
+     * `max-w-[130px]`; at a fixed layout max-w-0 collapsed the column to its
+     * padding and a cap stopped a drag.
+     */
+    tableClass: fixed ? "[&_td]:max-w-none [&_th]:max-w-none" : "",
     headProps: (key: string) => {
       const w = widthOf(key);
-      return { "data-col-key": key, style: w ? { width: w } : undefined };
+      return { "data-col-key": key, style: w ? { width: w, minWidth: w, maxWidth: w } : undefined };
     },
     handle: (key: string) =>
       enabled ? (
@@ -468,7 +475,7 @@ export function DataTable({
       )}
 
       <div className="overflow-x-auto rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)]">
-        <table ref={tableRef} className="w-full text-left text-[13px]" style={cw.tableStyle ?? { minWidth }}>
+        <table ref={tableRef} className={`w-full text-left text-[13px] ${cw.tableClass}`} style={cw.tableStyle ?? { minWidth }}>
           <thead>
             <tr className="border-b border-[var(--color-border)]">
               {columns.map((c) => {
