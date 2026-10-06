@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useRef, useState } from "react";
-import { DataCount, DataHead, DataMenus, DataSearch, useColumnLayout, useDataTable, type DataColumn, type DataRow } from "@/components/DataTable";
+import { ColumnsButton, DataCount, DataHead, DataMenus, DataSearch, WrapButton, useColumnLayout, useDataTable, type DataColumn, type DataRow } from "@/components/DataTable";
 import { IconClose } from "@/components/icons";
 import { useShell } from "@/components/shell/ShellProvider";
 import { formatPhone, initials, tint } from "@/lib/format";
@@ -187,6 +187,8 @@ export function MessagesTab({
       <div className="flex flex-wrap items-center gap-2 border-b border-[var(--color-border)] px-4 py-3">
         <DataSearch table={table} placeholder={L.searchMsg} />
         <DataCount table={table} />
+        <WrapButton layout={cw} />
+        <ColumnsButton layout={cw} />
         <div className="ml-auto flex flex-wrap gap-1.5">
           {FILTERS.map((f) => (
             <button
@@ -215,7 +217,7 @@ export function MessagesTab({
             <tr className="border-b border-[var(--color-border)]">
               {cw.cols.map((c) => {
                 const sorted = table.sort?.key === c.key ? table.sort.dir : null;
-                const { frozenClass, ...head } = cw.headProps(c.key);
+                const { extraClass, ...head } = cw.headProps(c.key);
                 return (
                   <th
                     key={c.key}
@@ -223,7 +225,7 @@ export function MessagesTab({
                     aria-sort={sorted === "asc" ? "ascending" : sorted === "desc" ? "descending" : undefined}
                     className={`group/th relative whitespace-nowrap px-4 py-2.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--color-faint)] ${
                       cw.fixed ? "overflow-hidden" : ""
-                    } ${c.className ?? ""} ${frozenClass}`}
+                    } ${c.className ?? ""} ${extraClass}`}
                   >
                     <DataHead column={c} table={table} />
                     {cw.handle(c.key)}
@@ -242,7 +244,7 @@ export function MessagesTab({
                     <td
                       key={c.key}
                       style={cell.style}
-                      className={`px-4 py-3 ${c.align === "right" ? "text-right" : ""} ${cw.fixed ? "overflow-hidden break-words" : ""} ${c.className ?? ""} ${cell.className}`}
+                      className={`px-4 py-3 ${c.align === "right" ? "text-right" : ""} ${c.className ?? ""} ${cell.className}`}
                     >
                       {r.cells[c.key]}
                     </td>

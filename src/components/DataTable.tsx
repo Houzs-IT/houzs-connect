@@ -163,11 +163,13 @@ export function useDataTable(
 
 export type DataTableState = ReturnType<typeof useDataTable>;
 
-// ── Column layout: widths, frozen and hidden columns ─────────
+// ── Column layout: widths, order, frozen and hidden columns, wrap ─
 // As in the Houzs ERP. Drag a header's right edge to resize a column,
-// double-click it to fit the column to its content. Right-click a header (or
-// open "Columns") to freeze columns at the left edge, hide a column, or bring
-// a hidden one back.
+// double-click it to fit the column to its content. Drag a header (or a row
+// in "Columns") onto another to move it there. Right-click a header (or open
+// "Columns") to freeze columns at the left edge, hide a column, or bring a
+// hidden one back. "Wrap" lets long text run onto more lines; off, each row
+// is one line and long text ends in "…".
 //
 // The table opens at its natural layout; those header widths are read once
 // and the table switches to a fixed layout, so resizing one column never
@@ -177,13 +179,14 @@ export type DataTableState = ReturnType<typeof useDataTable>;
 // All of it is this viewer's, kept in this browser per table:
 // `dt:widths:v2:<stateKey>` (v1 held widths saved while #102 collapsed
 // `max-w-0` columns to 64px, so it is not read) and `dt:cols:<stateKey>`
-// ({ hidden, pinned }).
+// ({ hidden, pinned, order, wrap }).
 
 const MIN_COL = 64;
 const MAX_FIT = 800;
 
 type Measured = { sig: string; widths: Record<string, number>; extra: number; lead: number };
-type ColState = { hidden: string[]; pinned: string[] };
+type ColState = { hidden: string[]; pinned: string[]; order: string[]; wrap: boolean };
+const NO_STATE: ColState = { hidden: [], pinned: [], order: [], wrap: false };
 /** How a row is painted, so a frozen cell can paint the same (it needs a solid background). */
 export type RowLook = "active" | "selected" | undefined;
 
@@ -223,19 +226,26 @@ export function useColumnLayout(
   const colsKey = enabled && stateKey ? `dt:cols:${stateKey}` : null;
   const [stored, setStored] = useState<Record<string, number>>({});
   const storedRef = useRef(stored);
-  const [state, setState] = useState<ColState>({ hidden: [], pinned: [] });
+  const [state, setState] = useState<ColState>(NO_STATE);
+  const [drag, setDrag] = useState<{ key: string; over: string | null } | null>(null);
   const [measured, setMeasured] = useState<Measured | null>(null);
   const [menu, setMenu] = useState<{ key: string; x: number; y: number } | null>(null);
 
-  // Visible columns, frozen ones first (in page order). Never hide them all.
+  // The viewer's order (columns it does not know keep their page order, after
+  // it), then visible columns, frozen ones first. Never hide them all.
+  const orderAt = new Map(state.order.map((k, i) => [k, i]));
+  const pageAt = new Map(columns.map((c, i) => [c.key, i]));
+  const rank = (k: string) => orderAt.get(k) ?? state.order.length + pageAt.get(k)!;
+  const ordered = enabled && state.order.length ? [...columns].sort((a, b) => rank(a.key) - rank(b.key)) : columns;
   const hiddenSet = new Set(state.hidden);
-  let visible = enabled ? columns.filter((c) => !hiddenSet.has(c.key)) : columns;
-  if (!visible.length) visible = columns.slice(0, 1);
+  let visible = enabled ? ordered.filter((c) => !hiddenSet.has(c.key)) : columns;
+  if (!visible.length) visible = ordered.slice(0, 1);
   const pinnedSet = new Set(enabled ? state.pinned : []);
   const frozen = visible.filter((c) => pinnedSet.has(c.key));
   const cols = [...frozen, ...visible.filter((c) => !pinnedSet.has(c.key))];
   const sig = cols.map((c) => c.key).join("\u0001");
   const fixed = enabled && measured?.sig === sig;
+  const wrap = enabled && state.wrap;
 
   // Restore after mount: the server render has no storage, and the first
   // client render must match it.
@@ -255,7 +265,7 @@ export function useColumnLayout(
     storedRef.current = clean;
     /* eslint-disable react-hooks/set-state-in-effect -- one-time restore from this browser's storage */
     setStored(clean);
-    setState({ hidden: strings(cs?.hidden), pinned: strings(cs?.pinned) });
+    setState({ hidden: strings(cs?.hidden), pinned: strings(cs?.pinned), order: strings(cs?.order), wrap: cs?.wrap === true });
     /* eslint-enable react-hooks/set-state-in-effect */
   }, [widthKey, colsKey, stateKey]);
 
@@ -348,7 +358,7 @@ export function useColumnLayout(
 
   const hide = (key: string) => {
     if (visible.length <= 1) return;
-    saveState({ hidden: [...state.hidden.filter((k) => k !== key), key], pinned: state.pinned.filter((k) => k !== key) });
+    saveState({ ...state, hidden: [...state.hidden.filter((k) => k !== key), key], pinned: state.pinned.filter((k) => k !== key) });
   };
   const show = (key: string) => saveState({ ...state, hidden: state.hidden.filter((k) => k !== key) });
   const togglePin = (key: string) =>
@@ -360,8 +370,27 @@ export function useColumnLayout(
   };
   const unfreeze = () => saveState({ ...state, pinned: [] });
   const reset = () => {
-    saveState({ hidden: [], pinned: [] });
+    saveState(NO_STATE);
     saveWidths({}, true);
+  };
+  const toggleWrap = () => saveState({ ...state, wrap: !state.wrap });
+  // Move a column to another's place. Not across the frozen / unfrozen divide:
+  // frozen columns are drawn first whatever the order, so that move would
+  // silently do nothing.
+  const canMove = (key: string, target: string) =>
+    key !== target && pinnedSet.has(key) === pinnedSet.has(target) && pageAt.has(key) && pageAt.has(target);
+  const moveTo = (key: string, target: string) => {
+    if (!canMove(key, target)) return;
+    const keys = ordered.map((c) => c.key);
+    keys.splice(keys.indexOf(key), 1);
+    keys.splice(keys.indexOf(target) + (rank(key) < rank(target) ? 1 : 0), 0, key);
+    saveState({ ...state, order: keys });
+  };
+  const dragging = drag?.key;
+  const dropSide = (key: string): "left" | "right" | null => {
+    if (!drag || drag.over !== key || !canMove(drag.key, key)) return null;
+    const at = (k: string) => cols.findIndex((c) => c.key === k);
+    return at(drag.key) < at(key) ? "right" : "left";
   };
 
   const solid = (look: RowLook) =>
@@ -371,7 +400,10 @@ export function useColumnLayout(
         ? "bg-[var(--color-surface-2)]"
         : "bg-[var(--color-surface)] group-hover/row:bg-[var(--color-surface-2)]";
 
-  const labelled = columns.filter((c) => c.label);
+  const labelled = ordered.filter((c) => c.label);
+  function labelOf(key: string) {
+    return columns.find((c) => c.key === key)?.label ?? "";
+  }
 
   return {
     /** The columns to render, in order: visible ones, frozen first. */
@@ -401,18 +433,45 @@ export function useColumnLayout(
               setMenu({ key, x: e.clientX, y: e.clientY });
             }
           : undefined,
-        /** Extra classes: a frozen header needs a background, the last one an edge. */
-        frozenClass:
-          left !== undefined ? `bg-[var(--color-surface)] ${key === lastFrozen ? "shadow-[inset_-1px_0_0_var(--color-border)]" : ""}` : "",
+        // Drag a header onto another to move it there.
+        draggable: enabled && !!labelOf(key),
+        onDragStart: (e: React.DragEvent) => {
+          e.dataTransfer.effectAllowed = "move";
+          try {
+            e.dataTransfer.setData("text/plain", key); // Firefox needs a payload
+          } catch {}
+          setDrag({ key, over: null });
+        },
+        onDragOver: (e: React.DragEvent) => {
+          if (!drag || !canMove(drag.key, key)) return;
+          e.preventDefault(); // allows the drop
+          e.dataTransfer.dropEffect = "move";
+          if (drag.over !== key) setDrag({ ...drag, over: key });
+        },
+        onDrop: (e: React.DragEvent) => {
+          e.preventDefault();
+          if (drag) moveTo(drag.key, key);
+          setDrag(null);
+        },
+        onDragEnd: () => setDrag(null),
+        /** Extra classes: a frozen header needs a background, the last one an edge; the one being dragged dims. */
+        extraClass: `${
+          left !== undefined ? `bg-[var(--color-surface)] ${key === lastFrozen ? "shadow-[inset_-1px_0_0_var(--color-border)]" : ""}` : ""
+        } ${dragging === key ? "opacity-40" : ""} ${enabled && labelOf(key) ? "cursor-grab active:cursor-grabbing" : ""}`,
       };
     },
-    /** A data <td>: sticky and painted like its row while its column is frozen. */
+    /**
+     * A data <td>: clipped to its column once fixed — one line ending in "…",
+     * or wrapped when Wrap is on — and sticky, painted like its row, while its
+     * column is frozen.
+     */
     cellProps: (key: string, look?: RowLook) => {
       const left = leftOf.get(key);
-      if (left === undefined) return { style: undefined, className: "" };
+      const fit = fixed ? `overflow-hidden ${wrap ? "whitespace-normal break-words" : "whitespace-nowrap text-ellipsis"}` : "";
+      if (left === undefined) return { style: undefined, className: fit };
       return {
         style: { position: "sticky" as const, left, zIndex: 10 },
-        className: `${solid(look)} ${key === lastFrozen ? "shadow-[inset_-1px_0_0_var(--color-border)]" : ""}`,
+        className: `${fit} ${solid(look)} ${key === lastFrozen ? "shadow-[inset_-1px_0_0_var(--color-border)]" : ""}`,
       };
     },
     /** A leading non-data cell (a checkbox column): sticks at the left while anything is frozen. */
@@ -420,22 +479,40 @@ export function useColumnLayout(
       leftOf.size
         ? { style: { position: "sticky" as const, left: 0, zIndex: head ? 20 : 10 }, className: head ? "bg-[var(--color-surface)]" : solid(look) }
         : { style: undefined, className: "" },
-    handle: (key: string) =>
-      enabled ? (
-        <span
-          role="separator"
-          aria-orientation="vertical"
-          aria-label={L.resize}
-          title={L.resize}
-          onPointerDown={(e) => start(e, key)}
-          onClick={(e) => e.stopPropagation()}
-          onDoubleClick={(e) => {
-            e.stopPropagation();
-            fit(key);
-          }}
-          className="absolute right-0 top-0 z-10 h-full w-1.5 cursor-col-resize touch-none select-none opacity-0 transition-opacity hover:bg-[var(--color-accent)] hover:opacity-40 group-hover/th:opacity-100 group-hover/th:bg-[var(--color-border-strong)]"
-        />
-      ) : null,
+    /** Inside each data <th>: the resize strip, and the bar showing where a dragged column lands. */
+    handle: (key: string) => {
+      if (!enabled) return null;
+      const side = dropSide(key);
+      return (
+        <>
+          <span
+            role="separator"
+            aria-orientation="vertical"
+            aria-label={L.resize}
+            title={L.resize}
+            draggable={false}
+            onPointerDown={(e) => start(e, key)}
+            onMouseDown={(e) => {
+              e.preventDefault(); // a resize, never the start of a column drag
+              e.stopPropagation();
+            }}
+            onDragStart={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+            }}
+            onClick={(e) => e.stopPropagation()}
+            onDoubleClick={(e) => {
+              e.stopPropagation();
+              fit(key);
+            }}
+            className="absolute right-0 top-0 z-10 h-full w-1.5 cursor-col-resize touch-none select-none opacity-0 transition-opacity hover:bg-[var(--color-accent)] hover:opacity-40 group-hover/th:opacity-100 group-hover/th:bg-[var(--color-border-strong)]"
+          />
+          {side && (
+            <span aria-hidden className={`pointer-events-none absolute top-0 z-20 h-full w-[3px] rounded-full bg-[var(--color-accent)] ${side === "right" ? "right-0" : "left-0"}`} />
+          )}
+        </>
+      );
+    },
     /** The header right-click menu; render once. */
     menu:
       menu && enabled ? (
@@ -461,11 +538,15 @@ export function useColumnLayout(
       isHidden: (key: string) => hiddenSet.has(key),
       isFrozen: (key: string) => pinnedSet.has(key),
       canHide: visible.length > 1,
-      changed: state.hidden.length > 0 || state.pinned.length > 0 || Object.keys(stored).length > 0,
+      changed: state.hidden.length > 0 || state.pinned.length > 0 || state.order.length > 0 || state.wrap || Object.keys(stored).length > 0,
       hide,
       show,
       togglePin,
       reset,
+      canMove,
+      moveTo,
+      wrap,
+      toggleWrap,
     },
   };
 }
@@ -603,13 +684,42 @@ export function ColumnsList({ layout }: { layout: ColumnLayout }) {
   const { t } = useShell();
   const L = t.table;
   const p = layout.panel;
+  const [drag, setDrag] = useState<{ key: string; over: string | null } | null>(null);
   return (
     <div className="flex flex-col">
       {p.columns.map((c) => {
         const hidden = p.isHidden(c.key);
         const frozen = p.isFrozen(c.key);
+        const target = drag && drag.over === c.key && p.canMove(drag.key, c.key);
         return (
-          <div key={c.key} className="flex items-center gap-2 rounded-[6px] px-2 py-1 hover:bg-[var(--color-surface-2)]">
+          <div
+            key={c.key}
+            draggable
+            onDragStart={(e) => {
+              e.dataTransfer.effectAllowed = "move";
+              try {
+                e.dataTransfer.setData("text/plain", c.key);
+              } catch {}
+              setDrag({ key: c.key, over: null });
+            }}
+            onDragOver={(e) => {
+              if (!drag || !p.canMove(drag.key, c.key)) return;
+              e.preventDefault();
+              if (drag.over !== c.key) setDrag({ ...drag, over: c.key });
+            }}
+            onDrop={(e) => {
+              e.preventDefault();
+              if (drag) p.moveTo(drag.key, c.key);
+              setDrag(null);
+            }}
+            onDragEnd={() => setDrag(null)}
+            className={`flex items-center gap-2 rounded-[6px] px-2 py-1 hover:bg-[var(--color-surface-2)] ${drag?.key === c.key ? "opacity-40" : ""} ${
+              target ? "shadow-[inset_0_2px_0_var(--color-accent)]" : ""
+            }`}
+          >
+            <span aria-hidden title={L.dragToMove} className="cursor-grab select-none text-[12px] leading-none text-[var(--color-faint)]">
+              ⋮⋮
+            </span>
             <label className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 py-0.5 text-[12.5px] text-[var(--color-ink)]">
               <input
                 type="checkbox"
@@ -636,13 +746,39 @@ export function ColumnsList({ layout }: { layout: ColumnLayout }) {
           </div>
         );
       })}
-      <p className="px-2 pb-1 pt-2 text-[11px] leading-snug text-[var(--color-faint)]">{L.columnsHint}</p>
+      <label className="mt-1 flex cursor-pointer items-center gap-2 border-t border-[var(--color-border-subtle)] px-2 pb-1 pt-2 text-[12.5px] text-[var(--color-ink)]">
+        <input type="checkbox" checked={p.wrap} onChange={p.toggleWrap} className="accent-[var(--color-accent)]" />
+        {L.wrapText}
+      </label>
+      <p className="px-2 pb-1 pt-1 text-[11px] leading-snug text-[var(--color-faint)]">{L.columnsHint}</p>
       {p.changed && (
         <button type="button" onClick={p.reset} className="mx-2 mb-1 self-start text-[12px] font-semibold text-[var(--color-accent)] hover:underline">
           {L.resetLayout}
         </button>
       )}
     </div>
+  );
+}
+
+/** "Wrap" — long text on more lines, or each row on one line. */
+export function WrapButton({ layout }: { layout: ColumnLayout }) {
+  const { t } = useShell();
+  const on = layout.panel.wrap;
+  return (
+    <button
+      type="button"
+      onClick={layout.panel.toggleWrap}
+      aria-pressed={on}
+      title={on ? t.table.wrapOff : t.table.wrapOn}
+      className={`flex h-[34px] items-center gap-1.5 rounded-[8px] border px-3 text-[12.5px] font-medium hover:bg-[var(--color-surface-2)] ${
+        on ? "border-[var(--color-accent)] bg-[var(--color-accent-soft)] text-[var(--color-accent-ink)]" : "border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--color-ink)]"
+      }`}
+    >
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+        <path d="M3 6h18M3 12h15a3 3 0 0 1 0 6h-4m0 0 2-2m-2 2 2 2M3 18h7" />
+      </svg>
+      {t.table.wrap}
+    </button>
   );
 }
 
@@ -841,6 +977,7 @@ export function DataTable({
           {(toolbar || columnsButton) && (
             <div className="ml-auto flex flex-wrap items-center gap-2">
               {toolbar}
+              {columnsButton && <WrapButton layout={cw} />}
               {columnsButton && <ColumnsButton layout={cw} />}
             </div>
           )}
@@ -853,7 +990,7 @@ export function DataTable({
             <tr className="border-b border-[var(--color-border)]">
               {cw.cols.map((c) => {
                 const sorted = table.sort?.key === c.key ? table.sort.dir : null;
-                const { frozenClass, ...head } = cw.headProps(c.key);
+                const { extraClass, ...head } = cw.headProps(c.key);
                 return (
                   <th
                     key={c.key}
@@ -861,7 +998,7 @@ export function DataTable({
                     aria-sort={sorted === "asc" ? "ascending" : sorted === "desc" ? "descending" : undefined}
                     className={`group/th relative whitespace-nowrap px-4 py-2.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--color-faint)] ${
                       cw.fixed ? "overflow-hidden" : ""
-                    } ${c.className ?? ""} ${frozenClass}`}
+                    } ${c.className ?? ""} ${extraClass}`}
                   >
                     <DataHead column={c} table={table} />
                     {cw.handle(c.key)}
@@ -896,9 +1033,9 @@ export function DataTable({
                     <td
                       key={c.key}
                       style={cell.style}
-                      className={`px-4 py-2.5 ${c.align === "center" ? "text-center" : c.align === "right" ? "text-right" : ""} ${
-                        cw.fixed ? "overflow-hidden break-words" : ""
-                      } ${c.className ?? ""} ${cell.className}`}
+                      className={`px-4 py-2.5 ${c.align === "center" ? "text-center" : c.align === "right" ? "text-right" : ""} ${c.className ?? ""} ${
+                        cell.className
+                      }`}
                     >
                       {r.cells[c.key] ?? <span className="text-[var(--color-faint)]">—</span>}
                     </td>
