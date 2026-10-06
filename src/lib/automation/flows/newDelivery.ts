@@ -47,10 +47,14 @@ export const newDeliveryFlow: SeedFlow = {
           templateName: "hc_order_delivery_follow_up_2_order",
           params: ["{full_name}", "{ref_1}", "{delivery_date_1}", "{brand_1}", "{ref_2}", "{delivery_date_2}", "{brand_2}", "{order_total}"],
         },
-        "3": {
-          templateName: "hc_order_delivery_follow_up_3_order",
-          params: ["{full_name}", "{ref_1}", "{delivery_date_1}", "{brand_1}", "{ref_2}", "{delivery_date_2}", "{brand_2}", "{ref_3}", "{delivery_date_3}", "{brand_3}", "{order_total}"],
-        },
+        // TEMPORARY (2026-10-06): the 3-order template was re-submitted to Meta
+        // with a stray footer ("sample") and cannot be edited while PENDING. Until
+        // it is approved and the footer removed, a 3-order customer gets the
+        // 4-order template ("You have a total of 3 orders — here are the first
+        // 3"), which prints all three. Restore the "3" entry afterwards:
+        // { templateName: "hc_order_delivery_follow_up_3_order", params:
+        //   [full_name, ref_1, delivery_date_1, brand_1, ref_2, delivery_date_2,
+        //    brand_2, ref_3, delivery_date_3, brand_3, order_total] }.
         "4": {
           templateName: "hc_order_delivery_follow_up_4_order",
           params: ["{full_name}", "{order_total}", "{ref_1}", "{delivery_date_1}", "{brand_1}", "{ref_2}", "{delivery_date_2}", "{brand_2}", "{ref_3}", "{delivery_date_3}", "{brand_3}"],
