@@ -553,6 +553,16 @@ export async function resumeRun(
   const cursor = run.cursorNodeId;
 
   if (context.waitingFor === "button" && input.buttonId != null) {
+    // Only a tap the waiting node actually offers moves the run. nextNodeId's
+    // default-edge fallback is right for a router; for a button wait it meant
+    // a stray tap (a redelivered earlier button, a tap on an old message)
+    // silently took the FIRST edge — seen live 2026-10-06 when a redelivered
+    // "Amend Date" landed on the reason prompt and picked "Renovation Delay".
+    const offered = ctx.graph.edges.some((e) => e.from === cursor && e.branch === input.buttonId);
+    if (!offered) {
+      await logStep(ctx.runId, { node: cursor, type: "resume", ignored: input.buttonId });
+      return false;
+    }
     await advance(ctx, nextNodeId(ctx.graph, cursor, input.buttonId));
     return true;
   }

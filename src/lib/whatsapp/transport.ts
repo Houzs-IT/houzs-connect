@@ -386,6 +386,9 @@ export async function recordInbound(
   meta?: {
     type?: "TEXT" | "INTERACTIVE" | "IMAGE" | "DOCUMENT" | "AUDIO" | "VIDEO";
     interactivePayload?: unknown;
+    /** Meta's id for the inbound message (`messages[].id`). Stored so a
+     *  redelivery of the same message is recognised, never processed twice. */
+    waMessageId?: string | null;
   }
 ) {
   const db = getDb();
@@ -398,6 +401,7 @@ export async function recordInbound(
       body,
       status: "READ",
       interactivePayload: (meta?.interactivePayload as object) ?? null,
+      waMessageId: meta?.waMessageId ?? null,
     })
     .returning();
   await db

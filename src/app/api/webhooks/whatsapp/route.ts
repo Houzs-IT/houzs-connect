@@ -1,4 +1,5 @@
 import { intakeReceipt } from "@/lib/receipt-intake";
+import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { NextRequest, NextResponse } from "next/server";
 import { eq, sql } from "drizzle-orm";
 import { getDb } from "@/db/client";
@@ -174,9 +175,17 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: false }, { status: 500 });
   }
 
+  // Acknowledge FIRST, process AFTER. Meta expects a 2xx within seconds and
+  // redelivers otherwise; a tap that opens a run sends templates, forms and the
+  // ERP callback before the loop ends, which is longer than that. The work
+  // continues under waitUntil (the Worker keeps running after the response);
+  // outside the Worker (tests, scripts) it simply runs inline.
+  const entries = body.entry;
+  const work = (async () => {
   let handled = 0;
+  let duplicates = 0;
   const refused: string[] = [];
-  for (const entry of body.entry) {
+  for (const entry of entries) {
     for (const change of entry.changes ?? []) {
       const value = change.value;
       if (!value) continue;
@@ -215,6 +224,19 @@ export async function POST(req: NextRequest) {
         // and took the whole delivery down — Meta then retried it four times.
         const senderId = m.from ?? m.from_user_id;
         if (!senderId) continue;
+        // Meta REDELIVERS a message whenever it does not get a 2xx fast enough
+        // (seen live 2026-10-06: one Confirm / Amend tap arrived three times,
+        // 24 s apart, and each copy advanced the flow again — the customer got
+        // the reason prompt twice and the run jumped a branch). The id is the
+        // same on every copy, so a message already on file is acknowledged and
+        // skipped; the first copy's processing, not this one, owns the reply.
+        if (m.id) {
+          const seen = await db.query.message.findFirst({ where: eq(messageTable.waMessageId, m.id) });
+          if (seen) {
+            duplicates++;
+            continue;
+          }
+        }
         // Keep a phone number as digits (that is the key contacts are stored by
         // and the value Cloud API takes back as `to`); keep a user id verbatim,
         // because stripping its non-digits would destroy the identifier.
@@ -270,6 +292,7 @@ export async function POST(req: NextRequest) {
           (isMedia ? "[attachment]" : "");
 
         const inbound = await recordInbound(convo.id, text, {
+          waMessageId: m.id ?? null,
           type: isMedia ? (m.type === "document" ? "DOCUMENT" : "IMAGE") : buttonId || flowFields ? "INTERACTIVE" : "TEXT",
           interactivePayload: flowFields
             ? { kind: "flow_reply", fields: flowFields }
@@ -313,13 +336,25 @@ export async function POST(req: NextRequest) {
       }
     }
   }
+  const dup = duplicates ? `;duplicate:${duplicates}` : "";
   await finish(
     refused.length
-      ? `dropped:number-not-assigned:${[...new Set(refused)].join(",")}${handled ? `;handled:${handled}-message(s)` : ""}`
+      ? `dropped:number-not-assigned:${[...new Set(refused)].join(",")}${handled ? `;handled:${handled}-message(s)` : ""}${dup}`
       : handled > 0
-        ? `handled:${handled}-message(s)`
-        : "handled:status-only",
+        ? `handled:${handled}-message(s)${dup}`
+        : duplicates
+          ? `handled:duplicate-only${dup}`
+          : "handled:status-only",
     refused.length === 0
   );
+  })().catch(async (e) => {
+    console.error("WEBHOOK_WORK_FAIL", e);
+    await finish(`failed:${String((e as Error)?.message ?? e).slice(0, 120)}`, false).catch(() => {});
+  });
+  try {
+    getCloudflareContext().ctx.waitUntil(work);
+  } catch {
+    await work;
+  }
   return NextResponse.json({ ok: true });
 }
