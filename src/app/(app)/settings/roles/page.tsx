@@ -32,7 +32,7 @@ export default async function RolesPage() {
         </button>
       }
     >
-      <div className="max-w-[1180px] p-4 md:p-6">
+      <div className="p-4 md:p-6">
         <SettingsHead title={L.roles} sub={L.rolesSub} />
         <RolesMatrix matrix={matrix} roles={MATRIX_ROLES} caps={CAPABILITIES} editable={editable} />
       </div>

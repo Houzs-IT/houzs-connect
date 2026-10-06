@@ -140,7 +140,7 @@ export default async function LibraryPage() {
 
   return (
     <PageChrome section="settings" crumbs={[L.library]}>
-      <div className="max-w-[1100px] p-4 md:p-6">
+      <div className="p-4 md:p-6">
         <SettingsHead title={L.library} sub={L.librarySub} />
         <div className="grid gap-6 lg:grid-cols-2">
           <Section icon="/" tone="orange" title={L.quickReplies} sub={L.qrSub}>
