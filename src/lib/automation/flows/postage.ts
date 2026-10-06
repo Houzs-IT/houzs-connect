@@ -1,4 +1,5 @@
 import type { SeedFlow } from "./types";
+import { ERP_CALLBACK_HEADERS } from "./shared";
 
 /**
  * Postage Confirm — confirm the delivery address before scheduling (decision B).
@@ -64,7 +65,14 @@ export const postageFlow: SeedFlow = {
         type: "call_rest_api",
         x: 900,
         y: 120,
-        data: { method: "POST", url: "{callback_url}", body: `{"ref":"{ref_1}","decision":"postage_confirmed","source":"connect"}` },
+        // The ERP's /api/chat-callback contract (see shared.ts): X-Chat-Key from
+        // the Worker secret, event + ref + the bundle, callback_id per run.
+        data: {
+          method: "POST",
+          url: "{callback_url}",
+          headers: ERP_CALLBACK_HEADERS,
+          body: `{"callback_id":"{run_id}-postage_confirm","event":"postage_confirm","ref":"{ref_1}","refs":"{refs_all}","phone":"{phone}","note":"source=connect"}`,
+        },
       },
       { id: "ack_confirmed", type: "send_text", x: 1120, y: 120, data: { message: ACK_CONFIRMED } },
       { id: "ask_addr", type: "collect_input", x: 460, y: 320, data: { message: ASK_ADDRESS, saveTo: "delivery_address" } },
@@ -74,7 +82,12 @@ export const postageFlow: SeedFlow = {
         type: "call_rest_api",
         x: 900,
         y: 320,
-        data: { method: "POST", url: "{callback_url}", body: `{"ref":"{ref_1}","decision":"postage_amend","address":"{delivery_address}","source":"connect"}` },
+        data: {
+          method: "POST",
+          url: "{callback_url}",
+          headers: ERP_CALLBACK_HEADERS,
+          body: `{"callback_id":"{run_id}-postage_amend","event":"postage_amend","ref":"{ref_1}","refs":"{refs_all}","phone":"{phone}","address":"{delivery_address}","note":"source=connect"}`,
+        },
       },
       { id: "ack_amend", type: "send_text", x: 1120, y: 320, data: { message: ACK_AMEND } },
       { id: "done", type: "end", x: 1340, y: 220, data: {} },
