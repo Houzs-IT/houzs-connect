@@ -168,7 +168,8 @@ export type DataTableState = ReturnType<typeof useDataTable>;
 // natural layout; those header widths are read once and the table switches to
 // a fixed layout, so resizing one column never moves the others (a blank
 // last column takes the slack). Dragged widths are this viewer's, kept in
-// this browser per table (`dt:widths:<stateKey>`).
+// this browser per table (`dt:widths:v2:<stateKey>`; v1 held widths saved
+// while #102 collapsed `max-w-0` columns to 64px, so it is not read).
 
 const MIN_COL = 64;
 const MAX_FIT = 800;
@@ -188,7 +189,7 @@ export function useColumnWidths(
   enabled = true
 ) {
   const { t } = useShell();
-  const storageKey = enabled && stateKey ? `dt:widths:${stateKey}` : null;
+  const storageKey = enabled && stateKey ? `dt:widths:v2:${stateKey}` : null;
   const [stored, setStored] = useState<Record<string, number>>({});
   const storedRef = useRef(stored);
   const [measured, setMeasured] = useState<Measured | null>(null);
@@ -200,13 +201,14 @@ export function useColumnWidths(
   useEffect(() => {
     if (!storageKey) return;
     try {
+      if (stateKey) localStorage.removeItem(`dt:widths:${stateKey}`); // the v1 key, see above
       const raw = JSON.parse(localStorage.getItem(storageKey) ?? "{}") as Record<string, unknown>;
       const clean: Record<string, number> = {};
       for (const [k, v] of Object.entries(raw)) if (typeof v === "number" && v >= MIN_COL && v <= 2000) clean[k] = Math.round(v);
       storedRef.current = clean;
       setStored(clean); // eslint-disable-line react-hooks/set-state-in-effect -- one-time restore from this browser's storage
     } catch {}
-  }, [storageKey]);
+  }, [storageKey, stateKey]);
 
   // Read the natural layout once (again when the columns change), before paint.
   useLayoutEffect(() => {
