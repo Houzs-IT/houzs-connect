@@ -31,6 +31,23 @@ Please send the payment slip here once done — we'll verify and secure your del
 
 export const PROPERTY_INTRO = `To help smoothen your delivery process, we'll need to collect a few details ⬇️`;
 
+// Fallback when the "Property Details" Flow form is not published on Meta (the
+// send_form node then skips): the same four answers are collected with buttons
+// and one text reply — the sheet-era wording, approved copy 2026-09-20. Each
+// answer lands on the SAME contact fields the form writes (house_type,
+// delivery_purpose, need_disposal, disposal_item), so prop_router and the ERP
+// read one shape whichever path ran.
+export const ASK_HOUSE = `${PROPERTY_INTRO}
+
+May I know which type of property you're staying in?`;
+export const ASK_PURPOSE = `Next, may I know what this delivery is for?`;
+export const ASK_DISPOSAL = `Understood 👍
+
+Do you need our team to dispose of any old items during delivery?`;
+export const ASK_DISPOSAL_ITEM = `Sure, could you please tell us what item you'd like to dispose of?
+
+Please reply in a single message to proceed.`;
+
 export const GENERIC_ACK = `Thank you for letting us know. We'll take note of your situation and plan accordingly.`;
 
 export const DISPOSAL_FEE = `Noted on your request. Please see our disposal fee details below:
@@ -309,6 +326,66 @@ export function buildDeliveryGraph(opts: {
       { id: "generic_ack", type: "send_text", x: 2680, y: 200, data: { message: GENERIC_ACK } },
       { id: "confirm_end", type: "end", x: 2900, y: 120, data: {} },
 
+      // ── Property questions without the Flow form (see ASK_HOUSE) ──
+      // The form, when published, writes house_type; when it was skipped the
+      // field is still empty (the ERP resets nothing here, but a form answer is
+      // the only writer) and the buttons take over.
+      {
+        id: "prop_have_router",
+        type: "criteria_router",
+        x: 2350,
+        y: 320,
+        data: { rules: [{ branch: "have", field: "house_type", op: "set" }] },
+      },
+      {
+        id: "ask_house",
+        type: "ask_buttons",
+        x: 2350,
+        y: 460,
+        data: {
+          message: ASK_HOUSE,
+          buttons: [
+            { id: "landed", label: "Landed" },
+            { id: "condo", label: "Condo" },
+            { id: "apartment", label: "Apartment" },
+          ],
+        },
+      },
+      { id: "house_landed", type: "set_attribute", x: 2560, y: 400, data: { key: "house_type", value: "Landed" } },
+      { id: "house_condo", type: "set_attribute", x: 2560, y: 460, data: { key: "house_type", value: "Condo" } },
+      { id: "house_apartment", type: "set_attribute", x: 2560, y: 520, data: { key: "house_type", value: "Apartment" } },
+      {
+        id: "ask_purpose",
+        type: "ask_buttons",
+        x: 2780,
+        y: 460,
+        data: {
+          message: ASK_PURPOSE,
+          buttons: [
+            { id: "newhouse", label: "✨ Move-in New House" },
+            { id: "replace", label: "🔁 Replace Furniture" },
+          ],
+        },
+      },
+      { id: "purpose_new", type: "set_attribute", x: 3000, y: 400, data: { key: "delivery_purpose", value: "Move-in New House" } },
+      { id: "purpose_replace", type: "set_attribute", x: 3000, y: 520, data: { key: "delivery_purpose", value: "Replace Furniture" } },
+      {
+        id: "ask_disposal",
+        type: "ask_buttons",
+        x: 3220,
+        y: 520,
+        data: {
+          message: ASK_DISPOSAL,
+          buttons: [
+            { id: "yes", label: "Yes" },
+            { id: "no", label: "No" },
+          ],
+        },
+      },
+      { id: "disposal_yes", type: "set_attribute", x: 3440, y: 460, data: { key: "need_disposal", value: "Yes" } },
+      { id: "disposal_no", type: "set_attribute", x: 3440, y: 580, data: { key: "need_disposal", value: "No" } },
+      { id: "ask_item", type: "collect_input", x: 3660, y: 460, data: { message: ASK_DISPOSAL_ITEM, saveTo: "disposal_item" } },
+
       // ── Amend branch ──
       {
         id: "amend_guard",
@@ -406,7 +483,24 @@ export function buildDeliveryGraph(opts: {
       { from: "bal_router", to: "send_property", branch: "default" },
       { from: "bal_msg", to: "tag_balance" },
       { from: "tag_balance", to: "send_property" },
-      { from: "send_property", to: "prop_router" },
+      { from: "send_property", to: "prop_have_router" },
+      { from: "prop_have_router", to: "prop_router", branch: "have" },
+      { from: "prop_have_router", to: "ask_house", branch: "default" },
+      { from: "ask_house", to: "house_landed", branch: "landed" },
+      { from: "ask_house", to: "house_condo", branch: "condo" },
+      { from: "ask_house", to: "house_apartment", branch: "apartment" },
+      { from: "house_landed", to: "ask_purpose" },
+      { from: "house_condo", to: "ask_purpose" },
+      { from: "house_apartment", to: "ask_purpose" },
+      { from: "ask_purpose", to: "purpose_new", branch: "newhouse" },
+      { from: "ask_purpose", to: "purpose_replace", branch: "replace" },
+      { from: "purpose_new", to: "prop_router" },
+      { from: "purpose_replace", to: "ask_disposal" },
+      { from: "ask_disposal", to: "disposal_yes", branch: "yes" },
+      { from: "ask_disposal", to: "disposal_no", branch: "no" },
+      { from: "disposal_yes", to: "ask_item" },
+      { from: "ask_item", to: "prop_router" },
+      { from: "disposal_no", to: "prop_router" },
       { from: "prop_router", to: "generic_ack", branch: "newhouse" },
       { from: "prop_router", to: "disposal_fee", branch: "disposal" },
       { from: "prop_router", to: "generic_ack", branch: "default" },
