@@ -14,7 +14,7 @@ import { buildDeliveryGraph, SHARED_FORMS } from "./shared";
 
 const OPENING = `Hi {full_name} 👋 Good news! Your order with {company_signature} has been scheduled for delivery.
 
-Reference No. : *{ref_1}*
+Sales Order No. : *{ref_1}*
 Delivery Date: *{delivery_date_1}*
 Branding: *{brand_1}*
 
