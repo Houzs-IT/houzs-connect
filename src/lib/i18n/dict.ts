@@ -116,6 +116,7 @@ const en = {
     reset: "Reset filters",
     none: "Nothing here yet.",
     noMatch: "Nothing matches the search or filters.",
+    resize: "Drag to resize · double-click to fit",
   },
   service: {
     hidePanel: "Hide customer info",
@@ -1591,6 +1592,7 @@ const zh: Dict = {
     reset: "重置筛选",
     none: "还没有内容。",
     noMatch: "没有符合搜索或筛选的内容。",
+    resize: "拖动调整列宽 · 双击自动适应",
   },
   service: {
     hidePanel: "收起客户信息",

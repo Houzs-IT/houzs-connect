@@ -6,7 +6,7 @@ import { fmt } from "@/lib/i18n/dict";
 import { initials, tint } from "@/lib/format";
 import { useShell } from "@/components/shell/ShellProvider";
 import { IconClose, IconDots, IconSearch } from "@/components/icons";
-import { DataCount, DataHead, DataMenus, useDataTable, type DataColumn, type DataRow } from "@/components/DataTable";
+import { DataCount, DataHead, DataMenus, useColumnWidths, useDataTable, type DataColumn, type DataRow } from "@/components/DataTable";
 import { bulkBlockContacts, bulkTagContacts, mergeContacts, setContactBlocked } from "./actions";
 import { DeleteContactButton } from "./DeleteContactButton";
 
@@ -292,6 +292,9 @@ export function ContactsView({
     [rows, s]
   );
   const table = useDataTable(dataRows, columns, { stateKey: "contacts" });
+  const tableRef = useRef<HTMLTableElement>(null);
+  const cw = useColumnWidths(tableRef, "contacts", columns.map((c) => c.key));
+  const filler = cw.fixed ? 1 : 0;
   const byId = new Map(rows.map((r) => [r.id, r]));
   const visible = table.shown.map((d) => byId.get(d.id)).filter((r): r is ContactRow => !!r);
   const allOnPage = visible.length > 0 && visible.every((r) => selected.has(r.id));
@@ -434,7 +437,7 @@ export function ContactsView({
         )}
 
         <div className="scroll-thin min-h-0 flex-1 overflow-auto">
-          <table className="w-full min-w-[700px] border-collapse [&_th]:whitespace-nowrap text-[13px]">
+          <table ref={tableRef} style={cw.tableStyle} className="w-full min-w-[700px] border-collapse [&_th]:whitespace-nowrap text-[13px]">
             <thead className="sticky top-0 z-10 bg-[var(--color-surface)]">
               <tr className="border-b border-[var(--color-border)]">
                 <th className="w-10 px-3">
@@ -447,24 +450,26 @@ export function ContactsView({
                   />
                 </th>
                 {columns.map((c) => (
-                  <th key={c.key} className={th}>
+                  <th key={c.key} {...cw.headProps(c.key)} className={`${th} group/th relative ${cw.fixed ? "overflow-hidden" : ""}`}>
                     <DataHead column={c} table={table} />
+                    {cw.handle(c.key)}
                   </th>
                 ))}
+                {cw.fixed && <th aria-hidden className="p-0" />}
                 <th className="w-10" />
               </tr>
             </thead>
             <tbody>
               {rows.length > 0 && visible.length === 0 && (
                 <tr>
-                  <td colSpan={8 + extra.length} className="px-4 py-10 text-center text-[var(--color-faint)]">
+                  <td colSpan={8 + extra.length + filler} className="px-4 py-10 text-center text-[var(--color-faint)]">
                     {t.table.noMatch}
                   </td>
                 </tr>
               )}
               {rows.length === 0 && (
                 <tr>
-                  <td colSpan={8 + extra.length} className="px-4 py-10 text-center text-[var(--color-faint)]">
+                  <td colSpan={8 + extra.length + filler} className="px-4 py-10 text-center text-[var(--color-faint)]">
                     {q ? fmt(s.noMatch, { q }) : s.none}
                   </td>
                 </tr>
@@ -546,6 +551,7 @@ export function ContactsView({
                         )}
                       </td>
                     ))}
+                    {cw.fixed && <td className="p-0" />}
                     <td className="px-2" onClick={(e) => e.stopPropagation()}>
                       <RowMenu row={r} onMerge={() => setMergeKeep(r)} />
                     </td>
