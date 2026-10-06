@@ -50,6 +50,8 @@ export interface ErpUser {
    *  fixtures without them still type-check. */
   department_name?: string | null;
   manager_id?: number | null;
+  /** Free-text sub-group within the department (ERP migration 0021, org chart columns). */
+  division?: string | null;
 }
 
 /** GET /api/users/:id/companies -> { companies: number[] } (granted company ids;
@@ -382,6 +384,8 @@ export async function ensureErpOrgColumns(db: DB): Promise<void> {
   );
   await db.execute(sql`ALTER TABLE "connect"."member" ADD COLUMN IF NOT EXISTS "erp_user_id" integer`);
   await db.execute(sql`ALTER TABLE "connect"."member" ADD COLUMN IF NOT EXISTS "active" boolean DEFAULT true NOT NULL`);
+  // The ERP division (migration 0022). Raw SQL only, not in db/schema.ts — see applyOrgHierarchy.
+  await db.execute(sql`ALTER TABLE "connect"."member" ADD COLUMN IF NOT EXISTS "division" text`);
   await db.execute(sql`ALTER TABLE "connect"."member" DROP CONSTRAINT IF EXISTS "member_email_unique"`);
   await db.execute(
     sql`CREATE UNIQUE INDEX IF NOT EXISTS "member_company_email_unique" ON "connect"."member" ("company_id", "email")`
@@ -549,9 +553,11 @@ export async function applyOrgHierarchy(db: DB, erp: ErpOrg): Promise<void> {
   // ERP user -> its department name / manager (an ERP user id).
   const deptOf = new Map<number, string | null>();
   const mgrOf = new Map<number, number | null>();
+  const divOf = new Map<number, string | null>();
   for (const u of erp.users) {
     deptOf.set(u.id, (u.department_name ?? "").trim() || null);
     mgrOf.set(u.id, u.manager_id ?? null);
+    divOf.set(u.id, (u.division ?? "").trim() || null);
   }
 
   // The (connect company, department name) pairs we will need — one per company a
@@ -599,6 +605,9 @@ export async function applyOrgHierarchy(db: DB, erp: ErpOrg): Promise<void> {
     const resolved = erpMgr ? memberByCompanyUser.get(`${m.companyId}${SEP}${erpMgr}`) ?? null : null;
     const managerId = resolved === m.id ? null : resolved; // never your own manager
     await db.update(member).set({ departmentId, managerId }).where(eq(member.id, m.id));
+    // division is not in db/schema.ts (a member query must never depend on a
+    // column a deploy may land before), so it is written raw.
+    await db.execute(sql`update connect.member set division = ${divOf.get(m.erpUserId) ?? null} where id = ${m.id}`);
   }
 }
 

@@ -39,6 +39,7 @@ export function TeamClient({
     { key: "person", label: L.person },
     { key: "role", label: L.role },
     { key: "department", label: L.department },
+    { key: "division", label: L.division },
     { key: "reportsTo", label: L.reportsTo },
     ...companies.map((c) => ({ key: `co:${c.id}`, label: c.name, align: "center" as const, className: "max-w-[130px]" })),
     { key: "actions", label: "", sort: false, filter: false, align: "right" as const, className: "w-[72px]" },
@@ -64,6 +65,7 @@ export function TeamClient({
         person: p.name,
         role: ROLE_RANK.indexOf(p.role) === -1 ? 99 : ROLE_RANK.indexOf(p.role),
         department: p.department,
+        division: p.division,
         reportsTo: p.reportsTo,
         ...accessRank,
       },
@@ -71,6 +73,7 @@ export function TeamClient({
         person: p.name,
         role: roles[p.role] ?? p.role,
         department: p.department,
+        division: p.division,
         reportsTo: p.reportsTo,
         ...access,
       },
@@ -93,6 +96,7 @@ export function TeamClient({
         ),
         role: <RoleSelect email={p.email} name={p.name} role={p.role} canSuper={canSuper} erpRole={p.erpRole} setHere={p.roleSetHere} />,
         department: <span className="text-[var(--color-ink)]">{p.department ?? "—"}</span>,
+        division: <span className="text-[var(--color-ink)]">{p.division ?? "—"}</span>,
         reportsTo: <span className="text-[var(--color-ink)]">{p.reportsTo ?? "—"}</span>,
         ...Object.fromEntries(companies.map((co) => [`co:${co.id}`, accessCell(p, co, L)])),
         actions:
@@ -118,7 +122,7 @@ export function TeamClient({
         </button>
       </form>
 
-      <DataTable columns={columns} rows={rows} minWidth={860} stateKey="team" searchPlaceholder={L.teamSearch} />
+      <DataTable columns={columns} rows={rows} minWidth={960} stateKey="team" searchPlaceholder={L.teamSearch} />
 
       <p className="text-[12px] leading-relaxed text-[var(--color-faint)]">{L.teamHint}</p>
 
