@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useRef, useState } from "react";
-import { DataCount, DataHead, DataMenus, DataSearch, useColumnWidths, useDataTable, type DataColumn, type DataRow } from "@/components/DataTable";
+import { DataCount, DataHead, DataMenus, DataSearch, useColumnLayout, useDataTable, type DataColumn, type DataRow } from "@/components/DataTable";
 import { IconClose } from "@/components/icons";
 import { useShell } from "@/components/shell/ShellProvider";
 import { formatPhone, initials, tint } from "@/lib/format";
@@ -149,7 +149,7 @@ export function MessagesTab({
 
   const table = useDataTable(tableRows, columns);
   const tableRef = useRef<HTMLTableElement>(null);
-  const cw = useColumnWidths(tableRef, "campaign-messages", columns.map((c) => c.key));
+  const cw = useColumnLayout(tableRef, "campaign-messages", columns);
   const { shown } = table;
 
   // Back to the first page whenever the search, a funnel or the sort changes.
@@ -213,16 +213,17 @@ export function MessagesTab({
         <table ref={tableRef} style={cw.tableStyle} className={`w-full min-w-[820px] text-left text-[13px] ${cw.tableClass}`}>
           <thead>
             <tr className="border-b border-[var(--color-border)]">
-              {columns.map((c) => {
+              {cw.cols.map((c) => {
                 const sorted = table.sort?.key === c.key ? table.sort.dir : null;
+                const { frozenClass, ...head } = cw.headProps(c.key);
                 return (
                   <th
                     key={c.key}
-                    {...cw.headProps(c.key)}
+                    {...head}
                     aria-sort={sorted === "asc" ? "ascending" : sorted === "desc" ? "descending" : undefined}
                     className={`group/th relative whitespace-nowrap px-4 py-2.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--color-faint)] ${
                       cw.fixed ? "overflow-hidden" : ""
-                    } ${c.className ?? ""}`}
+                    } ${c.className ?? ""} ${frozenClass}`}
                   >
                     <DataHead column={c} table={table} />
                     {cw.handle(c.key)}
@@ -234,18 +235,25 @@ export function MessagesTab({
           </thead>
           <tbody>
             {slice.map((r) => (
-              <tr key={r.id} className="border-b border-[var(--color-border-subtle)] align-middle hover:bg-[var(--color-surface-2)]">
-                {columns.map((c) => (
-                  <td key={c.key} className={`px-4 py-3 ${c.align === "right" ? "text-right" : ""} ${cw.fixed ? "overflow-hidden break-words" : ""} ${c.className ?? ""}`}>
-                    {r.cells[c.key]}
-                  </td>
-                ))}
+              <tr key={r.id} className="group/row border-b border-[var(--color-border-subtle)] align-middle hover:bg-[var(--color-surface-2)]">
+                {cw.cols.map((c) => {
+                  const cell = cw.cellProps(c.key);
+                  return (
+                    <td
+                      key={c.key}
+                      style={cell.style}
+                      className={`px-4 py-3 ${c.align === "right" ? "text-right" : ""} ${cw.fixed ? "overflow-hidden break-words" : ""} ${c.className ?? ""} ${cell.className}`}
+                    >
+                      {r.cells[c.key]}
+                    </td>
+                  );
+                })}
                 {cw.fixed && <td className="p-0" />}
               </tr>
             ))}
             {slice.length === 0 && (
               <tr>
-                <td colSpan={columns.length + (cw.fixed ? 1 : 0)} className="px-4 py-10 text-center text-[13px] text-[var(--color-faint)]">
+                <td colSpan={cw.cols.length + (cw.fixed ? 1 : 0)} className="px-4 py-10 text-center text-[13px] text-[var(--color-faint)]">
                   {L.noMessages}
                 </td>
               </tr>
@@ -292,6 +300,7 @@ export function MessagesTab({
       </div>
 
       <DataMenus table={table} />
+      {cw.menu}
       {open && <Detail m={open} channelName={channelName} L={L} onClose={() => setOpen(null)} />}
     </div>
   );
