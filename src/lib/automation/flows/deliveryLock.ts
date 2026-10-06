@@ -22,7 +22,7 @@ export const deliveryLockFlow: SeedFlow = {
   key: "delivery_lock",
   name: "Delivery Lock",
   description:
-    "After confirmation, a late Amend tap gets the locked message (button_status=Confirm AND last_button=Amend Date); the date cannot be reopened.",
+    "After confirmation, a late Amend tap gets the locked message (button_status=Confirm AND last_button contains Amend); the date cannot be reopened.",
   triggerType: "NEW_INCOMING_MESSAGE",
   triggerConfig: { event: "new_message" },
   forms: [],
@@ -41,7 +41,10 @@ export const deliveryLockFlow: SeedFlow = {
         type: "criteria_router",
         x: 460,
         y: 100,
-        data: { rules: [{ branch: "yes", field: "last_button", op: "eq", value: "Amend Date" }] },
+        // "Amend Date" on the single-order openers, "Amend Date(s)" on the
+        // multi-order ones (shared.ts OPENER_AMEND_ANY_BTN): both are a late
+        // amend, so match the word, not the exact label.
+        data: { rules: [{ branch: "yes", field: "last_button", op: "contains", value: "Amend" }] },
       },
       { id: "locked", type: "send_text", x: 680, y: 60, data: { message: LOCKED } },
       { id: "stop", type: "end", x: 900, y: 160, data: {} },
