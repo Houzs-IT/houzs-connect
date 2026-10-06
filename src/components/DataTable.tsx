@@ -3,7 +3,8 @@
 // The list table every Connect page uses, after the Houzs ERP's DataTable:
 // a search box over the rows, click a header to sort, a funnel on each
 // header to sort A→Z / Z→A or tick which values to show (with counts,
-// Select all / Invert / Clear), and header edges to drag for column widths.
+// Select all / Invert / Clear), header edges to drag for column widths, and
+// right-click / "Columns" to freeze or hide columns.
 //
 // Rows come in already rendered: a server page builds each cell as JSX and
 // passes it with the plain values this table sorts, searches and filters on.
@@ -162,53 +163,101 @@ export function useDataTable(
 
 export type DataTableState = ReturnType<typeof useDataTable>;
 
-// ── Column widths ───────────────────────────────────────────
-// As in the Houzs ERP: drag a header's right edge to resize a column,
-// double-click it to fit the column to its content. The table opens at its
-// natural layout; those header widths are read once and the table switches to
-// a fixed layout, so resizing one column never moves the others (a blank
-// last column takes the slack). Dragged widths are this viewer's, kept in
-// this browser per table (`dt:widths:v2:<stateKey>`; v1 held widths saved
-// while #102 collapsed `max-w-0` columns to 64px, so it is not read).
+// ── Column layout: widths, frozen and hidden columns ─────────
+// As in the Houzs ERP. Drag a header's right edge to resize a column,
+// double-click it to fit the column to its content. Right-click a header (or
+// open "Columns") to freeze columns at the left edge, hide a column, or bring
+// a hidden one back.
+//
+// The table opens at its natural layout; those header widths are read once
+// and the table switches to a fixed layout, so resizing one column never
+// moves the others (a blank last column takes the slack). Frozen columns move
+// to the front, in page order, and stick while the table scrolls sideways.
+//
+// All of it is this viewer's, kept in this browser per table:
+// `dt:widths:v2:<stateKey>` (v1 held widths saved while #102 collapsed
+// `max-w-0` columns to 64px, so it is not read) and `dt:cols:<stateKey>`
+// ({ hidden, pinned }).
 
 const MIN_COL = 64;
 const MAX_FIT = 800;
 
-type Measured = { sig: string; widths: Record<string, number>; extra: number };
+type Measured = { sig: string; widths: Record<string, number>; extra: number; lead: number };
+type ColState = { hidden: string[]; pinned: string[] };
+/** How a row is painted, so a frozen cell can paint the same (it needs a solid background). */
+export type RowLook = "active" | "selected" | undefined;
+
+function readJson(key: string): unknown {
+  try {
+    return JSON.parse(localStorage.getItem(key) ?? "null");
+  } catch {
+    return null;
+  }
+}
+function writeJson(key: string | null, value: unknown) {
+  if (!key) return;
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+  } catch {}
+}
+const strings = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : []);
 
 /**
- * Resizable columns for a table: pass the <table>'s ref, put `tableStyle` on
- * it, `headProps(key)` and `handle(key)` on each data column's <th> (which
- * needs `relative`), and a `<th />` / `<td />` filler before any trailing
- * non-data column while `fixed`.
+ * Column layout for a table. Pass the <table>'s ref and every column the page
+ * offers; render `cols` (visible, frozen first) instead of them. Put
+ * `tableStyle` / `tableClass` on the <table>, `headProps(key)` and
+ * `handle(key)` on each data column's <th>, `cellProps(key, look)` on each
+ * data <td>, `leadProps(look)` on a leading non-data cell (a checkbox), a
+ * `<th />` / `<td />` filler before any trailing non-data column while
+ * `fixed`, and `menu` once.
  */
-export function useColumnWidths(
+export function useColumnLayout(
   tableRef: React.RefObject<HTMLTableElement | null>,
   stateKey: string | undefined,
-  keys: string[],
+  columns: DataColumn[],
   enabled = true
 ) {
   const { t } = useShell();
-  const storageKey = enabled && stateKey ? `dt:widths:v2:${stateKey}` : null;
+  const L = t.table;
+  const widthKey = enabled && stateKey ? `dt:widths:v2:${stateKey}` : null;
+  const colsKey = enabled && stateKey ? `dt:cols:${stateKey}` : null;
   const [stored, setStored] = useState<Record<string, number>>({});
   const storedRef = useRef(stored);
+  const [state, setState] = useState<ColState>({ hidden: [], pinned: [] });
   const [measured, setMeasured] = useState<Measured | null>(null);
-  const sig = keys.join("\u0001");
+  const [menu, setMenu] = useState<{ key: string; x: number; y: number } | null>(null);
+
+  // Visible columns, frozen ones first (in page order). Never hide them all.
+  const hiddenSet = new Set(state.hidden);
+  let visible = enabled ? columns.filter((c) => !hiddenSet.has(c.key)) : columns;
+  if (!visible.length) visible = columns.slice(0, 1);
+  const pinnedSet = new Set(enabled ? state.pinned : []);
+  const frozen = visible.filter((c) => pinnedSet.has(c.key));
+  const cols = [...frozen, ...visible.filter((c) => !pinnedSet.has(c.key))];
+  const sig = cols.map((c) => c.key).join("\u0001");
   const fixed = enabled && measured?.sig === sig;
 
   // Restore after mount: the server render has no storage, and the first
   // client render must match it.
   useEffect(() => {
-    if (!storageKey) return;
-    try {
-      if (stateKey) localStorage.removeItem(`dt:widths:${stateKey}`); // the v1 key, see above
-      const raw = JSON.parse(localStorage.getItem(storageKey) ?? "{}") as Record<string, unknown>;
-      const clean: Record<string, number> = {};
+    if (!widthKey && !colsKey) return;
+    if (stateKey) {
+      try {
+        localStorage.removeItem(`dt:widths:${stateKey}`); // the v1 key, see above
+      } catch {}
+    }
+    const raw = widthKey ? readJson(widthKey) : null;
+    const clean: Record<string, number> = {};
+    if (raw && typeof raw === "object") {
       for (const [k, v] of Object.entries(raw)) if (typeof v === "number" && v >= MIN_COL && v <= 2000) clean[k] = Math.round(v);
-      storedRef.current = clean;
-      setStored(clean); // eslint-disable-line react-hooks/set-state-in-effect -- one-time restore from this browser's storage
-    } catch {}
-  }, [storageKey, stateKey]);
+    }
+    const cs = colsKey ? (readJson(colsKey) as Partial<ColState> | null) : null;
+    storedRef.current = clean;
+    /* eslint-disable react-hooks/set-state-in-effect -- one-time restore from this browser's storage */
+    setStored(clean);
+    setState({ hidden: strings(cs?.hidden), pinned: strings(cs?.pinned) });
+    /* eslint-enable react-hooks/set-state-in-effect */
+  }, [widthKey, colsKey, stateKey]);
 
   // Read the natural layout once (again when the columns change), before paint.
   useLayoutEffect(() => {
@@ -216,6 +265,7 @@ export function useColumnWidths(
     const table = tableRef.current;
     const heads = table?.querySelectorAll<HTMLElement>("thead th[data-col-key]");
     if (!table || !heads?.length) return;
+    const box = table.getBoundingClientRect();
     const widths: Record<string, number> = {};
     let sum = 0;
     for (const th of heads) {
@@ -224,22 +274,33 @@ export function useColumnWidths(
       widths[th.dataset.colKey!] = Math.max(MIN_COL, Math.round(w));
       sum += w;
     }
-    const extra = Math.max(0, Math.round(table.getBoundingClientRect().width - sum));
-    setMeasured({ sig, widths, extra });
+    const extra = Math.max(0, Math.round(box.width - sum));
+    const lead = Math.max(0, Math.round(heads[0].getBoundingClientRect().left - box.left));
+    setMeasured({ sig, widths, extra, lead });
   }, [enabled, fixed, sig, tableRef]);
 
-  const save = (next: Record<string, number>, persist: boolean) => {
+  const saveWidths = (next: Record<string, number>, persist: boolean) => {
     storedRef.current = next;
     setStored(next);
-    if (persist && storageKey) {
-      try {
-        localStorage.setItem(storageKey, JSON.stringify(next));
-      } catch {}
-    }
+    if (persist) writeJson(widthKey, next);
+  };
+  const saveState = (next: ColState) => {
+    setState(next);
+    writeJson(colsKey, next);
   };
 
   const widthOf = (key: string): number | undefined => stored[key] ?? (fixed ? measured!.widths[key] : undefined);
-  const total = fixed ? keys.reduce((n, k) => n + (widthOf(k) ?? MIN_COL), 0) + measured!.extra : 0;
+  const total = fixed ? cols.reduce((n, c) => n + (widthOf(c.key) ?? MIN_COL), 0) + measured!.extra : 0;
+  // Left offset of each frozen column: the leading non-data cells, then the frozen ones before it.
+  const leftOf = new Map<string, number>();
+  if (fixed && frozen.length) {
+    let x = measured!.lead;
+    for (const c of frozen) {
+      leftOf.set(c.key, x);
+      x += widthOf(c.key) ?? MIN_COL;
+    }
+  }
+  const lastFrozen = frozen[frozen.length - 1]?.key;
 
   const start = (e: React.PointerEvent, key: string) => {
     e.preventDefault();
@@ -249,13 +310,13 @@ export function useColumnWidths(
     const startX = e.clientX;
     const startW = th.getBoundingClientRect().width;
     const move = (ev: PointerEvent) => {
-      save({ ...storedRef.current, [key]: Math.max(MIN_COL, Math.round(startW + ev.clientX - startX)) }, false);
+      saveWidths({ ...storedRef.current, [key]: Math.max(MIN_COL, Math.round(startW + ev.clientX - startX)) }, false);
     };
     const end = () => {
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", end);
       window.removeEventListener("pointercancel", end);
-      save(storedRef.current, true); // write storage once, when the drag ends
+      saveWidths(storedRef.current, true); // write storage once, when the drag ends
     };
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", end);
@@ -276,16 +337,45 @@ export function useColumnWidths(
     table.style.tableLayout = "auto";
     table.style.width = "max-content";
     table.style.minWidth = "0";
-    Object.assign(th.style, { width: "", minWidth: "", maxWidth: "" });
+    Object.assign(th.style, { width: "", minWidth: "", maxWidth: "", position: "" });
     for (const c of cells) c.style.whiteSpace = "nowrap";
     const natural = th.getBoundingClientRect().width;
     cells.forEach((c, i) => (c.style.whiteSpace = wraps[i]));
     Object.assign(table.style, { tableLayout: was.layout, width: was.width, minWidth: was.min });
     th.style.cssText = was.th;
-    save({ ...storedRef.current, [key]: Math.min(MAX_FIT, Math.max(MIN_COL, Math.ceil(natural))) }, true);
+    saveWidths({ ...storedRef.current, [key]: Math.min(MAX_FIT, Math.max(MIN_COL, Math.ceil(natural))) }, true);
   };
 
+  const hide = (key: string) => {
+    if (visible.length <= 1) return;
+    saveState({ hidden: [...state.hidden.filter((k) => k !== key), key], pinned: state.pinned.filter((k) => k !== key) });
+  };
+  const show = (key: string) => saveState({ ...state, hidden: state.hidden.filter((k) => k !== key) });
+  const togglePin = (key: string) =>
+    saveState({ ...state, pinned: pinnedSet.has(key) ? state.pinned.filter((k) => k !== key) : [...state.pinned, key] });
+  /** Freeze every visible column from the first through this one (as on screen). */
+  const freezeUpTo = (key: string) => {
+    const i = cols.findIndex((c) => c.key === key);
+    if (i >= 0) saveState({ ...state, pinned: cols.slice(0, i + 1).map((c) => c.key) });
+  };
+  const unfreeze = () => saveState({ ...state, pinned: [] });
+  const reset = () => {
+    saveState({ hidden: [], pinned: [] });
+    saveWidths({}, true);
+  };
+
+  const solid = (look: RowLook) =>
+    look === "active"
+      ? "bg-[#eef6f8]"
+      : look === "selected"
+        ? "bg-[var(--color-surface-2)]"
+        : "bg-[var(--color-surface)] group-hover/row:bg-[var(--color-surface-2)]";
+
+  const labelled = columns.filter((c) => c.label);
+
   return {
+    /** The columns to render, in order: visible ones, frozen first. */
+    cols,
     /** Laid out at fixed widths (render the filler cells). */
     fixed,
     tableStyle: fixed ? ({ tableLayout: "fixed", width: "100%", minWidth: total } as const) : undefined,
@@ -298,15 +388,45 @@ export function useColumnWidths(
     tableClass: fixed ? "[&_td]:max-w-none [&_th]:max-w-none" : "",
     headProps: (key: string) => {
       const w = widthOf(key);
-      return { "data-col-key": key, style: w ? { width: w, minWidth: w, maxWidth: w } : undefined };
+      const left = leftOf.get(key);
+      return {
+        "data-col-key": key,
+        style: {
+          ...(w ? { width: w, minWidth: w, maxWidth: w } : {}),
+          ...(left !== undefined ? { position: "sticky" as const, left, zIndex: 20 } : {}),
+        },
+        onContextMenu: enabled
+          ? (e: React.MouseEvent) => {
+              e.preventDefault();
+              setMenu({ key, x: e.clientX, y: e.clientY });
+            }
+          : undefined,
+        /** Extra classes: a frozen header needs a background, the last one an edge. */
+        frozenClass:
+          left !== undefined ? `bg-[var(--color-surface)] ${key === lastFrozen ? "shadow-[inset_-1px_0_0_var(--color-border)]" : ""}` : "",
+      };
     },
+    /** A data <td>: sticky and painted like its row while its column is frozen. */
+    cellProps: (key: string, look?: RowLook) => {
+      const left = leftOf.get(key);
+      if (left === undefined) return { style: undefined, className: "" };
+      return {
+        style: { position: "sticky" as const, left, zIndex: 10 },
+        className: `${solid(look)} ${key === lastFrozen ? "shadow-[inset_-1px_0_0_var(--color-border)]" : ""}`,
+      };
+    },
+    /** A leading non-data cell (a checkbox column): sticks at the left while anything is frozen. */
+    leadProps: (look?: RowLook, head = false) =>
+      leftOf.size
+        ? { style: { position: "sticky" as const, left: 0, zIndex: head ? 20 : 10 }, className: head ? "bg-[var(--color-surface)]" : solid(look) }
+        : { style: undefined, className: "" },
     handle: (key: string) =>
       enabled ? (
         <span
           role="separator"
           aria-orientation="vertical"
-          aria-label={t.table.resize}
-          title={t.table.resize}
+          aria-label={L.resize}
+          title={L.resize}
           onPointerDown={(e) => start(e, key)}
           onClick={(e) => e.stopPropagation()}
           onDoubleClick={(e) => {
@@ -316,10 +436,253 @@ export function useColumnWidths(
           className="absolute right-0 top-0 z-10 h-full w-1.5 cursor-col-resize touch-none select-none opacity-0 transition-opacity hover:bg-[var(--color-accent)] hover:opacity-40 group-hover/th:opacity-100 group-hover/th:bg-[var(--color-border-strong)]"
         />
       ) : null,
+    /** The header right-click menu; render once. */
+    menu:
+      menu && enabled ? (
+        <ColumnMenu
+          at={menu}
+          column={columns.find((c) => c.key === menu.key)}
+          frozen={pinnedSet.has(menu.key)}
+          anyFrozen={pinnedSet.size > 0}
+          canHide={visible.length > 1 && !!columns.find((c) => c.key === menu.key)?.label}
+          hidden={labelled.filter((c) => hiddenSet.has(c.key))}
+          onFreezeUpTo={() => freezeUpTo(menu.key)}
+          onTogglePin={() => togglePin(menu.key)}
+          onUnfreeze={unfreeze}
+          onFit={() => fit(menu.key)}
+          onHide={() => hide(menu.key)}
+          onShow={show}
+          onClose={() => setMenu(null)}
+        />
+      ) : null,
+    /** For the Columns panel: every column with a label, and what it can do. */
+    panel: {
+      columns: labelled,
+      isHidden: (key: string) => hiddenSet.has(key),
+      isFrozen: (key: string) => pinnedSet.has(key),
+      canHide: visible.length > 1,
+      changed: state.hidden.length > 0 || state.pinned.length > 0 || Object.keys(stored).length > 0,
+      hide,
+      show,
+      togglePin,
+      reset,
+    },
   };
 }
 
-export type ColumnWidths = ReturnType<typeof useColumnWidths>;
+export type ColumnLayout = ReturnType<typeof useColumnLayout>;
+
+const PinIcon = () => (
+  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+    <path d="M12 17v5M9 3h6l-1 6 4 4H6l4-4z" />
+  </svg>
+);
+const EyeIcon = () => (
+  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden>
+    <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z" />
+    <circle cx="12" cy="12" r="3" />
+  </svg>
+);
+
+/** Right-click on a header: freeze, fit, hide, and bring hidden columns back. */
+function ColumnMenu({
+  at,
+  column,
+  frozen,
+  anyFrozen,
+  canHide,
+  hidden,
+  onFreezeUpTo,
+  onTogglePin,
+  onUnfreeze,
+  onFit,
+  onHide,
+  onShow,
+  onClose,
+}: {
+  at: { x: number; y: number };
+  column: DataColumn | undefined;
+  frozen: boolean;
+  anyFrozen: boolean;
+  canHide: boolean;
+  hidden: DataColumn[];
+  onFreezeUpTo: () => void;
+  onTogglePin: () => void;
+  onUnfreeze: () => void;
+  onFit: () => void;
+  onHide: () => void;
+  onShow: (key: string) => void;
+  onClose: () => void;
+}) {
+  const { t } = useShell();
+  const L = t.table;
+  const ref = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState({ top: at.y, left: at.x });
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    setPos({ top: Math.max(8, Math.min(at.y, window.innerHeight - r.height - 8)), left: Math.max(8, Math.min(at.x, window.innerWidth - r.width - 8)) });
+  }, [at]);
+  useEffect(() => {
+    const away = (e: Event) => {
+      if (!ref.current?.contains(e.target as Node)) onClose();
+    };
+    const esc = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    document.addEventListener("mousedown", away);
+    document.addEventListener("keydown", esc);
+    window.addEventListener("scroll", away, true);
+    return () => {
+      document.removeEventListener("mousedown", away);
+      document.removeEventListener("keydown", esc);
+      window.removeEventListener("scroll", away, true);
+    };
+  }, [onClose]);
+  if (typeof document === "undefined") return null;
+  const item =
+    "flex w-full items-center gap-2 rounded-[6px] px-2.5 py-1.5 text-left text-[12.5px] text-[var(--color-ink)] hover:bg-[var(--color-surface-2)] disabled:cursor-not-allowed disabled:text-[var(--color-faint)] disabled:hover:bg-transparent";
+  const run = (fn: () => void) => () => {
+    fn();
+    onClose();
+  };
+  return createPortal(
+    <div
+      ref={ref}
+      role="menu"
+      onContextMenu={(e) => e.preventDefault()}
+      className="fixed z-[120] max-h-[calc(100vh-16px)] min-w-[200px] overflow-y-auto rounded-[10px] border border-[var(--color-border)] bg-[var(--color-surface)] p-1.5 shadow-[var(--shadow-popover)]"
+      style={pos}
+    >
+      {column?.label && <div className="truncate px-2.5 pb-1 pt-0.5 text-[10.5px] font-semibold uppercase tracking-[0.08em] text-[var(--color-faint)]">{column.label}</div>}
+      <button type="button" className={item} onClick={run(onFreezeUpTo)}>
+        <span className="w-4 text-center">⇤</span>
+        {L.freezeUpTo}
+      </button>
+      <button type="button" className={item} onClick={run(onTogglePin)}>
+        <span className="grid w-4 place-items-center">
+          <PinIcon />
+        </span>
+        {frozen ? L.unfreezeCol : L.freezeCol}
+      </button>
+      {anyFrozen && (
+        <button type="button" className={item} onClick={run(onUnfreeze)}>
+          <span className="w-4 text-center">↺</span>
+          {L.unfreezeAll}
+        </button>
+      )}
+      <div className="my-1 border-t border-[var(--color-border-subtle)]" />
+      <button type="button" className={item} onClick={run(onFit)}>
+        <span className="w-4 text-center">↔</span>
+        {L.fitWidth}
+      </button>
+      <button type="button" className={item} disabled={!canHide} onClick={run(onHide)}>
+        <span className="w-4 text-center">⊘</span>
+        {L.hideCol}
+      </button>
+      {hidden.length > 0 && (
+        <>
+          <div className="my-1 border-t border-[var(--color-border-subtle)]" />
+          <div className="px-2.5 py-1 text-[10.5px] font-semibold uppercase tracking-[0.08em] text-[var(--color-faint)]">{L.hiddenCols}</div>
+          {hidden.map((c) => (
+            <button key={c.key} type="button" className={item} onClick={run(() => onShow(c.key))}>
+              <span className="grid w-4 place-items-center">
+                <EyeIcon />
+              </span>
+              {fmt(L.showCol, { col: c.label })}
+            </button>
+          ))}
+        </>
+      )}
+    </div>,
+    document.body
+  );
+}
+
+/** The Columns panel's list: show / hide and freeze each column, and reset. */
+export function ColumnsList({ layout }: { layout: ColumnLayout }) {
+  const { t } = useShell();
+  const L = t.table;
+  const p = layout.panel;
+  return (
+    <div className="flex flex-col">
+      {p.columns.map((c) => {
+        const hidden = p.isHidden(c.key);
+        const frozen = p.isFrozen(c.key);
+        return (
+          <div key={c.key} className="flex items-center gap-2 rounded-[6px] px-2 py-1 hover:bg-[var(--color-surface-2)]">
+            <label className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 py-0.5 text-[12.5px] text-[var(--color-ink)]">
+              <input
+                type="checkbox"
+                checked={!hidden}
+                disabled={!hidden && !p.canHide}
+                onChange={() => (hidden ? p.show(c.key) : p.hide(c.key))}
+                className="accent-[var(--color-accent)]"
+              />
+              <span className="truncate">{c.label}</span>
+            </label>
+            <button
+              type="button"
+              disabled={hidden}
+              onClick={() => p.togglePin(c.key)}
+              title={frozen ? L.unfreezeCol : L.freezeCol}
+              aria-label={frozen ? L.unfreezeCol : L.freezeCol}
+              aria-pressed={frozen}
+              className={`grid h-6 w-6 shrink-0 place-items-center rounded-[5px] text-[12px] disabled:opacity-30 ${
+                frozen ? "bg-[var(--color-accent-soft)] text-[var(--color-accent)]" : "text-[var(--color-faint)] hover:bg-[var(--color-surface-dim)]"
+              }`}
+            >
+              <PinIcon />
+            </button>
+          </div>
+        );
+      })}
+      <p className="px-2 pb-1 pt-2 text-[11px] leading-snug text-[var(--color-faint)]">{L.columnsHint}</p>
+      {p.changed && (
+        <button type="button" onClick={p.reset} className="mx-2 mb-1 self-start text-[12px] font-semibold text-[var(--color-accent)] hover:underline">
+          {L.resetLayout}
+        </button>
+      )}
+    </div>
+  );
+}
+
+/** "Columns" — a button opening ColumnsList. */
+export function ColumnsButton({ layout }: { layout: ColumnLayout }) {
+  const { t } = useShell();
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const away = (e: MouseEvent) => {
+      if (!ref.current?.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", away);
+    return () => document.removeEventListener("mousedown", away);
+  }, [open]);
+  const p = layout.panel;
+  const off = p.columns.filter((c) => p.isHidden(c.key)).length;
+  return (
+    <div ref={ref} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex h-[34px] items-center gap-1.5 rounded-[8px] border border-[var(--color-border)] bg-[var(--color-surface)] px-3 text-[12.5px] font-medium text-[var(--color-ink)] hover:bg-[var(--color-surface-2)]"
+      >
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden>
+          <rect x="3" y="4" width="18" height="16" rx="2" />
+          <path d="M9 4v16M15 4v16" />
+        </svg>
+        {t.table.columns}
+        {off > 0 && <span className="rounded-full bg-[var(--color-surface-2)] px-1.5 text-[11px] text-[var(--color-muted)]">{fmt(t.table.hiddenN, { n: off })}</span>}
+      </button>
+      {open && (
+        <div className="absolute right-0 z-30 mt-1 w-60 rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)] p-1.5 shadow-[var(--shadow-popover)]">
+          <ColumnsList layout={layout} />
+        </div>
+      )}
+    </div>
+  );
+}
 
 /** A header's contents: the label (click to sort) and its funnel. Goes inside a <th>. */
 export function DataHead({ column: c, table }: { column: DataColumn; table: DataTableState }) {
@@ -455,7 +818,7 @@ export function DataTable({
   /** Remember search / sort / filters for this table in this browser tab (and column widths in this browser). */
   stateKey?: string;
   className?: string;
-  /** Drag a header edge to resize its column (on by default). */
+  /** Column tools — resize, freeze, hide (on by default). */
   resizable?: boolean;
 }) {
   const { t } = useShell();
@@ -464,15 +827,23 @@ export function DataTable({
   const table = useDataTable(rows, columns, { initialSort, stateKey });
   const { shown, filtered } = table;
   const tableRef = useRef<HTMLTableElement>(null);
-  const cw = useColumnWidths(tableRef, stateKey, columns.map((c) => c.key), resizable);
+  const cw = useColumnLayout(tableRef, stateKey, columns, resizable);
+  // The Columns button only where there is something to choose from.
+  const columnsButton = resizable && cw.panel.columns.length >= 4;
+  const filler = cw.fixed ? 1 : 0;
 
   return (
     <div className={`flex flex-col gap-2.5 ${className}`}>
-      {(search || toolbar || filtered) && (
+      {(search || toolbar || filtered || columnsButton) && (
         <div className="flex flex-wrap items-center gap-2">
           {search && <DataSearch table={table} placeholder={searchPlaceholder} />}
           <DataCount table={table} />
-          {toolbar && <div className="ml-auto flex flex-wrap items-center gap-2">{toolbar}</div>}
+          {(toolbar || columnsButton) && (
+            <div className="ml-auto flex flex-wrap items-center gap-2">
+              {toolbar}
+              {columnsButton && <ColumnsButton layout={cw} />}
+            </div>
+          )}
         </div>
       )}
 
@@ -480,16 +851,17 @@ export function DataTable({
         <table ref={tableRef} className={`w-full text-left text-[13px] ${cw.tableClass}`} style={cw.tableStyle ?? { minWidth }}>
           <thead>
             <tr className="border-b border-[var(--color-border)]">
-              {columns.map((c) => {
+              {cw.cols.map((c) => {
                 const sorted = table.sort?.key === c.key ? table.sort.dir : null;
+                const { frozenClass, ...head } = cw.headProps(c.key);
                 return (
                   <th
                     key={c.key}
-                    {...cw.headProps(c.key)}
+                    {...head}
                     aria-sort={sorted === "asc" ? "ascending" : sorted === "desc" ? "descending" : undefined}
                     className={`group/th relative whitespace-nowrap px-4 py-2.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--color-faint)] ${
                       cw.fixed ? "overflow-hidden" : ""
-                    } ${c.className ?? ""}`}
+                    } ${c.className ?? ""} ${frozenClass}`}
                   >
                     <DataHead column={c} table={table} />
                     {cw.handle(c.key)}
@@ -512,28 +884,32 @@ export function DataTable({
                       }
                     : undefined
                 }
-                className={`border-b border-[var(--color-border-subtle)] align-middle last:border-0 ${r.href ? "cursor-pointer" : ""} ${
+                className={`group/row border-b border-[var(--color-border-subtle)] align-middle last:border-0 ${r.href ? "cursor-pointer" : ""} ${
                   r.active
                     ? "bg-[rgba(224,239,242,0.55)] shadow-[inset_2px_0_0_var(--color-accent)]"
                     : "hover:bg-[var(--color-surface-2)]"
                 }`}
               >
-                {columns.map((c) => (
-                  <td
-                    key={c.key}
-                    className={`px-4 py-2.5 ${c.align === "center" ? "text-center" : c.align === "right" ? "text-right" : ""} ${
-                      cw.fixed ? "overflow-hidden break-words" : ""
-                    } ${c.className ?? ""}`}
-                  >
-                    {r.cells[c.key] ?? <span className="text-[var(--color-faint)]">—</span>}
-                  </td>
-                ))}
+                {cw.cols.map((c) => {
+                  const cell = cw.cellProps(c.key, r.active ? "active" : undefined);
+                  return (
+                    <td
+                      key={c.key}
+                      style={cell.style}
+                      className={`px-4 py-2.5 ${c.align === "center" ? "text-center" : c.align === "right" ? "text-right" : ""} ${
+                        cw.fixed ? "overflow-hidden break-words" : ""
+                      } ${c.className ?? ""} ${cell.className}`}
+                    >
+                      {r.cells[c.key] ?? <span className="text-[var(--color-faint)]">—</span>}
+                    </td>
+                  );
+                })}
                 {cw.fixed && <td className="p-0" />}
               </tr>
             ))}
             {shown.length === 0 && (
               <tr>
-                <td colSpan={columns.length + (cw.fixed ? 1 : 0)} className="px-4 py-10 text-center text-[13px] text-[var(--color-faint)]">
+                <td colSpan={cw.cols.length + filler} className="px-4 py-10 text-center text-[13px] text-[var(--color-faint)]">
                   {rows.length === 0 ? (empty ?? L.none) : L.noMatch}
                 </td>
               </tr>
@@ -543,6 +919,7 @@ export function DataTable({
       </div>
 
       <DataMenus table={table} />
+      {cw.menu}
     </div>
   );
 }

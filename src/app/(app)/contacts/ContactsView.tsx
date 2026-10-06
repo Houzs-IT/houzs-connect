@@ -2,11 +2,11 @@
 
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { fmt } from "@/lib/i18n/dict";
+import { fmt, type Dict } from "@/lib/i18n/dict";
 import { initials, tint } from "@/lib/format";
 import { useShell } from "@/components/shell/ShellProvider";
 import { IconClose, IconDots, IconSearch } from "@/components/icons";
-import { DataCount, DataHead, DataMenus, useColumnWidths, useDataTable, type DataColumn, type DataRow } from "@/components/DataTable";
+import { ColumnsList, DataCount, DataHead, DataMenus, useColumnLayout, useDataTable, type DataColumn, type DataRow } from "@/components/DataTable";
 import { bulkBlockContacts, bulkTagContacts, mergeContacts, setContactBlocked } from "./actions";
 import { DeleteContactButton } from "./DeleteContactButton";
 
@@ -293,7 +293,7 @@ export function ContactsView({
   );
   const table = useDataTable(dataRows, columns, { stateKey: "contacts" });
   const tableRef = useRef<HTMLTableElement>(null);
-  const cw = useColumnWidths(tableRef, "contacts", columns.map((c) => c.key));
+  const cw = useColumnLayout(tableRef, "contacts", columns);
   const filler = cw.fixed ? 1 : 0;
   const byId = new Map(rows.map((r) => [r.id, r]));
   const visible = table.shown.map((d) => byId.get(d.id)).filter((r): r is ContactRow => !!r);
@@ -348,7 +348,10 @@ export function ContactsView({
             {s.columns}
           </button>
           {colsOpen && (
-            <div className="absolute right-0 z-30 mt-1 w-52 rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)] p-2 shadow-[var(--shadow-popover)]">
+            <div className="absolute right-0 z-30 mt-1 w-60 rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)] p-2 shadow-[var(--shadow-popover)]">
+              <ColumnsList layout={cw} />
+              <div className="mx-1 my-1.5 border-t border-[var(--color-border-subtle)]" />
+              <div className="px-2 pb-1 text-[10.5px] font-semibold uppercase tracking-[0.08em] text-[var(--color-faint)]">{s.moreFields}</div>
               {OPTIONAL.map((c) => (
                 <label key={c} className="flex cursor-pointer items-center gap-2 rounded-[6px] px-2 py-1.5 text-[12.5px] hover:bg-[var(--color-surface-2)]">
                   <input
@@ -440,7 +443,7 @@ export function ContactsView({
           <table ref={tableRef} style={cw.tableStyle} className={`w-full min-w-[700px] border-collapse [&_th]:whitespace-nowrap text-[13px] ${cw.tableClass}`}>
             <thead className="sticky top-0 z-10 bg-[var(--color-surface)]">
               <tr className="border-b border-[var(--color-border)]">
-                <th className="w-10 px-3">
+                <th className={`w-10 px-3 ${cw.leadProps(undefined, true).className}`} style={cw.leadProps(undefined, true).style}>
                   <input
                     type="checkbox"
                     aria-label="Select all"
@@ -449,12 +452,15 @@ export function ContactsView({
                     className="h-4 w-4 accent-[var(--color-accent)]"
                   />
                 </th>
-                {columns.map((c) => (
-                  <th key={c.key} {...cw.headProps(c.key)} className={`${th} group/th relative ${cw.fixed ? "overflow-hidden" : ""}`}>
-                    <DataHead column={c} table={table} />
-                    {cw.handle(c.key)}
-                  </th>
-                ))}
+                {cw.cols.map((c) => {
+                  const { frozenClass, ...head } = cw.headProps(c.key);
+                  return (
+                    <th key={c.key} {...head} className={`${th} group/th relative ${cw.fixed ? "overflow-hidden" : ""} ${frozenClass}`}>
+                      <DataHead column={c} table={table} />
+                      {cw.handle(c.key)}
+                    </th>
+                  );
+                })}
                 {cw.fixed && <th aria-hidden className="p-0" />}
                 <th className="w-10" />
               </tr>
@@ -462,14 +468,14 @@ export function ContactsView({
             <tbody>
               {rows.length > 0 && visible.length === 0 && (
                 <tr>
-                  <td colSpan={8 + extra.length + filler} className="px-4 py-10 text-center text-[var(--color-faint)]">
+                  <td colSpan={cw.cols.length + 2 + filler} className="px-4 py-10 text-center text-[var(--color-faint)]">
                     {t.table.noMatch}
                   </td>
                 </tr>
               )}
               {rows.length === 0 && (
                 <tr>
-                  <td colSpan={8 + extra.length + filler} className="px-4 py-10 text-center text-[var(--color-faint)]">
+                  <td colSpan={cw.cols.length + 2 + filler} className="px-4 py-10 text-center text-[var(--color-faint)]">
                     {q ? fmt(s.noMatch, { q }) : s.none}
                   </td>
                 </tr>
@@ -477,80 +483,28 @@ export function ContactsView({
               {visible.map((r) => {
                 const on = r.id === activeId;
                 const sel = selected.has(r.id);
+                const look = on ? "active" : sel ? "selected" : undefined;
+                const lead = cw.leadProps(look);
                 return (
                   <tr
                     key={r.id}
                     onClick={() => go({ id: on ? null : r.id, page: params.get("page") })}
-                    className={`relative cursor-pointer border-b border-[var(--color-border-subtle)] ${
+                    className={`group/row relative cursor-pointer border-b border-[var(--color-border-subtle)] ${
                       on ? "bg-[rgba(224,239,242,0.55)]" : sel ? "bg-[var(--color-surface-2)]" : "hover:bg-[var(--color-surface-2)]"
                     }`}
                   >
-                    <td className="relative px-3" onClick={(e) => e.stopPropagation()}>
+                    <td className={`relative px-3 ${lead.className}`} style={lead.style} onClick={(e) => e.stopPropagation()}>
                       {on && <span className="absolute inset-y-0 left-0 w-[2px] bg-[var(--color-accent)]" />}
                       <input type="checkbox" aria-label={r.name} checked={sel} onChange={() => toggle(r.id)} className="h-4 w-4 accent-[var(--color-accent)]" />
                     </td>
-                    <td className="max-w-[210px] px-3 py-2.5">
-                      <div className="flex items-center gap-2.5">
-                        <Avatar name={r.name} blocked={r.blocked} />
-                        <div className="min-w-0">
-                          <div className="flex items-center gap-1.5">
-                            <span className="truncate font-medium text-[var(--color-ink)]">{r.name}</span>
-                            {r.blocked && (
-                              <span className="rounded-full bg-[var(--color-danger-soft)] px-1.5 text-[9.5px] font-semibold uppercase tracking-[0.06em] text-[var(--color-danger)]">
-                                {s.blockedBadge}
-                              </span>
-                            )}
-                          </div>
-                          <div className="text-[11.5px] tabular-nums text-[var(--color-faint)]">{r.phone}</div>
-                        </div>
-                      </div>
-                    </td>
-                    <td className="px-3 py-2.5">
-                      {r.orderRef ? (
-                        <>
-                          <div className="font-semibold text-[var(--color-brand)]">{r.orderRef}</div>
-                          {r.orderSub && <div className="text-[11.5px] text-[var(--color-faint)]">{r.orderSub}</div>}
-                        </>
-                      ) : (
-                        <span className="text-[var(--color-brand)]">—</span>
-                      )}
-                    </td>
-                    <td className="px-3 py-2.5 uppercase text-[var(--color-ink)]">{r.sales ?? "—"}</td>
-                    <td className="px-3 py-2.5">
-                      <div className="flex flex-wrap gap-1">
-                        {r.tags.map((tg) => (
-                          <span key={tg.id} className="rounded-[4px] px-1.5 py-px text-[10.5px] font-medium" style={{ background: `${tg.color}1f`, color: tg.color }}>
-                            {tg.name}
-                          </span>
-                        ))}
-                      </div>
-                    </td>
-                    <td className="max-w-[170px] px-3 py-2.5">
-                      {r.last ? (
-                        <span className="flex items-center gap-1.5 text-[12.5px] text-[var(--color-muted)]">
-                          <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${r.last.inbound ? "bg-[var(--color-danger)]" : "bg-[var(--color-success)]"}`} />
-                          <span className="truncate">{r.last.body}</span>
-                        </span>
-                      ) : (
-                        <span className="text-[var(--color-faint)]">—</span>
-                      )}
-                    </td>
-                    <td className="whitespace-nowrap px-3 py-2.5 text-[12px] text-[var(--color-faint)]">{r.updated}</td>
-                    {extra.map((c) => (
-                      <td key={c} className="max-w-[200px] truncate px-3 py-2.5 text-[12.5px] text-[var(--color-muted)]">
-                        {c === "sourceUrl" && r.sourceUrl ? (
-                          <a href={r.sourceUrl} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()} className="text-[var(--color-accent)] hover:underline">
-                            {r.sourceUrl}
-                          </a>
-                        ) : c === "blocked" ? (
-                          r.blocked ? "✓" : "—"
-                        ) : c === "source" ? (
-                          (r.source ? (s.sources[r.source] ?? r.source) : "—")
-                        ) : (
-                          ((r as Record<string, unknown>)[c] as string | null) ?? "—"
-                        )}
-                      </td>
-                    ))}
+                    {cw.cols.map((c) => {
+                      const cell = cw.cellProps(c.key, look);
+                      return (
+                        <td key={c.key} className={`${CELL_CLASS[c.key] ?? EXTRA_CELL} ${cell.className}`} style={cell.style}>
+                          {contactCell(c.key, r, s)}
+                        </td>
+                      );
+                    })}
                     {cw.fixed && <td className="p-0" />}
                     <td className="px-2" onClick={(e) => e.stopPropagation()}>
                       <RowMenu row={r} onMerge={() => setMergeKeep(r)} />
@@ -589,6 +543,7 @@ export function ContactsView({
       </div>
 
       <DataMenus table={table} />
+      {cw.menu}
       {dupOpen && <DupReview pairs={duplicates} onClose={() => setDupOpen(false)} />}
       {mergeKeep && (
         <DupReview
@@ -717,4 +672,84 @@ function DupReview({ pairs, onClose }: { pairs: DupPair[]; onClose: () => void }
       </div>
     </div>
   );
+}
+
+// Each column's <td> classes and contents, by column key, so the table can
+// draw its columns in the viewer's order (frozen first) and skip hidden ones.
+const CELL_CLASS: Record<string, string> = {
+  name: "max-w-[210px] px-3 py-2.5",
+  order: "px-3 py-2.5",
+  sales: "px-3 py-2.5 uppercase text-[var(--color-ink)]",
+  tags: "px-3 py-2.5",
+  last: "max-w-[170px] px-3 py-2.5",
+  updated: "whitespace-nowrap px-3 py-2.5 text-[12px] text-[var(--color-faint)]",
+};
+const EXTRA_CELL = "max-w-[200px] truncate px-3 py-2.5 text-[12.5px] text-[var(--color-muted)]";
+
+function contactCell(key: string, r: ContactRow, s: Dict["contacts"]): React.ReactNode {
+  switch (key) {
+    case "name":
+      return (
+        <div className="flex items-center gap-2.5">
+          <Avatar name={r.name} blocked={r.blocked} />
+          <div className="min-w-0">
+            <div className="flex items-center gap-1.5">
+              <span className="truncate font-medium text-[var(--color-ink)]">{r.name}</span>
+              {r.blocked && (
+                <span className="rounded-full bg-[var(--color-danger-soft)] px-1.5 text-[9.5px] font-semibold uppercase tracking-[0.06em] text-[var(--color-danger)]">
+                  {s.blockedBadge}
+                </span>
+              )}
+            </div>
+            <div className="text-[11.5px] tabular-nums text-[var(--color-faint)]">{r.phone}</div>
+          </div>
+        </div>
+      );
+    case "order":
+      return r.orderRef ? (
+        <>
+          <div className="font-semibold text-[var(--color-brand)]">{r.orderRef}</div>
+          {r.orderSub && <div className="text-[11.5px] text-[var(--color-faint)]">{r.orderSub}</div>}
+        </>
+      ) : (
+        <span className="text-[var(--color-brand)]">—</span>
+      );
+    case "sales":
+      return r.sales ?? "—";
+    case "tags":
+      return (
+        <div className="flex flex-wrap gap-1">
+          {r.tags.map((tg) => (
+            <span key={tg.id} className="rounded-[4px] px-1.5 py-px text-[10.5px] font-medium" style={{ background: `${tg.color}1f`, color: tg.color }}>
+              {tg.name}
+            </span>
+          ))}
+        </div>
+      );
+    case "last":
+      return r.last ? (
+        <span className="flex items-center gap-1.5 text-[12.5px] text-[var(--color-muted)]">
+          <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${r.last.inbound ? "bg-[var(--color-danger)]" : "bg-[var(--color-success)]"}`} />
+          <span className="truncate">{r.last.body}</span>
+        </span>
+      ) : (
+        <span className="text-[var(--color-faint)]">—</span>
+      );
+    case "updated":
+      return r.updated;
+    case "sourceUrl":
+      return r.sourceUrl ? (
+        <a href={r.sourceUrl} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()} className="text-[var(--color-accent)] hover:underline">
+          {r.sourceUrl}
+        </a>
+      ) : (
+        "—"
+      );
+    case "blocked":
+      return r.blocked ? "✓" : "—";
+    case "source":
+      return r.source ? (s.sources[r.source] ?? r.source) : "—";
+    default:
+      return ((r as unknown as Record<string, unknown>)[key] as string | null) ?? "—";
+  }
 }
