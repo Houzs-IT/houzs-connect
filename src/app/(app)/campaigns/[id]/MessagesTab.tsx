@@ -210,7 +210,7 @@ export function MessagesTab({
       </div>
 
       <div className="overflow-x-auto">
-        <table ref={tableRef} style={cw.tableStyle} className="w-full min-w-[820px] text-left text-[13px]">
+        <table ref={tableRef} style={cw.tableStyle} className={`w-full min-w-[820px] text-left text-[13px] ${cw.tableClass}`}>
           <thead>
             <tr className="border-b border-[var(--color-border)]">
               {columns.map((c) => {

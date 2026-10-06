@@ -437,7 +437,7 @@ export function ContactsView({
         )}
 
         <div className="scroll-thin min-h-0 flex-1 overflow-auto">
-          <table ref={tableRef} style={cw.tableStyle} className="w-full min-w-[700px] border-collapse [&_th]:whitespace-nowrap text-[13px]">
+          <table ref={tableRef} style={cw.tableStyle} className={`w-full min-w-[700px] border-collapse [&_th]:whitespace-nowrap text-[13px] ${cw.tableClass}`}>
             <thead className="sticky top-0 z-10 bg-[var(--color-surface)]">
               <tr className="border-b border-[var(--color-border)]">
                 <th className="w-10 px-3">
