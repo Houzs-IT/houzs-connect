@@ -187,15 +187,23 @@ async function execNode(
       // whose PUBLISHED meta flow id is what's actually sent; flow_token = the run
       // id so the submission resumes THIS run. A missing / unpublished form sends
       // nothing and continues, so a not-yet-published form never hangs the flow.
+      //
+      // "Published" is the form's STATUS, not the presence of a flow id: a
+      // Publish that Meta refuses still records the DRAFT flow's id (so the next
+      // attempt adopts it instead of creating another), and sending that id is
+      // refused too — live 2026-10-07 the Property Details form (draft, id
+      // recorded, "Blocked by Integrity") was sent, Meta answered 139000, and
+      // the run sat waiting for a form the customer never got, so the button
+      // questions behind this node never ran.
       const formRow = d.formId
         ? await db.query.form.findFirst({ where: eq(formTable.id, d.formId) })
         : null;
-      const flowId = formRow?.metaFlowId ?? "";
+      const flowId = formRow?.status === "published" ? (formRow.metaFlowId ?? "") : "";
       if (!flowId) {
         await logStep(ctx.runId, { node: node.id, type: node.type, skipped: "form not published" });
         return { next: nextNodeId(ctx.graph, node.id) };
       }
-      await sendOutbound(ctx.conversationId, interpolate(d.message ?? "", varCtx), {
+      const sent = await sendOutbound(ctx.conversationId, interpolate(d.message ?? "", varCtx), {
         isBot: true,
         flow: {
           flowId,
@@ -204,6 +212,16 @@ async function execNode(
           screen: d.flowScreen || "FORM",
         },
       });
+      // A form Meta refused (or a blocked contact) never comes back filled in:
+      // waiting for it would hang the run. Record why and carry on to whatever
+      // follows — for the delivery flows, the same questions as buttons.
+      const sentRow = sent ? await db.query.message.findFirst({ where: eq(message.id, sent.id) }) : null;
+      if (!sentRow || sentRow.status === "FAILED") {
+        const reason =
+          (sentRow?.interactivePayload as { reason?: string } | null)?.reason ?? "message not sent";
+        await logStep(ctx.runId, { node: node.id, type: node.type, skipped: `form refused: ${reason}` });
+        return { next: nextNodeId(ctx.graph, node.id) };
+      }
       await logStep(ctx.runId, { node: node.id, type: node.type, awaiting: "form", formId: d.formId });
       return { pause: "form" };
     }

@@ -16,6 +16,8 @@
 //      the latest waits; one tap moves exactly one run and sends ONE reply.
 //   4. Two different automations waiting on the same customer → a tap answers
 //      the most recently asked question only; the other run keeps waiting.
+//   5. A send_form node whose form is still a DRAFT (even with a Meta flow id
+//      recorded) sends nothing and continues to the next node.
 //
 // Usage (needs a Postgres it can create the `connect` schema in — CI uses a plain
 // service container, so pass sslmode=disable there):
@@ -85,6 +87,7 @@ async function main() {
     automation,
     automationRun,
     webhookEvent,
+    form,
   } = schema;
 
   const { handleErpWebhook, handleInboundMessage } = await import(
@@ -94,6 +97,7 @@ async function main() {
   const SLUG = "smoke-trigger-co";
   const CALLBACK_ID = "SMOKE";
   const CALLBACK_ID_B = "SMOKE-B";
+  const CALLBACK_ID_C = "SMOKE-C";
   const PHONE = "60111111111";
 
   // (1) Teardown any prior smoke data for a deterministic starting point. The
@@ -125,11 +129,12 @@ async function main() {
         .delete(automationRun)
         .where(inArray(automationRun.automationId, autos.map((a) => a.id)));
     await db.delete(automation).where(eq(automation.companyId, prior.id));
+    await db.delete(form).where(eq(form.companyId, prior.id));
     await db.delete(contact).where(eq(contact.companyId, prior.id));
     await db.delete(channel).where(eq(channel.companyId, prior.id));
     await db.delete(company).where(eq(company.id, prior.id));
   }
-  await db.delete(webhookEvent).where(inArray(webhookEvent.eventType, [CALLBACK_ID, CALLBACK_ID_B]));
+  await db.delete(webhookEvent).where(inArray(webhookEvent.eventType, [CALLBACK_ID, CALLBACK_ID_B, CALLBACK_ID_C]));
 
   // (2) Create the throwaway company + channel + the ACTION_CALLBACK automation.
   const [companyRow] = await db
@@ -338,6 +343,62 @@ async function main() {
   assert(runB.status === "completed", `the latest question (B) should be answered, got '${runB.status}'`);
   assert(runA.status === "waiting", `the earlier question (A) must still wait, got '${runA.status}'`);
   assert((await countOut()) === outBeforeTap3 + 1, "the tap must send one reply, not one per waiting run");
+
+  // (7) send_form on a DRAFT form that already carries a Meta flow id (what a
+  //     refused Publish leaves behind) must send nothing and move on — not send
+  //     the draft and wait for a submission that can never come.
+  const [draftForm] = await db
+    .insert(form)
+    .values({ companyId: companyRow.id, name: "Smoke draft form", status: "draft", fields: [], metaFlowId: "123456789" })
+    .returning();
+  const [autoC] = await db
+    .insert(automation)
+    .values({
+      companyId: companyRow.id,
+      channelId: channelRow.id,
+      name: "Smoke ACTION_CALLBACK C",
+      description: "smoke-trigger test automation C",
+      triggerType: "ACTION_CALLBACK",
+      triggerConfig: { event: "ACTION_CALLBACK", callbackId: CALLBACK_ID_C, keywords: [] },
+      status: "PUBLISHED",
+      enabled: true,
+      graph: {
+        nodes: [
+          { id: "c_trigger", type: "trigger", x: 40, y: 200, data: { event: "ACTION_CALLBACK", callbackId: CALLBACK_ID_C } },
+          { id: "c_form", type: "send_form", x: 260, y: 200, data: { message: "Please fill in", formId: draftForm.id } },
+          { id: "c_ask", type: "ask_buttons", x: 480, y: 200, data: { message: "Fallback question?", buttons: [{ id: "a", label: "A" }] } },
+          { id: "c_end", type: "end", x: 700, y: 200, data: {} },
+        ],
+        edges: [
+          { from: "c_trigger", to: "c_form" },
+          { from: "c_form", to: "c_ask" },
+          { from: "c_ask", to: "c_end", branch: "a" },
+        ],
+      },
+    })
+    .returning();
+  const outIdsBeforeC = new Set(
+    (
+      await db
+        .select({ id: message.id })
+        .from(message)
+        .where(and(eq(message.conversationId, conversationId), eq(message.direction, "OUT")))
+    ).map((m) => m.id)
+  );
+  const resC = await send(CALLBACK_ID_C, "SMK-6");
+  assert(resC.ok && resC.runs.length === 1 && resC.triggered.includes(autoC.name), `send C: ${JSON.stringify(resC)}`);
+  const runC = await runById(resC.runs[0]);
+  assert(runC.status === "waiting", `run C should wait at the fallback question, got '${runC.status}'`);
+  assert(runC.cursorNodeId === "c_ask", `run C must skip the draft form and wait at c_ask, got '${runC.cursorNodeId}'`);
+  const formStep = (Array.isArray(runC.log) ? runC.log : []).find((e) => e && e.node === "c_form");
+  assert(formStep && formStep.skipped === "form not published", `draft form must be skipped, got ${JSON.stringify(formStep)}`);
+  const outC = (
+    await db
+      .select()
+      .from(message)
+      .where(and(eq(message.conversationId, conversationId), eq(message.direction, "OUT")))
+  ).filter((m) => !outIdsBeforeC.has(m.id));
+  assert(outC.length === 1 && outC[0].body === "Fallback question?", `only the fallback question may go out, got ${outC.map((m) => m.body).join(" | ")}`);
 
   console.log("SMOKE PASS:");
   console.log(`  automation:     ${autoRow.id} (${autoRow.name})`);
