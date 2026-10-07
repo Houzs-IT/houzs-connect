@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { getDb } from "@/db/client";
 import {
   automation as automationTable,
@@ -61,16 +61,15 @@ function findNode(graph: FlowGraph, id: string): FlowNode | undefined {
   return graph.nodes.find((n) => n.id === id);
 }
 
+/** ONE statement: the key is merged into the jsonb in Postgres, so no read
+ *  round trip (every query is a region hop) and no lost update when two runs
+ *  write the same contact at once. */
 async function setContactAttr(contactId: string, key: string, value: string) {
   const db = getDb();
-  const c = await db.query.contact.findFirst({
-    where: eq(contactTable.id, contactId),
-  });
-  if (!c) return;
-  const merged = { ...attrs(c.attributes), [key]: value };
+  const patch = JSON.stringify({ [key]: value });
   await db
     .update(contactTable)
-    .set({ attributes: merged })
+    .set({ attributes: sql`coalesce(${contactTable.attributes}, '{}'::jsonb) || ${patch}::jsonb` })
     .where(eq(contactTable.id, contactId));
 }
 
@@ -100,16 +99,15 @@ interface RunCtx {
   jumpDepth: number;
 }
 
+/** Append ONE entry to the run's log in Postgres — one statement, not a read
+ *  of the whole log and a write of it back (two region hops per node, and a
+ *  lost entry when two steps of the same run overlap). */
 async function logStep(runId: string, entry: Record<string, unknown>) {
   const db = getDb();
-  const run = await db.query.automationRun.findFirst({
-    where: eq(automationRun.id, runId),
-  });
-  const log = Array.isArray(run?.log) ? (run!.log as unknown[]) : [];
-  log.push({ ...entry, at: new Date().toISOString() });
+  const row = JSON.stringify([{ ...entry, at: new Date().toISOString() }]);
   await db
     .update(automationRun)
-    .set({ log })
+    .set({ log: sql`coalesce(${automationRun.log}, '[]'::jsonb) || ${row}::jsonb` })
     .where(eq(automationRun.id, runId));
 }
 
