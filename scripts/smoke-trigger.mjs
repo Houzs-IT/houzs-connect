@@ -60,8 +60,12 @@ async function main() {
   // runs outside the Worker runtime.
   globalThis[Symbol.for("__cloudflare-context__")] = { env: { DATABASE_URL: url } };
 
-  // Direct client for schema setup + assertions.
+  // Direct client for schema setup + assertions — and, registered under
+  // SCRIPT_DB, the ONE client the engine's every getDb() shares for this run
+  // (outside the Worker each call would otherwise open its own socket; see
+  // src/db/client.ts).
   const { db, sql } = scriptDb();
+  globalThis[Symbol.for("houzs-connect.script-db")] = db;
 
   // (0) Ensure the `connect` schema + tables exist (idempotent on an existing DB,
   //     full create on an empty CI Postgres).
