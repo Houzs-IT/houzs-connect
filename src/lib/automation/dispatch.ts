@@ -12,7 +12,7 @@ import {
   webhookEvent,
 } from "@/db/schema";
 import { attrs } from "@/lib/format";
-import { startRun, resumeRun } from "./engine";
+import { startRun, resumeRun, supersedeRuns } from "./engine";
 import { getOrCreateConversation } from "@/lib/whatsapp/transport";
 import { runOcr } from "@/lib/ocr";
 
@@ -114,14 +114,21 @@ export async function handleErpWebhook(payload: ErpWebhookPayload) {
   // so the two sets never overlap.
   const automations = [...webhookAutomations, ...callbackAutomations];
 
+  // ONE live run per automation per customer. An ERP send always starts a run
+  // (the operator pressed Send), so unlike the inbound triggers below — which
+  // skip while a run is active — it retires whatever earlier run of the same
+  // automation is still waiting on this customer, or that run would answer
+  // the new send's taps as well (supersedeRuns has the live case).
   const runs: string[] = [];
   for (const a of webhookAutomations) {
+    await supersedeRuns(a.id, contact.id, "new ERP send");
     const run = await startRun(a.id, contact.id);
     if (run) runs.push(run.id);
   }
   // ACTION_CALLBACK: pass the matched callback id so a multi-entry flow starts
   // from the trigger node configured for exactly this callback.
   for (const a of callbackAutomations) {
+    await supersedeRuns(a.id, contact.id, "new ERP send");
     const run = await startRun(a.id, contact.id, { callbackId: callbackKey ?? undefined });
     if (run) runs.push(run.id);
   }
@@ -313,9 +320,20 @@ export async function handleCustomerReply(
   // the old `return waiting.length`, one such run meant that contact's every
   // future message counted as handled: they were silently muted for good, with
   // nothing on screen to show it.
+  //
+  // One reply answers ONE question: the most recently asked one that the reply
+  // fits (the list is newest-updated first; a run whose wait the reply cannot
+  // satisfy returns false without moving and the next one is tried). Feeding
+  // the same tap to every waiting run meant two flows waiting on the same
+  // customer — a Delivery opener and a Postpone, say — both took it, and each
+  // sent its next prompt (2026-10-07; the same-automation case is prevented
+  // earlier, by supersedeRuns on the ERP send).
   let advanced = 0;
   for (const run of waiting) {
-    if (await resumeRun(run.id, input)) advanced++;
+    if (await resumeRun(run.id, input)) {
+      advanced++;
+      break;
+    }
   }
   return advanced;
 }

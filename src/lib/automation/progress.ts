@@ -13,7 +13,7 @@ import { asGraph, type FlowGraph, type FlowNode } from "./types";
 */
 
 export type StepState = "done" | "current" | "todo";
-export type RunStatus = "running" | "waiting" | "paused" | "completed" | string;
+export type RunStatus = "running" | "waiting" | "paused" | "completed" | "superseded" | string;
 
 export type AutomationProgress = {
   runId: string;

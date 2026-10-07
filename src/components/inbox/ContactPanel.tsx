@@ -426,7 +426,7 @@ function AutomationCard({
   const tone =
     a.status === "completed"
       ? "success"
-      : a.status === "paused"
+      : a.status === "paused" || a.status === "superseded"
         ? "neutral"
         : a.status === "waiting"
           ? "warning"

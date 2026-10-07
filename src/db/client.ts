@@ -1,5 +1,5 @@
 import { cache } from "react";
-import { drizzle } from "drizzle-orm/postgres-js";
+import { drizzle, type PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { getSql, resolveDatabaseUrl } from "./pg";
 import * as schema from "./schema";
@@ -16,10 +16,24 @@ import * as schema from "./schema";
  * from the HYPERDRIVE binding, or DATABASE_URL when set (local dev / scripts) —
  * both surfaced through getCloudflareContext().env.
  */
-export const getDb = cache(() => {
+export type DB = PostgresJsDatabase<typeof schema>;
+
+export const getDb = cache((): DB => {
+  const scripted = (globalThis as Record<symbol, unknown>)[SCRIPT_DB] as DB | undefined;
+  if (scripted) return scripted;
   const { env } = getCloudflareContext();
   return drizzle(getSql(resolveDatabaseUrl(env)), { schema });
 });
 
-export type DB = ReturnType<typeof getDb>;
+/**
+ * Outside the Worker (scripts under tsx: the CI smoke tests) React's cache()
+ * has no request to scope to, so every getDb() above would open ANOTHER
+ * postgres.js client — one socket each, held for idle_timeout — and a test
+ * that drives the engine through a few hundred calls hits Postgres's
+ * "sorry, too many clients already" (CI, 2026-10-07). A script that already
+ * holds a client registers it under this symbol and the whole run shares it.
+ * Nothing in the Worker sets it, so prod keeps its request-scoped client.
+ */
+export const SCRIPT_DB = Symbol.for("houzs-connect.script-db");
+
 export { schema };
