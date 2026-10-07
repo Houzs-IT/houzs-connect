@@ -1,4 +1,4 @@
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 import { getDb } from "@/db/client";
 import {
   automation as automationTable,
@@ -502,6 +502,43 @@ function pickEntryTrigger(
     if (matched) return matched;
   }
   return triggers[0] ?? graph.nodes[0];
+}
+
+/** Statuses of a run that is still part of the customer's conversation. */
+export const LIVE_RUN_STATUSES = ["running", "waiting", "paused"] as const;
+
+/**
+ * Retire every unfinished run of this automation for this contact, because a
+ * fresh one is about to start (a new ERP send). Each customer reply is fed to
+ * the contact's waiting runs, so a run left waiting by an earlier send — a test
+ * the customer never finished, an order they never answered — would answer the
+ * NEW send's taps too: seen live 2026-10-07, when three New Delivery Follow-up
+ * runs (one per send, two of them a day old) each replied to one "Amend Date"
+ * tap and the customer got the reason prompt twice and the confirmation three
+ * times, and a Yes would have posted three callbacks to the ERP. A superseded
+ * run keeps its log and is shown as such; it never resumes. Returns the ids.
+ */
+export async function supersedeRuns(
+  automationId: string,
+  contactId: string,
+  reason: string
+): Promise<string[]> {
+  const db = getDb();
+  const live = await db.query.automationRun.findMany({
+    where: and(
+      eq(automationRun.automationId, automationId),
+      eq(automationRun.contactId, contactId),
+      inArray(automationRun.status, [...LIVE_RUN_STATUSES])
+    ),
+  });
+  for (const run of live) {
+    await logStep(run.id, { node: run.cursorNodeId, type: "superseded", reason });
+    await db
+      .update(automationRun)
+      .set({ status: "superseded", cursorNodeId: null })
+      .where(eq(automationRun.id, run.id));
+  }
+  return live.map((r) => r.id);
 }
 
 /** Start a fresh run of an automation for a contact (from a trigger). */
