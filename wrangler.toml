@@ -24,6 +24,19 @@ compatibility_date = "2024-12-30"
 # cannot be the target of a same-zone fetch() call").
 compatibility_flags = ["nodejs_compat", "global_fetch_strictly_public"]
 
+# Run the Worker NEXT TO THE DATABASE (Supabase project "HOUZS ERP SG",
+# ap-southeast-1), not next to whoever sent the request. Meta's webhooks come
+# from the US, so without this the WhatsApp webhook ran in a US colo and every
+# query crossed the Pacific: ~0.4 s each, 1.5–5 s per flow node, 9 s before the
+# first node — and the work a tap triggers after the 200 (waitUntil) was cut
+# off at the runtime's 30 s, twice on 2026-10-07, before the customer's property
+# questions went out. Targeted placement is explicit (no traffic analysis to
+# wait for, unlike mode = "smart"). The ERP service binding runs here too; Meta
+# API calls go the other way, one per message, which is fine.
+[placement]
+mode = "targeted"
+region = "aws:ap-southeast-1"
+
 # Keep the *.workers.dev URL working alongside the branded custom domain.
 workers_dev = true
 
