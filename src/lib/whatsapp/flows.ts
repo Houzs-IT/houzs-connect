@@ -18,17 +18,26 @@ export function isFlowsConfigured(): boolean {
   return isLive() && !!process.env.WHATSAPP_WABA_ID;
 }
 
-/** Options for a `select` field live on the raw jsonb row (`options: string[]`);
- *  the clean FormField drops them, so read them back by matching the field key. */
-function optionsFor(raw: Record<string, unknown>[], key: string): string[] {
-  const row = raw.find((x) => {
+/** The raw jsonb row of a field, matched by key — the clean FormField drops
+ *  `options` and `required`, so they are read back from here. */
+function rawRowFor(raw: Record<string, unknown>[], key: string): Record<string, unknown> | undefined {
+  return raw.find((x) => {
     if (!x || typeof x !== "object") return false;
     const rawKey = typeof x.key === "string" ? x.key.trim() : "";
     const label = typeof x.label === "string" ? x.label : "";
     return (rawKey || keyFromLabel(label)) === key;
   });
-  const o = row?.options;
+}
+
+/** Options for a `select` field (`options: string[]` on the raw row). */
+function optionsFor(raw: Record<string, unknown>[], key: string): string[] {
+  const o = rawRowFor(raw, key)?.options;
   return Array.isArray(o) ? o.map((v) => String(v)).filter(Boolean) : [];
+}
+
+/** `required: true` on the raw row: the Flow refuses Submit until answered. */
+function requiredFor(raw: Record<string, unknown>[], key: string): boolean {
+  return rawRowFor(raw, key)?.required === true;
 }
 
 /**
@@ -49,8 +58,11 @@ export function buildFlowJson(name: string, rawFields: unknown): Record<string, 
   for (const f of fields) {
     payload[f.key] = `\${form.${f.key}}`;
     const label = f.label.slice(0, 80);
+    // Only set when true: Meta's default is optional, and a changed form is
+    // detected by comparing JSON, so the shape must stay stable otherwise.
+    const req = requiredFor(raw, f.key) ? { required: true } : {};
     if (f.type === "date") {
-      children.push({ type: "DatePicker", name: f.key, label });
+      children.push({ type: "DatePicker", name: f.key, label, ...req });
     } else if (f.type === "select") {
       const opts = optionsFor(raw, f.key);
       if (opts.length) {
@@ -59,14 +71,15 @@ export function buildFlowJson(name: string, rawFields: unknown): Record<string, 
           name: f.key,
           label,
           "data-source": opts.map((o) => ({ id: o.slice(0, 30), title: o.slice(0, 30) })),
+          ...req,
         });
       } else {
-        children.push({ type: "TextInput", name: f.key, label, "input-type": "text" });
+        children.push({ type: "TextInput", name: f.key, label, "input-type": "text", ...req });
       }
     } else {
       const inputType =
         f.type === "number" ? "number" : f.type === "email" ? "email" : f.type === "phone" ? "phone" : "text";
-      children.push({ type: "TextInput", name: f.key, label, "input-type": inputType });
+      children.push({ type: "TextInput", name: f.key, label, "input-type": inputType, ...req });
     }
   }
   children.push({

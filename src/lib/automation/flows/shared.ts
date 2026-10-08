@@ -123,8 +123,9 @@ export type OpenerFamily = Partial<Record<"2" | "3" | "4", OpenerTemplate>>;
 // are dropdowns whose choices are EXACTLY the values the button fallback writes
 // (house_landed …, purpose_new …, disposal_yes …) and prop_router matches on —
 // the first published Flow had no options, the customer typed "condo" / "new
-// in" / "no", and prop_router matched nothing (owner, 2026-10-08). The last
-// question stays a typed answer.
+// in" / "no", and prop_router matched nothing (owner, 2026-10-08). The three
+// are REQUIRED (owner, 2026-10-09): a blank house_type would send the run down
+// the button fallback again. The last question stays a typed, optional answer.
 export const PROPERTY_FORM_KEY = "property_details";
 export const DATE_FORM_KEY = "new_delivery_date";
 
@@ -133,21 +134,30 @@ export const SHARED_FORMS: SeedForm[] = [
     key: PROPERTY_FORM_KEY,
     name: "Property Details",
     fields: [
-      { key: "house_type", label: "Property type", type: "select", options: ["Landed", "Condo", "Apartment"] },
+      {
+        key: "house_type",
+        label: "Property type",
+        type: "select",
+        options: ["Landed", "Condo", "Apartment"],
+        required: true,
+      },
       {
         key: "delivery_purpose",
         label: "What is this delivery for?",
         type: "select",
         options: ["Move-in New House", "Replace Furniture"],
+        required: true,
       },
-      { key: "need_disposal", label: "Dispose of old items?", type: "select", options: ["Yes", "No"] },
+      { key: "need_disposal", label: "Dispose of old items?", type: "select", options: ["Yes", "No"], required: true },
       { key: "disposal_item", label: "Items to dispose (if any)", type: "text" },
     ],
   },
   {
     key: DATE_FORM_KEY,
     name: "New Delivery Date",
-    fields: [{ key: "amended_delivery_date", label: "Preferred delivery date", type: "date" }],
+    // Required too (owner, 2026-10-09): an empty date would come back as an
+    // amend with nothing to reschedule to.
+    fields: [{ key: "amended_delivery_date", label: "Preferred delivery date", type: "date", required: true }],
   },
 ];
 

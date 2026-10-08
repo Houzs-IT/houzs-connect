@@ -8,8 +8,9 @@ export interface SeedForm {
   /** Form row name (also what the owner sees in /forms). */
   name: string;
   /** `options` on a `select` field become the Flow's dropdown choices; the
-   *  chosen option's TEXT is what the submission writes onto the contact. */
-  fields: (FormField & { options?: string[] })[];
+   *  chosen option's TEXT is what the submission writes onto the contact.
+   *  `required` makes the Flow refuse Submit until the question is answered. */
+  fields: (FormField & { options?: string[]; required?: boolean })[];
 }
 
 /**
