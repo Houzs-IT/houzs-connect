@@ -119,9 +119,12 @@ export interface OpenerTemplate {
 export type OpenerFamily = Partial<Record<"2" | "3" | "4", OpenerTemplate>>;
 
 // Forms both flows send. `key` is the local handle the graph references; the
-// seed resolves it to the published form row id. `select` options are not yet
-// wired in the form model, so a published Flow renders these as text inputs for
-// now (follow-up); the routers below tolerate that.
+// seed resolves it to the published form row id. The three `select` questions
+// are dropdowns whose choices are EXACTLY the values the button fallback writes
+// (house_landed …, purpose_new …, disposal_yes …) and prop_router matches on —
+// the first published Flow had no options, the customer typed "condo" / "new
+// in" / "no", and prop_router matched nothing (owner, 2026-10-08). The last
+// question stays a typed answer.
 export const PROPERTY_FORM_KEY = "property_details";
 export const DATE_FORM_KEY = "new_delivery_date";
 
@@ -130,9 +133,14 @@ export const SHARED_FORMS: SeedForm[] = [
     key: PROPERTY_FORM_KEY,
     name: "Property Details",
     fields: [
-      { key: "house_type", label: "Property type", type: "select" },
-      { key: "delivery_purpose", label: "What is this delivery for?", type: "select" },
-      { key: "need_disposal", label: "Dispose of old items?", type: "select" },
+      { key: "house_type", label: "Property type", type: "select", options: ["Landed", "Condo", "Apartment"] },
+      {
+        key: "delivery_purpose",
+        label: "What is this delivery for?",
+        type: "select",
+        options: ["Move-in New House", "Replace Furniture"],
+      },
+      { key: "need_disposal", label: "Dispose of old items?", type: "select", options: ["Yes", "No"] },
       { key: "disposal_item", label: "Items to dispose (if any)", type: "text" },
     ],
   },

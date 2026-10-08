@@ -35,8 +35,10 @@ function optionsFor(raw: Record<string, unknown>[], key: string): string[] {
  * Build a Meta Flow JSON (one terminal screen) from a form's fields. Each field
  * becomes an input whose `name` is the field key, and Submit completes the flow
  * returning { <key>: value } — which the inbound webhook writes onto the contact.
- * A `select` with options renders a Dropdown; without options it falls back to a
- * text input (the field model has no options UI yet).
+ * A `select` with options renders a Dropdown whose option ids ARE the option
+ * texts — a Flow submits the chosen id, and the contact field must end up
+ * holding "Move-in New House" / "Yes", what the routers and the button
+ * fallback use, not "0" / "1". Without options it falls back to a text input.
  */
 export function buildFlowJson(name: string, rawFields: unknown): Record<string, unknown> {
   const fields = readFields(rawFields);
@@ -56,7 +58,7 @@ export function buildFlowJson(name: string, rawFields: unknown): Record<string, 
           type: "Dropdown",
           name: f.key,
           label,
-          "data-source": opts.map((o, i) => ({ id: String(i), title: o.slice(0, 30) })),
+          "data-source": opts.map((o) => ({ id: o.slice(0, 30), title: o.slice(0, 30) })),
         });
       } else {
         children.push({ type: "TextInput", name: f.key, label, "input-type": "text" });
@@ -154,6 +156,32 @@ async function flowStatus(token: string, flowId: string): Promise<string | null>
   return r.body?.status ?? null;
 }
 
+/** The Flow JSON Meta currently holds for a flow, or null when it cannot be
+ *  read. Compared (as parsed JSON) with what the form builds now, to tell a
+ *  real change from a re-click of Publish. */
+async function liveFlowJson(token: string, flowId: string): Promise<unknown | null> {
+  const r = await graphCall(token, `${flowId}/assets`, {});
+  const rows = r?.res.ok ? ((r.body as { data?: { asset_type?: string; download_url?: string }[] }).data ?? []) : [];
+  const url = rows.find((a) => a.asset_type === "FLOW_JSON")?.download_url;
+  if (!url) return null;
+  const res = await rawFetch()(url).catch(() => null);
+  if (!res || !res.ok) return null;
+  return res.json().catch(() => null);
+}
+
+/** Retire a flow on Meta (best effort — a failure here leaves an extra live
+ *  flow of an old name, nothing worse). */
+async function deprecateFlow(token: string, flowId: string): Promise<void> {
+  await graphCall(token, `${flowId}/deprecate`, { method: "POST", json: {} });
+}
+
+/** `name`, then `name v2`, `name v3` …: a published flow is immutable on Meta
+ *  and names are unique per WABA, so a changed form goes live as a new flow
+ *  under the next free name. */
+function versionedName(base: string, attempt: number): string {
+  return attempt === 0 ? base : `${base} v${attempt + 1}`.slice(0, 200);
+}
+
 /**
  * The WABA's flow with exactly this name, DRAFT preferred over PUBLISHED, so an
  * earlier half-finished attempt (created, never published) is picked up rather
@@ -198,38 +226,62 @@ export async function publishFlow(form: {
   const name = form.name.slice(0, 200);
   const flowJson = JSON.stringify(buildFlowJson(form.name, form.fields));
 
-  // 1. A flow we already know about.
+  // 1. A flow we already know about. A PUBLISHED flow is immutable on Meta: if
+  //    the form still builds the same JSON it is simply reused; if the form
+  //    changed (new options, a new question) a NEW flow goes live under the
+  //    next free name and the old one is deprecated once the new one is up —
+  //    the form row then points at the new id, so sends switch over atomically.
   let flowId = (form.metaFlowId ?? "").trim();
+  let supersedes = "";
   if (flowId) {
     const status = await flowStatus(token, flowId);
-    if (status === "PUBLISHED") return { ok: true, flowId, reused: true };
-    if (status === null || status === "DEPRECATED" || status === "BLOCKED") flowId = "";
+    if (status === "PUBLISHED") {
+      const live = await liveFlowJson(token, flowId);
+      if (live && JSON.stringify(live) === JSON.stringify(JSON.parse(flowJson))) {
+        return { ok: true, flowId, reused: true };
+      }
+      supersedes = flowId;
+      flowId = "";
+    } else if (status === null || status === "DEPRECATED" || status === "BLOCKED") {
+      flowId = "";
+    }
   }
 
-  // 2. Nothing usable stored: create a DRAFT, or adopt the WABA's flow of this name.
+  // 2. Nothing usable stored: create a DRAFT, or adopt the WABA's draft of this
+  //    name. A new VERSION (supersedes set) never adopts a published flow —
+  //    that is the one being replaced — and takes the next free name instead.
   let mustUpload = true;
   if (!flowId) {
-    const created = await graphCall(token, `${waba}/flows`, {
-      method: "POST",
-      json: { name, categories: ["OTHER"], flow_json: flowJson },
-    });
-    if (created?.res.ok && created.body?.id) {
-      flowId = String(created.body.id);
-      mustUpload = false; // the create carried the JSON
-      const v = validationMessage(created.body);
-      if (v) return { ok: false, flowId, error: v };
-    } else {
+    let attempt = 0;
+    while (!flowId) {
+      const tryName = versionedName(name, attempt);
+      const created = await graphCall(token, `${waba}/flows`, {
+        method: "POST",
+        json: { name: tryName, categories: ["OTHER"], flow_json: flowJson },
+      });
+      if (created?.res.ok && created.body?.id) {
+        flowId = String(created.body.id);
+        mustUpload = false; // the create carried the JSON
+        const v = validationMessage(created.body);
+        if (v) return { ok: false, flowId, error: v };
+        break;
+      }
       const msg = metaError(created, "Meta refused to create the flow");
       if (!isNameTaken(msg)) return { ok: false, error: msg };
-      const existing = await findFlowByName(token, waba, name);
-      if (!existing) {
-        return {
-          ok: false,
-          error: `${msg} — and no flow named "${name}" is visible on this Business Account to reuse.`,
-        };
+      const existing = await findFlowByName(token, waba, tryName);
+      if (existing && existing.status === "DRAFT") {
+        flowId = existing.id;
+        break;
       }
-      if (existing.status === "PUBLISHED") return { ok: true, flowId: existing.id, reused: true };
-      flowId = existing.id;
+      if (existing && existing.status === "PUBLISHED" && !supersedes) {
+        return { ok: true, flowId: existing.id, reused: true };
+      }
+      // Name held by a published flow (the one being replaced, or an older
+      // version): try the next version name. Give up after a few.
+      attempt += 1;
+      if (attempt > 20) {
+        return { ok: false, error: `${msg} — every name up to "${tryName}" is taken on this Business Account.` };
+      }
     }
   }
 
@@ -252,9 +304,12 @@ export async function publishFlow(form: {
   if (!pub?.res.ok || pub.body?.success === false) {
     return {
       ok: false,
-      flowId,
+      // A failed new version must not be stored over the live one: the form
+      // keeps sending the old flow until the new one actually publishes.
+      flowId: supersedes ? undefined : flowId,
       error: `Saved on Meta as draft flow ${flowId}, but publishing failed: ${metaError(pub, "Meta refused to publish")}`,
     };
   }
+  if (supersedes) await deprecateFlow(token, supersedes);
   return { ok: true, flowId };
 }
