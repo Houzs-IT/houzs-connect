@@ -46,4 +46,10 @@ interface CloudflareEnv {
   // automation engine's call_rest_api uses it for erp.houzscentury.com instead
   // of a network fetch — see src/lib/automation/rest.ts RestBindings for why.
   ERP?: { fetch: (input: string | Request, init?: RequestInit) => Promise<Response> };
+
+  // IT Support (src/lib/it-support/hub.ts): the Houzs IT Hub's origin (a [vars]
+  // entry) and Connect's key for it (`wrangler secret put IT_HUB_API_KEY`). Either
+  // unset => IT Support is off: no menu entry, and /it-support says so.
+  IT_HUB_URL?: string;
+  IT_HUB_API_KEY?: string;
 }

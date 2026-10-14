@@ -5,7 +5,8 @@ import { usePathname } from "next/navigation";
 import { initials, tint } from "@/lib/format";
 import { PersonAvatar } from "./PersonAvatar";
 import { useShell } from "./shell/ShellProvider";
-import { NAV, SETTINGS_NAV, isActive, type NavItem } from "./shell/nav";
+import { IT_SUPPORT_NAV, NAV, SETTINGS_NAV, isActive, type NavItem } from "./shell/nav";
+import { useItUnread, useRememberPage } from "./it-support/useItSupportShell";
 
 /**
  * One 40×40 icon tile.
@@ -62,8 +63,11 @@ export function Sidebar({
   internalUnread,
   live,
   me,
+  itSupport,
 }: {
   unread?: number;
+  /** IT Support is connected on this Worker: show its tile and unread count. */
+  itSupport?: boolean;
   /** Unread Internal messages in my channels and DMs. */
   internalUnread?: number;
   live?: boolean;
@@ -71,6 +75,8 @@ export function Sidebar({
 }) {
   const path = usePathname();
   const { t } = useShell();
+  const itUnread = useItUnread(Boolean(itSupport));
+  useRememberPage();
 
   const tile = (item: NavItem, badge?: number) => (
     <Link
@@ -104,6 +110,7 @@ export function Sidebar({
       </nav>
 
       <div className="mt-auto flex flex-col items-center gap-2.5">
+        {itSupport && tile(IT_SUPPORT_NAV, itUnread)}
         {tile(SETTINGS_NAV)}
         {/* Read from WHATSAPP_MODE, never hardcoded — an operator trusts this
             dot, so it must not claim LIVE while WhatsApp is stubbed. */}

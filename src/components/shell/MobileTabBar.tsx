@@ -13,7 +13,8 @@ import {
   IconLogout,
   IconMenu,
 } from "../icons";
-import { NAV, SETTINGS_NAV, isActive, type NavItem } from "./nav";
+import { IT_SUPPORT_NAV, NAV, SETTINGS_NAV, isActive, type NavItem } from "./nav";
+import { useItUnread } from "../it-support/useItSupportShell";
 import { useShell } from "./ShellProvider";
 import { LangToggle } from "./TopbarControls";
 
@@ -21,8 +22,9 @@ type Tab = { href: string; label: string; Icon: NavItem["Icon"]; match: string[]
 
 /** Modules reached through "More" rather than a tab of their own. */
 const MORE_KEYS = ["contacts", "campaigns", "templates", "payments", "logs"] as const;
-const MORE: NavItem[] = [
+const moreItems = (itSupport: boolean): NavItem[] => [
   ...NAV.filter((n) => (MORE_KEYS as readonly string[]).includes(n.key)),
+  ...(itSupport ? [IT_SUPPORT_NAV] : []),
   SETTINGS_NAV,
 ];
 
@@ -61,11 +63,13 @@ function TabCell({
  * Hidden inside an open conversation (`/inbox/<id>`): the thread carries its own
  * back control and needs the height for the composer.
  */
-export function MobileTabBar({ unread, internalUnread }: { unread?: number; internalUnread?: number }) {
+export function MobileTabBar({ unread, internalUnread, itSupport }: { unread?: number; internalUnread?: number; itSupport?: boolean }) {
   const path = usePathname();
   const params = useSearchParams();
   const { t } = useShell();
   const [open, setOpen] = useState(false);
+  const itUnread = useItUnread(Boolean(itSupport));
+  const MORE = moreItems(Boolean(itSupport));
 
   useEffect(() => {
     if (!open) return;
@@ -97,7 +101,7 @@ export function MobileTabBar({ unread, internalUnread }: { unread?: number; inte
           </Link>
         ))}
         <button type="button" className="flex-1" aria-expanded={open} onClick={() => setOpen(true)}>
-          <TabCell label={t.tab.more} Icon={IconMenu} on={moreOn || open} />
+          <TabCell label={t.tab.more} Icon={IconMenu} on={moreOn || open} badge={itUnread} />
         </button>
       </nav>
 
@@ -148,7 +152,14 @@ export function MobileTabBar({ unread, internalUnread }: { unread?: number; inte
                       : "border-[var(--color-border)] text-[var(--color-ink)]"
                   }`}
                 >
-                  <n.Icon width={20} height={20} />
+                  <span className="relative">
+                    <n.Icon width={20} height={20} />
+                    {n.key === "itSupport" && itUnread > 0 && (
+                      <span className="absolute -right-2.5 -top-1.5 grid h-4 min-w-4 place-items-center rounded-full bg-[var(--color-accent)] px-1 text-[9.5px] font-semibold text-white">
+                        {itUnread > 99 ? "99+" : itUnread}
+                      </span>
+                    )}
+                  </span>
                   <span className="leading-tight">{t.nav[n.key]}</span>
                 </Link>
               );
