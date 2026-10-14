@@ -6,6 +6,7 @@ import { getDict, getLang } from "@/lib/i18n/server";
 import { fmt } from "@/lib/i18n/dict";
 import { demoTap } from "@/app/actions";
 import { ChatMedia } from "./ChatMedia";
+import { ThreadScroll } from "./ThreadScroll";
 
 /**
  * Which day a message belongs to, in Malaysian time.
@@ -134,8 +135,18 @@ export async function Thread({
   const s = t.service;
   const locale = (await getLang()) === "zh" ? "zh-CN" : "en-GB";
 
+  // ThreadScroll pins the box to the newest item: it changes when a message,
+  // note or flow event is added, so a 5 s LiveRefresh with nothing new leaves
+  // the scroll alone.
+  const last = items[items.length - 1];
+  const latestKey = `${items.length}:${last ? `${last.kind}-${last.id}` : ""}`;
+
   return (
-    <div className="scroll-thin flex min-h-0 flex-1 flex-col gap-2.5 overflow-y-auto px-4 py-5 md:px-6">
+    <ThreadScroll
+      conversationId={conversationId}
+      latestKey={latestKey}
+      className="scroll-thin flex min-h-0 flex-1 flex-col gap-2.5 overflow-y-auto px-4 py-5 md:px-6"
+    >
       {items.map((m, i) => {
         const prev = i > 0 ? items[i - 1] : null;
         const newDay = !prev || dayKey(prev.createdAt) !== dayKey(m.createdAt);
@@ -285,6 +296,6 @@ export async function Thread({
           </Fragment>
         );
       })}
-    </div>
+    </ThreadScroll>
   );
 }
