@@ -68,6 +68,9 @@ service = "autocount-sync-api"
 # real. DEMO stubs Meta entirely and only records message rows — put it back to
 # DEMO if you ever need to exercise flows without messaging customers.
 WHATSAPP_MODE = "LIVE"
+# IT Support relays to the Houzs IT Hub. The menu stays hidden until the
+# IT_HUB_API_KEY secret (the hub's CONNECT key) is also on the Worker.
+IT_HUB_URL = "https://support.houzscentury.com"
 
 [observability]
 enabled = true

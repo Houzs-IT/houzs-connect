@@ -6,6 +6,7 @@ import {
   IconForm,
   IconInbox,
   IconInternal,
+  IconLifeBuoy,
   IconLogs,
   IconPayments,
   IconSettings,
@@ -40,6 +41,17 @@ export const NAV: NavItem[] = [
   { key: "payments", href: "/payments", Icon: IconPayments },
   { key: "logs", href: "/logs", Icon: IconLogs },
 ];
+
+/**
+ * IT Support: report a problem with Connect to IT. At the foot of the rail above
+ * Settings, and in the phone's More sheet; shown only where the Worker has the
+ * IT Hub's address and key (lib/it-support/hub.ts itSupportConnected).
+ */
+export const IT_SUPPORT_NAV: NavItem = {
+  key: "itSupport",
+  href: "/it-support",
+  Icon: IconLifeBuoy,
+};
 
 export const SETTINGS_NAV: NavItem = {
   key: "settings",

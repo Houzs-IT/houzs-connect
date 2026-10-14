@@ -190,3 +190,11 @@ export const IconClose = (p: P) => (
     <path d="M18 6 6 18M6 6l12 12" />
   </svg>
 );
+
+export const IconLifeBuoy = (p: P) => (
+  <svg {...base(p)}>
+    <circle cx="12" cy="12" r="9" />
+    <circle cx="12" cy="12" r="4" />
+    <path d="M4.9 4.9l4.3 4.3M14.8 14.8l4.3 4.3M14.8 9.2l4.3-4.3M4.9 19.1l4.3-4.3" />
+  </svg>
+);
