@@ -342,7 +342,25 @@ export function buildDeliveryGraph(opts: {
       },
       { id: "disposal_fee", type: "send_text", x: 2680, y: 40, data: { message: DISPOSAL_FEE } },
       { id: "generic_ack", type: "send_text", x: 2680, y: 200, data: { message: GENERIC_ACK } },
-      { id: "confirm_end", type: "end", x: 2900, y: 120, data: {} },
+      // The Property Details answers → ERP /api/chat-callback event "property",
+      // so the board's Building Type / New House-Replacement / Disposal columns
+      // fill in. Fires after the answers are collected, on BOTH tails (new-house
+      // ack and the disposal-fee notice). A field the customer did not give
+      // interpolates to its literal "{key}" (vars.ts) — the ERP treats that as
+      // blank, and disposal_item is only read when need_disposal is "Yes".
+      {
+        id: "cb_property",
+        type: "call_rest_api",
+        x: 2900,
+        y: 120,
+        data: {
+          method: "POST",
+          url: "{callback_url}",
+          headers: ERP_CALLBACK_HEADERS,
+          body: `{"callback_id":"{run_id}-property","event":"property","ref":"{ref_1}","refs":"{refs_all}","phone":"{phone}","house_type":"{house_type}","delivery_purpose":"{delivery_purpose}","need_disposal":"{need_disposal}","disposal_item":"{disposal_item}","note":"source=connect"}`,
+        },
+      },
+      { id: "confirm_end", type: "end", x: 3120, y: 120, data: {} },
 
       // ── Property questions without the Flow form (see ASK_HOUSE) ──
       // The form, when published, writes house_type; when it was skipped the
@@ -522,8 +540,9 @@ export function buildDeliveryGraph(opts: {
       { from: "prop_router", to: "generic_ack", branch: "newhouse" },
       { from: "prop_router", to: "disposal_fee", branch: "disposal" },
       { from: "prop_router", to: "generic_ack", branch: "default" },
-      { from: "disposal_fee", to: "confirm_end" },
-      { from: "generic_ack", to: "confirm_end" },
+      { from: "disposal_fee", to: "cb_property" },
+      { from: "generic_ack", to: "cb_property" },
+      { from: "cb_property", to: "confirm_end" },
 
       // Amend
       { from: "amend_guard", to: "locked_msg", branch: "locked" },
