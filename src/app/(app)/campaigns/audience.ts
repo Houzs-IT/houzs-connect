@@ -59,6 +59,28 @@ export async function resolveAudience(
 ): Promise<ResolvedAudience> {
   let matched: ContactRow[];
 
+  // Hand-picked contacts (the Broadcast page): exactly the ids staff ticked,
+  // company-scoped. Unlike the rule-based audiences below, a hand-pick is an
+  // explicit choice per recipient, so it is NOT gated on marketing opt-in
+  // (that gate would silently drop almost everyone, since the opt-in switch is
+  // rarely set); only a blocked contact is removed. Returned early.
+  if (aud.kind === "ids") {
+    const ids = (aud.contactIds ?? []).filter(Boolean);
+    const picked = ids.length
+      ? await db.query.contact.findMany({
+          where: and(eq(contactTable.companyId, companyId), inArray(contactTable.id, ids)),
+        })
+      : [];
+    const reachable = picked.filter((c) => !c.blocked);
+    return {
+      matched: picked.length,
+      blocked: picked.length - reachable.length,
+      optedOut: 0,
+      recipients: reachable,
+      sample: picked.slice(0, SAMPLE_ROWS),
+    };
+  }
+
   if (aud.kind === "tag" && aud.tag) {
     const tagRow = await db.query.tag.findFirst({
       where: and(eq(tagTable.companyId, companyId), eq(tagTable.name, aud.tag)),

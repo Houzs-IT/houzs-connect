@@ -38,7 +38,7 @@ export const SPEC_VERSION = 1;
 /** Seampify caps the campaign name at 150 characters and shows a counter. */
 export const NAME_MAX = 150;
 
-export type AudienceKind = "all" | "tag" | "attribute";
+export type AudienceKind = "all" | "tag" | "attribute" | "ids";
 
 export interface AudienceSpec {
   kind: AudienceKind;
@@ -48,6 +48,8 @@ export interface AudienceSpec {
   attrKey?: string;
   /** Required attribute value; empty means "has the attribute at all". */
   attrValue?: string;
+  /** Hand-picked contact ids, when kind === "ids" (the Broadcast page). */
+  contactIds?: string[];
 }
 
 export interface CampaignSpec {
@@ -122,7 +124,9 @@ export function packAudience(spec: CampaignSpec): StoredAudience {
         ? a.attrValue
           ? `${a.attrKey} = ${a.attrValue}`
           : `has ${a.attrKey}`
-        : "all";
+        : a.kind === "ids"
+          ? `${a.contactIds?.length ?? 0} selected`
+          : "all";
   return { kind: a.kind, value, spec };
 }
 
@@ -143,10 +147,13 @@ export function unpackSpec(audience: unknown): CampaignSpec | null {
     templateBody: typeof raw.templateBody === "string" ? raw.templateBody : "",
     bindings: asBindings(raw.bindings),
     audience: {
-      kind: kind === "tag" || kind === "attribute" ? kind : "all",
+      kind: kind === "tag" || kind === "attribute" || kind === "ids" ? kind : "all",
       tag: raw.audience?.tag,
       attrKey: raw.audience?.attrKey,
       attrValue: raw.audience?.attrValue,
+      contactIds: Array.isArray(raw.audience?.contactIds)
+        ? raw.audience!.contactIds!.filter((x): x is string => typeof x === "string")
+        : undefined,
     },
   };
 }
@@ -156,6 +163,7 @@ export function audienceLabel(audience: unknown): string {
   const a = (audience ?? {}) as StoredAudience;
   if (a.kind === "tag" && a.value) return `Tagged "${a.value}"`;
   if (a.kind === "attribute" && a.value) return `Where ${a.value}`;
+  if (a.kind === "ids") return a.value ? `${a.value} contacts` : "Selected contacts";
   return "Everyone in the address book";
 }
 
