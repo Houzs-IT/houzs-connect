@@ -22,6 +22,7 @@ import {
   channel as channelTable,
   contact as contactTable,
   message as messageTable,
+  tag as tagTable,
 } from "@/db/schema";
 import { getCurrentMember } from "@/lib/current-member";
 import { attrs } from "@/lib/format";
@@ -44,6 +45,7 @@ import {
 import { resolveAudience, type ContactRow } from "./audience";
 import {
   NAME_MAX,
+  SPEC_VERSION,
   packAudience,
   sendBlocker,
   unpackSpec,
@@ -730,4 +732,112 @@ export async function sendCampaignNow(input: {
   revalidatePath("/campaigns");
   revalidatePath("/inbox");
   return { ok: true, sent, failed, recipients: resolved.recipients.length, remaining };
+}
+
+// ── Broadcast page (a campaign to hand-picked contacts) ────────────────────
+//
+// The Broadcast screen is a campaign whose audience is a hand-picked list of
+// contact ids, not a rule. It reuses the campaign send engine wholesale: a
+// contact-id audience (audience.ts "ids") is created as a one-off campaign and
+// driven to completion here, so it lands in the Campaigns history with the same
+// stats, and the per-message read/replied tagging, as any other broadcast.
+
+export interface BroadcastContact {
+  id: string;
+  name: string | null;
+  phone: string;
+  blocked: boolean;
+  tags: string[];
+}
+
+/** The address book for the Broadcast picker: every contact + its tag names,
+ *  plus the company's tag list for the filter. Company-scoped. */
+export async function listBroadcastContacts(): Promise<{
+  contacts: BroadcastContact[];
+  tags: string[];
+}> {
+  const c = await ctx();
+  if (!c) return { contacts: [], tags: [] };
+  const [rows, tags, links] = await Promise.all([
+    c.db.query.contact.findMany({
+      where: eq(contactTable.companyId, c.companyId),
+      columns: { id: true, name: true, phone: true, blocked: true },
+      orderBy: desc(contactTable.updatedAt),
+    }),
+    c.db.query.tag.findMany({
+      where: eq(tagTable.companyId, c.companyId),
+      columns: { id: true, name: true },
+    }),
+    c.db.query.contactTag.findMany({ columns: { contactId: true, tagId: true } }),
+  ]);
+  const tagName = new Map(tags.map((t) => [t.id, t.name]));
+  const byContact = new Map<string, string[]>();
+  for (const l of links) {
+    const name = tagName.get(l.tagId);
+    if (!name) continue; // a link to another company's tag never matches here
+    const arr = byContact.get(l.contactId) ?? [];
+    arr.push(name);
+    byContact.set(l.contactId, arr);
+  }
+  return {
+    contacts: rows.map((r) => ({
+      id: r.id,
+      name: r.name,
+      phone: r.phone,
+      blocked: r.blocked,
+      tags: byContact.get(r.id) ?? [],
+    })),
+    tags: tags.map((t) => t.name).sort((a, b) => a.localeCompare(b)),
+  };
+}
+
+/** Send one broadcast NOW to the hand-picked contacts. Creates the one-off
+ *  campaign and drives the chunked send to completion, so the caller makes a
+ *  single call. Returns the cumulative sent / failed / recipient counts. */
+export async function sendBroadcast(input: {
+  contactIds: string[];
+  templateName: string;
+  templateLang: string;
+  templateBody: string;
+  /** The template's saved {{n}} mapping, so a template with variables resolves
+   *  per-contact exactly as a campaign would. Empty for a no-variable template. */
+  bindings: VarBinding[];
+  confirm: string;
+}): Promise<SendResult> {
+  if (input.confirm !== "SEND") return { ok: false, error: "This send was not confirmed." };
+  const c = await ctx();
+  if (!c) return { ok: false, error: "Not signed in." };
+  const ids = [...new Set(input.contactIds.filter(Boolean))];
+  if (ids.length === 0) return { ok: false, error: "Pick at least one contact to broadcast to." };
+  if (!input.templateName) return { ok: false, error: "Pick an approved template first." };
+
+  const spec: CampaignSpec = {
+    v: SPEC_VERSION,
+    templateName: input.templateName,
+    templateLang: input.templateLang || "en",
+    templateBody: input.templateBody,
+    bindings: input.bindings ?? [],
+    audience: { kind: "ids", contactIds: ids },
+  };
+  const stamp = new Date().toLocaleString("en-GB", {
+    timeZone: "Asia/Kuala_Lumpur",
+    day: "2-digit",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+  const saved = await saveCampaign({ name: `Broadcast ${stamp}`, channelId: "", spec });
+  if (!saved.ok || !saved.id) {
+    return { ok: false, error: saved.error ?? "Could not create the broadcast." };
+  }
+
+  // Drive the chunked send to the end. Each call sends SEND_CHUNK and reports
+  // how many remain; the cap is a safety belt, not an expected limit.
+  let last: SendResult = { ok: true, sent: 0, failed: 0, recipients: 0, remaining: 0 };
+  for (let i = 0; i < 1000; i++) {
+    last = await sendCampaignNow({ campaignId: saved.id, confirm: "SEND" });
+    if (!last.ok) return last;
+    if (!last.remaining || last.remaining <= 0) break;
+  }
+  return last;
 }
