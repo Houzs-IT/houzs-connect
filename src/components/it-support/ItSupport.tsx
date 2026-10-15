@@ -72,6 +72,7 @@ function RequestList({ tab, onTab, onOpen, onNew }: { tab: ItTab; onTab: (t: ItT
     { key: "status", label: t.it.colStatus, className: "w-[170px]" },
     { key: "priority", label: t.it.colUrgency, className: "w-[110px]" },
     { key: "assignee", label: t.it.colHandledBy, className: "w-[160px]" },
+    { key: "submitted", label: t.it.colSubmitted, className: "w-[150px]", filter: false },
     { key: "updated", label: t.it.colUpdated, className: "w-[160px]", filter: false },
   ];
 
@@ -104,14 +105,15 @@ function RequestList({ tab, onTab, onOpen, onNew }: { tab: ItTab; onTab: (t: ItT
       status: <StatusChip status={r.status} />,
       priority: <UrgencyChip priority={r.priority} />,
       assignee: <span className="truncate text-[var(--color-muted)]">{r.assignee_name ?? t.it.notPicked}</span>,
+      submitted: <span className="whitespace-nowrap text-[12px] text-[var(--color-muted)]" title={agoLabel(t, r.created_at)}>{stamp(r.created_at)}</span>,
       updated: <span className="whitespace-nowrap text-[12px] text-[var(--color-muted)]" title={agoLabel(t, r.updated_at)}>{stamp(r.updated_at)}</span>,
     },
     // Urgency sorts most urgent first, not by the word; the funnel and the search still see the word.
     sort: {
       code: r.code, title: r.title, status: statusWord(r.status), priority: URGENCY_RANK.indexOf(r.priority),
-      assignee: r.assignee_name ?? t.it.notPicked, updated: r.updated_at,
+      assignee: r.assignee_name ?? t.it.notPicked, submitted: r.created_at, updated: r.updated_at,
     },
-    text: { priority: urgencyWord(r.priority), updated: stamp(r.updated_at) },
+    text: { priority: urgencyWord(r.priority), submitted: stamp(r.created_at), updated: stamp(r.updated_at) },
   }));
   // The phone has no table, so it has its own search over the same words.
   const q = search.trim().toLowerCase();
@@ -140,7 +142,7 @@ function RequestList({ tab, onTab, onOpen, onNew }: { tab: ItTab; onTab: (t: ItT
       {/* Desktop: the table every Connect list uses (search, sort, filters, columns). */}
       <div className="hidden md:block">
         <DataTable columns={columns} rows={tableRows} searchPlaceholder={t.it.searchPh} stateKey="it-support"
-          initialSort={{ key: "updated", dir: "desc" }} minWidth={860}
+          initialSort={{ key: "updated", dir: "desc" }} minWidth={1000}
           empty={<p className="px-4 py-8 text-center text-[12.5px] text-[var(--color-muted)]">{t.it.emptyTab}</p>} />
       </div>
 
@@ -161,6 +163,7 @@ function RequestList({ tab, onTab, onOpen, onNew }: { tab: ItTab; onTab: (t: ItT
                     <span className="ml-auto"><StatusChip status={r.status} /></span>
                   </span>
                   <span className={`text-[14px] text-[var(--color-ink)] [overflow-wrap:anywhere] ${r.unread ? "font-bold" : "font-medium"}`}>{r.title}</span>
+                  <span className="text-[11.5px] text-[var(--color-faint)]">{fmt(t.it.submittedOn, { date: stamp(r.created_at) })}</span>
                   <span className="flex w-full items-center gap-2 text-[11.5px] text-[var(--color-faint)]">
                     <UrgencyChip priority={r.priority} />
                     <span className="truncate">{r.assignee_name ?? t.it.notPicked}</span>
