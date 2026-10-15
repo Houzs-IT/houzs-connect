@@ -24,6 +24,7 @@ export function Topbar({
   center,
   current,
   companies,
+  canCreateCompany,
 }: {
   crumbs: Crumb[];
   /** Centred in the bar on desktop — page tabs (e.g. System Logs). */
@@ -36,6 +37,8 @@ export function Topbar({
   /** Companies this person may work in (src/lib/companies.ts). The switcher
    *  only appears when there is somewhere else to go. */
   companies?: CompanyChoice[];
+  /** Owner/admin: the switcher also offers "New company". */
+  canCreateCompany?: boolean;
 }) {
   const last = crumbs[crumbs.length - 1];
   const lastLabel = typeof last === "string" ? last : last?.label;
@@ -72,7 +75,7 @@ export function Topbar({
       {center && <div className="mx-auto hidden md:flex">{center}</div>}
 
       <div className={`${center ? "md:ml-0" : ""} ml-auto flex items-center gap-2`}>
-        <CompanySwitcher companies={companies} className="hidden md:block" />
+        <CompanySwitcher companies={companies} canCreateCompany={canCreateCompany} className="hidden md:block" />
         <LangToggle className="hidden md:flex" />
         {actions}
         <OnlinePeople className="hidden md:block" />
