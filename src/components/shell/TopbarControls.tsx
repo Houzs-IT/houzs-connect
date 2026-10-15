@@ -4,8 +4,9 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { logout } from "@/app/login/actions";
-import { switchCompany } from "@/app/company-actions";
+import { createCompany, switchCompany } from "@/app/company-actions";
 import type { CompanyChoice } from "@/lib/companies";
+import { ActionDialog } from "../ActionConfirm";
 import { PersonAvatar } from "../PersonAvatar";
 import { IconChevronDown, IconLogout, IconPanelOpen } from "../icons";
 import { useShell } from "./ShellProvider";
@@ -69,10 +70,23 @@ export function LangToggle({ className = "", pill = false }: { className?: strin
  * the others you may open. Picking one re-signs the session there and stays on
  * the same section. Shown only when there is somewhere else to go.
  */
-export function CompanySwitcher({ companies, className = "" }: { companies?: CompanyChoice[]; className?: string }) {
+export function CompanySwitcher({
+  companies,
+  canCreateCompany = false,
+  className = "",
+}: {
+  companies?: CompanyChoice[];
+  /** Owner/admin: show "New company" (Connect-only) at the foot of the menu. */
+  canCreateCompany?: boolean;
+  className?: string;
+}) {
   const { t } = useShell();
   const path = usePathname();
   const [open, setOpen] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const [name, setName] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -89,9 +103,28 @@ export function CompanySwitcher({ companies, className = "" }: { companies?: Com
     };
   }, [open]);
 
-  if (!companies || companies.length < 2) return null;
-  const current = companies.find((c) => c.current) ?? companies[0];
+  const list = companies ?? [];
+  // The switcher shows when there is somewhere else to go, OR when an owner may
+  // make one — otherwise a single-company owner would have no way in.
+  if (list.length < 2 && !canCreateCompany) return null;
+  const current = list.find((c) => c.current) ?? list[0];
   const section = path.split("/")[1] ?? "";
+
+  async function submitNew() {
+    const trimmed = name.trim();
+    if (trimmed.length < 2 || busy) return;
+    setBusy(true);
+    setErr(null);
+    const res = await createCompany(trimmed);
+    if (res.ok) {
+      // A full navigation so the freshly-signed session cookie takes effect;
+      // land on Contacts, where the new company's address book gets imported.
+      window.location.assign("/contacts");
+      return;
+    }
+    setBusy(false);
+    setErr(res.error);
+  }
 
   return (
     <div ref={ref} className={`relative ${className}`}>
@@ -104,7 +137,7 @@ export function CompanySwitcher({ companies, className = "" }: { companies?: Com
         onClick={() => setOpen((v) => !v)}
         className="flex h-[34px] max-w-[220px] items-center gap-1.5 rounded-[8px] border border-[color-mix(in_srgb,var(--color-brand)_45%,transparent)] bg-[color-mix(in_srgb,var(--color-brand)_7%,var(--color-surface))] pl-3 pr-2 text-[13px] font-semibold text-[var(--color-brand)] transition-colors hover:bg-[color-mix(in_srgb,var(--color-brand)_12%,var(--color-surface))]"
       >
-        <span className="truncate">{current.name}</span>
+        <span className="truncate">{current?.name}</span>
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden className="shrink-0 opacity-70">
           <path d="M8 9l4-4 4 4M8 15l4 4 4-4" />
         </svg>
@@ -115,7 +148,7 @@ export function CompanySwitcher({ companies, className = "" }: { companies?: Com
           role="menu"
           className="absolute left-0 z-40 mt-1 w-[240px] overflow-hidden rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)] py-1 shadow-[var(--shadow-popover)]"
         >
-          {companies.map((c) => (
+          {list.map((c) => (
             <form key={c.id} action={switchCompany}>
               <input type="hidden" name="companyId" value={c.id} />
               <input type="hidden" name="next" value={section} />
@@ -133,8 +166,68 @@ export function CompanySwitcher({ companies, className = "" }: { companies?: Com
               </button>
             </form>
           ))}
+          {canCreateCompany && (
+            <>
+              <div className="my-1 border-t border-[var(--color-border-subtle)]" />
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  setOpen(false);
+                  setName("");
+                  setErr(null);
+                  setCreating(true);
+                }}
+                className="flex w-full items-center gap-2 px-3 py-2 text-left text-[13px] font-semibold text-[var(--color-accent-ink)] hover:bg-[var(--color-surface-2)]"
+              >
+                <span className="grid w-4 shrink-0 place-items-center text-[15px] leading-none text-[var(--color-accent)]">+</span>
+                <span className="min-w-0 flex-1 truncate">{t.shell.newCompany}</span>
+              </button>
+            </>
+          )}
         </div>
       )}
+
+      <ActionDialog
+        open={creating}
+        title={t.shell.ncTitle}
+        subtitle={t.shell.ncHint}
+        width="w-[420px]"
+        onClose={() => !busy && setCreating(false)}
+      >
+        <div className="flex flex-col gap-3">
+          <input
+            autoFocus
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && void submitNew()}
+            maxLength={60}
+            placeholder={t.shell.ncNamePh}
+            className="h-[38px] w-full rounded-[8px] border border-[var(--color-border)] bg-[var(--color-surface)] px-3 text-[13px] text-[var(--color-ink)] outline-none placeholder:text-[var(--color-faint)] focus:border-[var(--color-accent)] focus:shadow-[0_0_0_3px_var(--color-accent-ring)]"
+          />
+          {err && (
+            <p className="rounded-[8px] bg-[var(--color-danger-soft)] px-3 py-2 text-[12px] text-[var(--color-danger)]">{err}</p>
+          )}
+          <div className="flex justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => setCreating(false)}
+              disabled={busy}
+              className="flex h-[34px] items-center rounded-[8px] border border-[var(--color-border)] bg-[var(--color-surface)] px-3.5 text-[13px] font-semibold text-[var(--color-ink)] hover:bg-[var(--color-surface-2)] disabled:opacity-40"
+            >
+              {t.shell.ncCancel}
+            </button>
+            <button
+              type="button"
+              onClick={() => void submitNew()}
+              disabled={busy || name.trim().length < 2}
+              className="flex h-[34px] items-center rounded-[8px] bg-[var(--color-accent)] px-4 text-[13px] font-semibold text-white shadow-[var(--shadow-primary)] hover:bg-[var(--color-accent-hi)] disabled:opacity-40 disabled:shadow-none"
+            >
+              {busy ? t.shell.ncCreating : t.shell.ncCreate}
+            </button>
+          </div>
+        </div>
+      </ActionDialog>
     </div>
   );
 }

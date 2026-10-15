@@ -6,8 +6,23 @@ import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { getDb } from "@/db/client";
 import { member } from "@/db/schema";
 import { getCurrentMember } from "@/lib/current-member";
-import { companyChoices } from "@/lib/companies";
+import { companyChoices, isOwnerOrAdmin } from "@/lib/companies";
+import { createConnectCompany } from "@/lib/whatsapp/number-assignment";
 import { SESSION_COOKIE, signSession } from "@/lib/erp-auth";
+
+/** Re-sign this browser's session as one member row — the single place the
+ *  session cookie is written, so switching and creating a company sign in the
+ *  same way. */
+async function setSessionCookie(memberId: string, secret: string) {
+  const jar = await cookies();
+  jar.set(SESSION_COOKIE, await signSession(memberId, secret), {
+    httpOnly: true,
+    secure: true,
+    sameSite: "lax",
+    path: "/",
+    maxAge: 7 * 24 * 3600,
+  });
+}
 
 /**
  * Work in another company: re-sign the session as this person's member row there.
@@ -59,13 +74,50 @@ export async function switchCompany(formData: FormData) {
 
   if (!row?.active) redirect("/inbox");
 
-  const jar = await cookies();
-  jar.set(SESSION_COOKIE, await signSession(row.id, secret), {
-    httpOnly: true,
-    secure: true,
-    sameSite: "lax",
-    path: "/",
-    maxAge: 7 * 24 * 3600,
-  });
+  await setSessionCookie(row.id, secret);
   redirect(next);
+}
+
+/**
+ * Create a new Connect-only company and drop the owner straight into it.
+ *
+ * This is the "number later" path: a company can exist, take contacts and be
+ * worked in before any WhatsApp number is assigned (Settings → Numbers attaches
+ * one to the already-existing company afterwards). Creation is owner/admin only,
+ * the same bar companyChoices() uses to let them into a Connect-only company —
+ * re-checked here because this is a public endpoint, not guarded by the UI.
+ *
+ * Returns an error for the dialog to show (a clashing name, a bad length); on
+ * success it signs the session into the new company and the client navigates.
+ */
+export async function createCompany(rawName: string): Promise<{ ok: true } | { ok: false; error: string }> {
+  const me = await getCurrentMember();
+  if (!me) return { ok: false, error: "Please sign in again." };
+  if (!isOwnerOrAdmin(me.role)) {
+    return { ok: false, error: "Only an owner or admin can create a company." };
+  }
+  const secret = getCloudflareContext().env.SESSION_SECRET;
+  if (!secret) return { ok: false, error: "The session is misconfigured — try again." };
+
+  const db = getDb();
+  const made = await createConnectCompany(db, rawName);
+  if ("error" in made) return { ok: false, error: made.error };
+
+  // The creator's own member row in the new company, carrying their role, then
+  // sign in there. onConflict covers the impossible-but-cheap re-entry.
+  const [row] = await db
+    .insert(member)
+    .values({
+      companyId: made.id,
+      email: me.email,
+      name: me.name,
+      role: me.role,
+      title: me.title,
+    })
+    .onConflictDoUpdate({ target: [member.companyId, member.email], set: { active: true } })
+    .returning({ id: member.id });
+  if (!row) return { ok: false, error: "Could not open the new company." };
+
+  await setSessionCookie(row.id, secret);
+  return { ok: true };
 }

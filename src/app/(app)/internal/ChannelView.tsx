@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import { IconPanelOpen } from "@/components/icons";
 import { CompanySwitcher, LangToggle } from "@/components/shell/TopbarControls";
 import { getDb } from "@/db/client";
-import { companyChoices } from "@/lib/companies";
+import { companyChoices, isOwnerOrAdmin } from "@/lib/companies";
 import { getCurrentMember } from "@/lib/current-member";
 import { fmt } from "@/lib/i18n/dict";
 import { getDict } from "@/lib/i18n/server";
@@ -50,7 +50,7 @@ export async function ChannelView({ channelId, threadId, info = false }: { chann
             ‹
           </Link>
           <h1 className="min-w-0 flex-1 truncate text-[16px] font-semibold text-[var(--color-ink)]">{title}</h1>
-          <CompanySwitcher companies={await companyChoices(getDb(), me)} className="hidden md:block" />
+          <CompanySwitcher companies={await companyChoices(getDb(), me)} canCreateCompany={isOwnerOrAdmin(me.role)} className="hidden md:block" />
           <LangToggle className="hidden md:flex" />
           {canManage && <ChannelMenu id={ch.id} name={ch.name} topic={ch.topic} access={ch.access} />}
         </header>
@@ -145,7 +145,7 @@ export async function ChannelView({ channelId, threadId, info = false }: { chann
               <span className="text-[12.5px] text-[var(--color-muted)]">{fmt(L.members, { n: memberCount })}</span>
             </span>
           )}
-          <CompanySwitcher companies={await companyChoices(getDb(), me)} className="hidden md:block" />
+          <CompanySwitcher companies={await companyChoices(getDb(), me)} canCreateCompany={isOwnerOrAdmin(me.role)} className="hidden md:block" />
           <LangToggle className="hidden md:flex" />
           {panelHref && !showInfo && (
             <Link

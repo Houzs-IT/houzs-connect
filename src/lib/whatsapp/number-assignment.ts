@@ -44,20 +44,18 @@ async function conversationCount(db: DB, channelId: string): Promise<number> {
   return row?.n ?? 0;
 }
 
-async function resolveCompany(
+/**
+ * Create a new Connect-only company (no ERP counterpart). The one place a
+ * company is born from a typed name — shared by the add-a-number flow and the
+ * "New company" action in the company switcher, so the name rules, the slug and
+ * the code are decided once. The org sync never touches a company whose
+ * erp_company_id is NULL, so this row is Connect's to keep.
+ */
+export async function createConnectCompany(
   db: DB,
-  target: AssignTarget
-): Promise<{ id: string; name: string; created: boolean } | { error: string }> {
-  if ("companyId" in target) {
-    const found = await db.query.company.findFirst({
-      columns: { id: true, name: true, active: true },
-      where: and(eq(company.id, target.companyId), bypassReadCache()),
-    });
-    if (!found || !found.active) return { error: "That company no longer exists." };
-    return { id: found.id, name: found.name, created: false };
-  }
-
-  const name = target.newCompanyName.trim().replace(/\s+/g, " ");
+  rawName: string
+): Promise<{ id: string; name: string; created: true } | { error: string }> {
+  const name = rawName.trim().replace(/\s+/g, " ");
   if (name.length < 2 || name.length > 60) {
     return { error: "A company name needs 2 to 60 characters." };
   }
@@ -81,6 +79,21 @@ async function resolveCompany(
     .values({ name, slug, code: base.replace(/-/g, "").toUpperCase().slice(0, 16) || null })
     .returning({ id: company.id, name: company.name });
   return { id: created.id, name: created.name, created: true };
+}
+
+async function resolveCompany(
+  db: DB,
+  target: AssignTarget
+): Promise<{ id: string; name: string; created: boolean } | { error: string }> {
+  if ("companyId" in target) {
+    const found = await db.query.company.findFirst({
+      columns: { id: true, name: true, active: true },
+      where: and(eq(company.id, target.companyId), bypassReadCache()),
+    });
+    if (!found || !found.active) return { error: "That company no longer exists." };
+    return { id: found.id, name: found.name, created: false };
+  }
+  return createConnectCompany(db, target.newCompanyName);
 }
 
 export async function assignNumber(
