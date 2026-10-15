@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useShell } from "../shell/ShellProvider";
 import { IconLifeBuoy, IconPaperclip } from "../icons";
+import { DataTable, type DataColumn, type DataRow } from "../DataTable";
 import { stamp } from "@/lib/format";
 import { agoLabel } from "@/lib/i18n/ago";
 import { fmt } from "@/lib/i18n/dict";
@@ -18,8 +19,9 @@ import { pageBeforeItSupport, refreshItUnread } from "./useItSupportShell";
  * IT Support: report a problem with Connect to IT, follow it, reply, and confirm
  * the fix. Every member has it and sees only their own requests (the server reads
  * who is asking from the session; lib/it-support/hub.ts). One screen, three views
- * chosen by the address so a link can open any of them: the list, ?new=1, and
- * ?request=CONNECT-0001.
+ * chosen by the address so a link can open any of them: the list (?tab=active|resolved,
+ * All when absent), ?new=1, and ?request=CONNECT-0001. Laid out like Hookka's IT
+ * Support, as Houzs Century's and Conts's are, so every system's works the same way.
  *
  * A list that failed to load is shown as that, never as an empty list.
  */
@@ -39,11 +41,13 @@ function Empty({ title, body, action }: { title: string; body?: string; action?:
   );
 }
 
-function RequestList({ onOpen, onNew }: { onOpen: (code: string) => void; onNew: () => void }) {
+const URGENCY_RANK = ["urgent", "high", "medium", "low"];
+
+function RequestList({ tab, onTab, onOpen, onNew }: { tab: ItTab; onTab: (t: ItTab) => void; onOpen: (code: string) => void; onNew: () => void }) {
   const { t } = useShell();
   const [rows, setRows] = useState<ItRequestRow[] | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [tab, setTab] = useState<ItTab>("active");
+  const [search, setSearch] = useState("");
 
   const load = useCallback(async () => {
     try {
@@ -60,6 +64,17 @@ function RequestList({ onOpen, onNew }: { onOpen: (code: string) => void; onNew:
     return () => window.clearInterval(timer);
   }, [load]);
 
+  const statusWord = (s: string) => (isItStatus(s) ? t.it.status[s] : s);
+  const urgencyWord = (p: string) => (t.it.urgencyShort as Record<string, string>)[p] ?? p;
+  const columns: DataColumn[] = [
+    { key: "code", label: t.it.colRequest, className: "w-[130px]", filter: false },
+    { key: "title", label: t.it.colProblem, filter: false },
+    { key: "status", label: t.it.colStatus, className: "w-[170px]" },
+    { key: "priority", label: t.it.colUrgency, className: "w-[110px]" },
+    { key: "assignee", label: t.it.colHandledBy, className: "w-[160px]" },
+    { key: "updated", label: t.it.colUpdated, className: "w-[160px]", filter: false },
+  ];
+
   if (!rows) {
     return error ? (
       <Empty title={t.it.loadFailed} body={error} action={<button type="button" className={SECONDARY} onClick={() => void load()}>{t.it.retry}</button>} />
@@ -74,7 +89,34 @@ function RequestList({ onOpen, onNew }: { onOpen: (code: string) => void; onNew:
   const tabs: { key: ItTab; label: string }[] = [
     { key: "all", label: t.it.tabAll }, { key: "active", label: t.it.tabActive }, { key: "resolved", label: t.it.tabResolved },
   ];
-  const shown = rows.filter((r) => itInTab(r.status, tab));
+  const inTab = rows.filter((r) => itInTab(r.status, tab));
+  const tableRows: DataRow[] = inTab.map((r) => ({
+    id: r.code,
+    href: `/it-support?request=${encodeURIComponent(r.code)}`,
+    cells: {
+      code: <span className="font-code text-[12px] font-semibold text-[var(--color-brand)]">{r.code}</span>,
+      title: (
+        <span className="flex min-w-0 items-center gap-2">
+          <span className={`truncate ${r.unread ? "font-bold" : ""} text-[var(--color-ink)]`}>{r.title}</span>
+          {r.unread && <span className="shrink-0 rounded-full bg-[var(--color-accent)] px-2 py-0.5 text-[10.5px] font-semibold text-white">{t.it.newReply}</span>}
+        </span>
+      ),
+      status: <StatusChip status={r.status} />,
+      priority: <UrgencyChip priority={r.priority} />,
+      assignee: <span className="truncate text-[var(--color-muted)]">{r.assignee_name ?? t.it.notPicked}</span>,
+      updated: <span className="whitespace-nowrap text-[12px] text-[var(--color-muted)]" title={agoLabel(t, r.updated_at)}>{stamp(r.updated_at)}</span>,
+    },
+    // Urgency sorts most urgent first, not by the word; the funnel and the search still see the word.
+    sort: {
+      code: r.code, title: r.title, status: statusWord(r.status), priority: URGENCY_RANK.indexOf(r.priority),
+      assignee: r.assignee_name ?? t.it.notPicked, updated: r.updated_at,
+    },
+    text: { priority: urgencyWord(r.priority), updated: stamp(r.updated_at) },
+  }));
+  // The phone has no table, so it has its own search over the same words.
+  const q = search.trim().toLowerCase();
+  const phoneRows = inTab.filter((r) => !q
+    || [r.code, r.title, r.assignee_name ?? t.it.notPicked, statusWord(r.status), urgencyWord(r.priority)].some((v) => v.toLowerCase().includes(q)));
 
   return (
     <div className="flex flex-col gap-3">
@@ -84,7 +126,7 @@ function RequestList({ onOpen, onNew }: { onOpen: (code: string) => void; onNew:
           const n = rows.filter((r) => itInTab(r.status, x.key)).length;
           const on = tab === x.key;
           return (
-            <button key={x.key} type="button" role="tab" aria-selected={on} onClick={() => setTab(x.key)}
+            <button key={x.key} type="button" role="tab" aria-selected={on} onClick={() => onTab(x.key)}
               className={`-mb-px flex items-center gap-1.5 border-b-2 px-3 py-2 text-[13px] font-semibold ${
                 on ? "border-[var(--color-accent)] text-[var(--color-ink)]" : "border-transparent text-[var(--color-muted)] hover:text-[var(--color-ink)]"
               }`}>
@@ -95,45 +137,22 @@ function RequestList({ onOpen, onNew }: { onOpen: (code: string) => void; onNew:
         })}
       </div>
 
-      {shown.length === 0 ? (
-        <p className={`${CARD} px-4 py-8 text-center text-[12.5px] text-[var(--color-muted)]`}>{t.it.emptyTab}</p>
-      ) : (
-        <>
-          {/* Desktop: one table. */}
-          <div className={`${CARD} hidden overflow-hidden md:block`}>
-            <table className="w-full table-fixed text-[13px]">
-              <thead className="bg-[var(--color-surface-2)] text-left text-[11px] font-semibold uppercase tracking-wider text-[var(--color-muted)]">
-                <tr>
-                  <th className="w-[130px] px-4 py-2.5">{t.it.colRequest}</th>
-                  <th className="px-3 py-2.5">{t.it.colProblem}</th>
-                  <th className="w-[170px] px-3 py-2.5">{t.it.colStatus}</th>
-                  <th className="w-[100px] px-3 py-2.5">{t.it.colUrgency}</th>
-                  <th className="w-[160px] px-3 py-2.5">{t.it.colHandledBy}</th>
-                  <th className="w-[120px] px-4 py-2.5 text-right">{t.it.colUpdated}</th>
-                </tr>
-              </thead>
-              <tbody>
-                {shown.map((r) => (
-                  <tr key={r.code} onClick={() => onOpen(r.code)} className="cursor-pointer border-t border-[var(--color-border-subtle)] hover:bg-[var(--color-surface-2)]">
-                    <td className="truncate px-4 py-2.5 font-code text-[12px] font-semibold text-[var(--color-brand)]">{r.code}</td>
-                    <td className="px-3 py-2.5">
-                      <div className="flex min-w-0 items-center gap-2">
-                        <span className={`truncate ${r.unread ? "font-bold" : ""} text-[var(--color-ink)]`}>{r.title}</span>
-                        {r.unread && <span className="shrink-0 rounded-full bg-[var(--color-accent)] px-2 py-0.5 text-[10.5px] font-semibold text-white">{t.it.newReply}</span>}
-                      </div>
-                    </td>
-                    <td className="px-3 py-2.5"><StatusChip status={r.status} /></td>
-                    <td className="px-3 py-2.5"><UrgencyChip priority={r.priority} /></td>
-                    <td className="truncate px-3 py-2.5 text-[var(--color-muted)]">{r.assignee_name ?? t.it.notPicked}</td>
-                    <td className="px-4 py-2.5 text-right text-[12px] text-[var(--color-faint)]" title={stamp(r.updated_at)}>{agoLabel(t, r.updated_at)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          {/* Phone: one card per request. */}
-          <ul className="flex flex-col gap-2 md:hidden">
-            {shown.map((r) => (
+      {/* Desktop: the table every Connect list uses (search, sort, filters, columns). */}
+      <div className="hidden md:block">
+        <DataTable columns={columns} rows={tableRows} searchPlaceholder={t.it.searchPh} stateKey="it-support"
+          initialSort={{ key: "updated", dir: "desc" }} minWidth={860}
+          empty={<p className="px-4 py-8 text-center text-[12.5px] text-[var(--color-muted)]">{t.it.emptyTab}</p>} />
+      </div>
+
+      {/* Phone: one card per request. */}
+      <div className="flex flex-col gap-2 md:hidden">
+        <input type="search" className={`${FIELD} h-[38px]`} value={search} onChange={(e) => setSearch(e.target.value)}
+          placeholder={t.it.searchPh} aria-label={t.it.searchPh} />
+        {phoneRows.length === 0 ? (
+          <p className={`${CARD} px-4 py-8 text-center text-[12.5px] text-[var(--color-muted)]`}>{q ? t.it.noMatch : t.it.emptyTab}</p>
+        ) : (
+          <ul className="flex flex-col gap-2">
+            {phoneRows.map((r) => (
               <li key={r.code}>
                 <button type="button" onClick={() => onOpen(r.code)} className={`${CARD} flex w-full flex-col gap-1.5 px-3.5 py-3 text-left`}>
                   <span className="flex w-full items-center gap-2">
@@ -151,8 +170,8 @@ function RequestList({ onOpen, onNew }: { onOpen: (code: string) => void; onNew:
               </li>
             ))}
           </ul>
-        </>
-      )}
+        )}
+      </div>
     </div>
   );
 }
@@ -315,7 +334,9 @@ function OneRequest({ code }: { code: string }) {
           <span className="font-code text-[12.5px] font-semibold text-[var(--color-brand)]">{tk.code}</span>
           <StatusChip status={tk.status} />
           <UrgencyChip priority={tk.priority} />
-          <span className="text-[12px] text-[var(--color-muted)]">{tk.assignee_name ? fmt(t.it.handledBy, { name: tk.assignee_name }) : t.it.notPicked}</span>
+          <span className="text-[12px] text-[var(--color-muted)]">
+            {(t.it.kind as Record<string, string>)[tk.type] ?? tk.type} · {tk.assignee_name ? fmt(t.it.handledBy, { name: tk.assignee_name }) : t.it.notPicked}
+          </span>
         </div>
         <h2 className="text-[17px] font-bold text-[var(--color-ink)] [overflow-wrap:anywhere]">{tk.title}</h2>
         {tk.description && <p className="whitespace-pre-wrap text-[13px] text-[var(--color-muted)] [overflow-wrap:anywhere]">{tk.description}</p>}
@@ -390,13 +411,15 @@ export function ItSupport({ connected }: { connected: boolean }) {
   const params = useSearchParams();
   const code = params.get("request") ?? "";
   const isNew = params.get("new") === "1";
+  const tabParam = params.get("tab");
+  const tab: ItTab = tabParam === "active" || tabParam === "resolved" ? tabParam : "all";
   const go = (q: string) => router.push(`/it-support${q}`);
 
   const heading = isNew ? t.it.report : code ? t.it.requestTitle : t.nav.itSupport;
   const sub = isNew ? t.it.newSub : code ? "" : t.it.subtitle;
 
   return (
-    <div className="mx-auto flex w-full max-w-5xl flex-col gap-4 px-4 py-5 sm:px-6">
+    <div className={`mx-auto flex w-full flex-col gap-4 px-4 py-5 sm:px-6 ${isNew || code ? "max-w-3xl" : "max-w-[1400px]"}`}>
       <header className="flex flex-wrap items-end justify-between gap-3">
         <div className="min-w-0">
           {(isNew || code) && (
@@ -419,7 +442,8 @@ export function ItSupport({ connected }: { connected: boolean }) {
       ) : code ? (
         <OneRequest key={code} code={code} />
       ) : (
-        <RequestList onOpen={(c) => go(`?request=${encodeURIComponent(c)}`)} onNew={() => go("?new=1")} />
+        <RequestList tab={tab} onTab={(x) => go(x === "all" ? "" : `?tab=${x}`)}
+          onOpen={(c) => go(`?request=${encodeURIComponent(c)}`)} onNew={() => go("?new=1")} />
       )}
     </div>
   );
