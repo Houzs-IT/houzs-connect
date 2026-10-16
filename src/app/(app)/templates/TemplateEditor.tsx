@@ -202,10 +202,10 @@ export function TemplateEditor({
 
   const patchCard = (uid: number, p: Partial<Card>) => setCards((cs) => cs.map((c) => (c.uid === uid ? { ...c, ...p } : c)));
 
-  /** Pick the header: none, text, or an image / PDF (which drops any chosen file of the other kind). */
+  /** Pick the header: none, text, or an image / PDF / video (which drops any chosen file of the other kind). */
   function pickHeader(next: "none" | "text" | HeaderMediaFormat) {
     setHeaderOn(next === "text");
-    const media = next === "IMAGE" || next === "DOCUMENT" ? next : null;
+    const media = next === "IMAGE" || next === "DOCUMENT" || next === "VIDEO" ? next : null;
     if (media !== headerMedia) chooseHeaderFile(null);
     setHeaderMedia(media);
   }
@@ -440,6 +440,7 @@ export function TemplateEditor({
                   // A media header cannot be carried through an edit (templates.ts), so only a new template offers one.
                   [L.hImage, headerMedia === "IMAGE", () => pickHeader("IMAGE"), !editing],
                   [L.hDocument, headerMedia === "DOCUMENT", () => pickHeader("DOCUMENT"), !editing],
+                  [L.hVideo, headerMedia === "VIDEO", () => pickHeader("VIDEO"), !editing],
                 ] as [string, boolean, () => void, boolean][]).map(([l, on, fn, ok]) => (
                   <button
                     key={l}
@@ -470,13 +471,15 @@ export function TemplateEditor({
                         <img src={headerPreview} alt="" className="h-full w-full object-cover" />
                       ) : headerMedia === "DOCUMENT" ? (
                         "PDF"
+                      ) : headerMedia === "VIDEO" ? (
+                        "MP4"
                       ) : (
                         "IMG"
                       )}
                     </span>
                     <span className="min-w-0 flex-1">
                       <span className="block truncate text-[13px] font-semibold text-[var(--color-ink)]">{headerFile?.name ?? L.hChoose}</span>
-                      <span className="block text-[11.5px] text-[var(--color-faint)]">{headerMedia === "IMAGE" ? L.hFileImage : L.hFileDoc}</span>
+                      <span className="block text-[11.5px] text-[var(--color-faint)]">{headerMedia === "IMAGE" ? L.hFileImage : headerMedia === "VIDEO" ? L.hFileVideo : L.hFileDoc}</span>
                     </span>
                     <span className="shrink-0 text-[12.5px] font-semibold text-[var(--color-accent)]">{headerFile ? L.hReplace : L.hChoose}</span>
                     <input

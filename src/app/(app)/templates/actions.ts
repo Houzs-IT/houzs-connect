@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { getDb } from "@/db/client";
 import { getCurrentMember } from "@/lib/current-member";
-import { headerFileProblem, isHeaderMediaFormat } from "@/lib/template-media-limits";
+import { headerFileProblem, isHeaderMediaFormat, type HeaderMediaFormat } from "@/lib/template-media-limits";
 import { saveTemplateMedia } from "@/lib/whatsapp/templateMedia";
 import {
   createTemplate,
@@ -27,6 +27,11 @@ import { STARTER_TEMPLATES } from "./starterTemplates";
  *  be a signed-in member — the same bar settings mutations use. */
 async function requireMember() {
   return await getCurrentMember();
+}
+
+/** A fallback name for a header file the browser handed over unnamed. */
+function defaultHeaderName(format: HeaderMediaFormat): string {
+  return format === "IMAGE" ? "header.jpg" : format === "VIDEO" ? "header.mp4" : "header.pdf";
 }
 
 export interface TemplateListResult {
@@ -82,8 +87,8 @@ export interface ComposerPayload {
   kind?: "standard" | "call_permission" | "carousel";
   /** Carousel cards without their images (for Copy as cURL). */
   cards?: { body: string; buttons: string[] }[];
-  /** An image / PDF header; the file itself goes through submitMediaHeaderTemplate. */
-  headerFormat?: "IMAGE" | "DOCUMENT";
+  /** An image / PDF / video header; the file itself goes through submitMediaHeaderTemplate. */
+  headerFormat?: "IMAGE" | "DOCUMENT" | "VIDEO";
 }
 
 /** The draft a standard / call-permission composer payload describes. */
@@ -155,7 +160,7 @@ export async function submitMediaHeaderTemplate(fd: FormData): Promise<SubmitRes
   if (problem) return { ok: false, error: problem };
 
   const bytes = await file.arrayBuffer();
-  const fileName = file.name || (format === "IMAGE" ? "header.jpg" : "header.pdf");
+  const fileName = file.name || defaultHeaderName(format);
   const up = await uploadForHandle(cfg, bytes, file.type, fileName);
   if (!up.ok) return { ok: false, error: `Header file: ${up.error}` };
 
@@ -204,7 +209,7 @@ export async function setTemplateHeaderFile(fd: FormData): Promise<{ ok: boolean
       language,
       format,
       mimeType: file.type,
-      fileName: file.name || (format === "IMAGE" ? "header.jpg" : "header.pdf"),
+      fileName: file.name || defaultHeaderName(format),
       bytes: await file.arrayBuffer(),
       by: me.id,
     });

@@ -68,11 +68,12 @@ export interface TemplateDraft {
   /** Carousel cards, 2–10, each with an uploaded image handle. */
   cards?: CarouselCard[];
   /**
-   * An IMAGE / DOCUMENT header instead of a text one: the sample Meta reviews,
-   * as a handle from the Resumable Upload API (profile.ts uploadForHandle).
-   * Every SEND then needs the file again (templateMedia.ts headerForSend).
+   * An IMAGE / DOCUMENT / VIDEO header instead of a text one: the sample Meta
+   * reviews, as a handle from the Resumable Upload API (profile.ts
+   * uploadForHandle). Every SEND then needs the file again (templateMedia.ts
+   * headerForSend).
    */
-  headerMedia?: { format: "IMAGE" | "DOCUMENT"; handle: string };
+  headerMedia?: { format: "IMAGE" | "DOCUMENT" | "VIDEO"; handle: string };
 }
 
 export interface CarouselCard {
