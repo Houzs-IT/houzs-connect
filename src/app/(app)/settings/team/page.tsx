@@ -1,4 +1,5 @@
 import { notFound } from "next/navigation";
+import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { sql } from "drizzle-orm";
 import { getDb } from "@/db/client";
 import { member } from "@/db/schema";
@@ -10,6 +11,7 @@ import { can, isAdminRole } from "@/lib/permissions";
 import { SettingsHead } from "../ui";
 import { fetchTeam } from "./actions";
 import { InvitePerson } from "./InvitePerson";
+import { StagingLogin } from "./StagingLogin";
 import { AccessRequests } from "./AccessRequests";
 import { TeamClient } from "./TeamClient";
 
@@ -36,8 +38,16 @@ export default async function TeamPage() {
       <AccessRequests requests={requests} companies={view.companies} canDept={canDept} canFinal={canFinal} />
     ) : null;
 
+  const staging = getCloudflareContext().env.CONNECT_STAGING === "1";
+  const actions = view.permitted ? (
+    <div className="flex items-center gap-2">
+      {staging && isAdminRole(me.role) ? <StagingLogin /> : null}
+      <InvitePerson />
+    </div>
+  ) : undefined;
+
   return (
-    <PageChrome section="settings" page="team" actions={view.permitted ? <InvitePerson /> : undefined}>
+    <PageChrome section="settings" page="team" actions={actions}>
       <div className="p-4 md:p-6">
         <SettingsHead title={L.teamTitle} sub={L.teamSub} />
         {!view.permitted ? (
