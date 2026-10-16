@@ -133,7 +133,9 @@ export function TemplateSide({
                   <span className="text-[var(--color-faint)]">{L.hfSent}</span>
                 </>
               ) : (
-                fmt(L.hfMissing, { kind: (mediaFormat === "IMAGE" ? L.hImage : L.hDocument).toLowerCase() })
+                fmt(L.hfMissing, {
+                  kind: (mediaFormat === "IMAGE" ? L.hImage : mediaFormat === "VIDEO" ? L.hVideo : L.hDocument).toLowerCase(),
+                })
               )}
             </p>
             <label
@@ -158,9 +160,6 @@ export function TemplateSide({
             <p className={`mt-1.5 text-[11.5px] ${fileNote.ok ? "text-[var(--color-faint)]" : "text-[var(--color-danger)]"}`}>{fileNote.text}</p>
           )}
         </div>
-      )}
-      {headerFormat === "VIDEO" && (
-        <p className="rounded-[8px] bg-[var(--color-pastel-orange)] px-3 py-2 text-[11.5px] text-[var(--color-ink)]">{L.hfVideo}</p>
       )}
 
       {slots.length > 0 && (
