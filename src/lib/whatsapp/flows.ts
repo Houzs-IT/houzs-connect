@@ -6,6 +6,7 @@
 import { isLive } from "./cloud-api";
 import { metaToken } from "./token";
 import { rawFetch } from "@/lib/raw-fetch";
+import { stagingMetaWriteRefusal } from "@/lib/staging";
 import { readFields, keyFromLabel } from "@/app/(app)/forms/fields";
 
 const GRAPH = "https://graph.facebook.com/v23.0";
@@ -231,6 +232,8 @@ export async function publishFlow(form: {
   fields: unknown;
   metaFlowId?: string | null;
 }): Promise<PublishFlowResult> {
+  const refused = stagingMetaWriteRefusal("POST");
+  if (refused) return { ok: false, error: refused };
   const waba = process.env.WHATSAPP_WABA_ID;
   const token = metaToken();
   if (!waba || !token) {

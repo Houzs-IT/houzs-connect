@@ -5,7 +5,9 @@
 //      they are missing - staging has no ERP, so its staff accounts live here;
 //   3. with --login <email> [--name "<name>"] [--role Owner], creates or resets
 //      that staging login and prints a new password ONCE in this terminal;
-//   4. with --seed, wipes and reloads the demo data (scripts/seed.ts).
+//   4. with --seed, wipes and reloads the demo data (scripts/seed.ts);
+//   5. with --flows, loads the real delivery flows (scripts/seed-flows.ts) and
+//      switches them on, so the ERP staging board's Send Message has them.
 //
 //   pnpm staging:setup --seed --login you@example.com --name "Your Name"
 import { readFileSync } from "node:fs";
@@ -13,6 +15,7 @@ import { resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { migrate } from "drizzle-orm/postgres-js/migrator";
 import { getSql } from "../src/db/pg";
+import { REBUILD_FLOWS } from "../src/lib/automation/flows";
 import { STAFF_TABLES_DDL, hashStaffPassword, newStaffPassword } from "../src/lib/staging-logins";
 
 // The production Supabase project (wrangler.toml, Hyperdrive houzs-connect-pg).
@@ -77,6 +80,21 @@ async function main() {
       });
       sql = getSql(url);
       if (r.status !== 0) throw new Error("Seeding failed.");
+    }
+
+    if (process.argv.includes("--flows")) {
+      await sql.end();
+      const r = spawnSync(process.execPath, ["node_modules/tsx/dist/cli.mjs", "scripts/seed-flows.ts"], {
+        stdio: "inherit",
+        env: process.env,
+      });
+      sql = getSql(url);
+      if (r.status !== 0) throw new Error("Loading the flows failed.");
+      const names = REBUILD_FLOWS.map((f) => f.name);
+      const on = await sql`
+        UPDATE connect.automation SET enabled = true, status = 'PUBLISHED'
+        WHERE name IN ${sql(names)} RETURNING name`;
+      console.log(`Flows switched on: ${on.map((o) => o.name).join(", ")}`);
     }
 
     const email = arg("login")?.trim().toLowerCase();

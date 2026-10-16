@@ -6,6 +6,8 @@
 // verify or register says so in `error_user_msg`, and losing that sentence is
 // what turns a five-minute fix into a day of guessing.
 
+import { stagingMetaWriteRefusal } from "@/lib/staging";
+
 export interface GraphError {
   error?: { message?: string; error_user_msg?: string; code?: number };
 }
@@ -17,6 +19,8 @@ export async function graph<T>(
   token: string,
   init?: RequestInit
 ): Promise<GraphResult<T>> {
+  const refused = stagingMetaWriteRefusal(init?.method);
+  if (refused) return { ok: false, error: refused };
   let res: Response;
   try {
     res = await fetch(url, {

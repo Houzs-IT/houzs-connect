@@ -1,9 +1,9 @@
 name: Deploy Houzs Connect (staging)
 
 # Publishes the `staging` branch to the houzs-connect-staging Worker
-# (wrangler.toml [env.staging]): its own Supabase project, WhatsApp in DEMO, no
-# Meta token, no ERP calls. Production (deploy.yml, chat.houzscentury.com) is
-# never touched. Applies new migrations to the staging database first when the
+# (wrangler.toml [env.staging]): its own Supabase project, WhatsApp LIVE but
+# fenced to the test phones, call_rest_api to the ERP staging Worker only.
+# Production (deploy.yml, chat.houzscentury.com) is never touched. Applies new migrations to the staging database first when the
 # STAGING_DATABASE_URL secret is set.
 on:
   push:

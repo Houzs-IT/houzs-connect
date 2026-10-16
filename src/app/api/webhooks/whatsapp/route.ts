@@ -15,6 +15,9 @@ import { handleInboundMessage } from "@/lib/automation/dispatch";
 import { loadRoutingTable, pickInboundChannel } from "@/lib/whatsapp/channels";
 import { maybeAutoReply } from "@/lib/auto-reply/run";
 import { mustRefuse, signatureState, type SignatureState } from "@/lib/whatsapp/signature";
+import { rawFetch } from "@/lib/raw-fetch";
+import { stagingRelayPhones } from "@/lib/staging";
+import { STAGING_WEBHOOK_URL, relayToStaging } from "@/lib/staging-fence";
 
 /**
  * Whether signature enforcement has armed (see mustRefuse): some delivery in the
@@ -159,6 +162,21 @@ export async function POST(req: NextRequest) {
 
   if (!body?.entry) {
     await finish("ignored:no-entry", false);
+    return NextResponse.json({ ok: true });
+  }
+
+  // A tester's phone (STAGING_RELAY_PHONES) is answered by staging, which sends
+  // from this same number: Meta delivers every reply and status for it here.
+  // Passed on byte for byte with Meta's signature, and not handled here.
+  if (relayToStaging(body, stagingRelayPhones())) {
+    const signature = req.headers.get("x-hub-signature-256");
+    const res = await rawFetch()(STAGING_WEBHOOK_URL, {
+      method: "POST",
+      headers: { "content-type": "application/json", ...(signature ? { "x-hub-signature-256": signature } : {}) },
+      body: raw,
+      signal: AbortSignal.timeout(10_000),
+    }).catch(() => null);
+    await finish(res?.ok ? "relayed:staging" : `failed:relay-staging-${res?.status ?? "network"}`, !!res?.ok);
     return NextResponse.json({ ok: true });
   }
 
