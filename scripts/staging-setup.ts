@@ -13,6 +13,7 @@ import { resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { migrate } from "drizzle-orm/postgres-js/migrator";
 import { getSql } from "../src/db/pg";
+import { STAFF_TABLES_DDL, hashStaffPassword, newStaffPassword } from "../src/lib/staging-logins";
 
 // The production Supabase project (wrangler.toml, Hyperdrive houzs-connect-pg).
 const PRODUCTION_REF = "anogrigyjbduyzclzjgn";
@@ -40,21 +41,6 @@ function arg(name: string): string | undefined {
   return i > 0 ? process.argv[i + 1] : undefined;
 }
 
-/** Same PBKDF2 `salt$hash` format the ERP writes and src/lib/erp-auth.ts verifies. */
-async function hashPassword(password: string): Promise<string> {
-  const salt = crypto.getRandomValues(new Uint8Array(16));
-  const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(password), "PBKDF2", false, ["deriveBits"]);
-  const bits = await crypto.subtle.deriveBits({ name: "PBKDF2", salt, iterations: 100_000, hash: "SHA-256" }, key, 256);
-  const b64 = (b: Uint8Array) => Buffer.from(b).toString("base64");
-  return `${b64(salt)}$${b64(new Uint8Array(bits))}`;
-}
-
-function newPassword(): string {
-  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789";
-  const bytes = crypto.getRandomValues(new Uint8Array(16));
-  return Array.from(bytes, (b) => alphabet[b % alphabet.length]).join("");
-}
-
 async function main() {
   loadStagingVars();
   const url = process.env.DATABASE_URL ?? "";
@@ -80,15 +66,7 @@ async function main() {
     });
     console.log("Migrations applied.");
 
-    await sql`CREATE TABLE IF NOT EXISTS public.roles (id serial PRIMARY KEY, name text NOT NULL UNIQUE)`;
-    await sql`CREATE TABLE IF NOT EXISTS public.users (
-      id serial PRIMARY KEY,
-      email text NOT NULL UNIQUE,
-      name text,
-      password_hash text NOT NULL,
-      status text NOT NULL DEFAULT 'active',
-      role_id integer NOT NULL REFERENCES public.roles(id)
-    )`;
+    for (const ddl of STAFF_TABLES_DDL) await sql.unsafe(ddl);
     console.log("Staff tables ready (public.roles, public.users).");
 
     if (process.argv.includes("--seed")) {
@@ -108,10 +86,10 @@ async function main() {
       const [roleRow] = await sql<{ id: number }[]>`
         INSERT INTO public.roles (name) VALUES (${role})
         ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name RETURNING id`;
-      const password = newPassword();
+      const password = newStaffPassword();
       await sql`
         INSERT INTO public.users (email, name, password_hash, status, role_id)
-        VALUES (${email}, ${name}, ${await hashPassword(password)}, 'active', ${roleRow.id})
+        VALUES (${email}, ${name}, ${await hashStaffPassword(password)}, 'active', ${roleRow.id})
         ON CONFLICT (email) DO UPDATE SET name = EXCLUDED.name, password_hash = EXCLUDED.password_hash,
           status = 'active', role_id = EXCLUDED.role_id`;
       console.log(`\nStaging login ready: ${email} (${role})\nPassword: ${password}\nIt is shown only now; run again to reset it.`);

@@ -27,8 +27,10 @@ applies new migrations to the staging database and deploys.
    pnpm staging:setup --seed --login you@houzscentury.com --name "Your Name"
    ```
 
-   Staging has no ERP, so its logins live in its own `public.users`; run the same command
-   with another `--login` (and `--role Agent`, `Manager`, ...) to add testers.
+   Staging has no ERP, so its logins live in its own `public.users`. After this first one,
+   add testers in the app: Settings -> Team -> "Create staging login" (owners and admins,
+   staging only), which shows the new person's password once. The same command with another
+   `--login` (and `--role Admin`, `Manager`, `Agent`, ...) also works.
 5. Push `staging` (first deploy creates the Worker). The address,
    `houzs-connect-staging.<account>.workers.dev`, is printed at the end of the workflow run.
 6. Session key for staging logins (generated and sent straight to Cloudflare, never shown):
