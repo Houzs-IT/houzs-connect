@@ -1,3 +1,4 @@
+import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { redirect } from "next/navigation";
 import { and, gt, ne } from "drizzle-orm";
 import { Sidebar } from "@/components/Sidebar";
@@ -71,6 +72,7 @@ export default async function AppLayout({
   const internalUnread = await internalUnreadTotal(me.companyId, me.id);
 
   const live = process.env.WHATSAPP_MODE === "LIVE";
+  const staging = getCloudflareContext().env.CONNECT_STAGING === "1";
   // Env only, no hub call: the unread count is fetched by the browser, so a slow
   // or missing hub never holds up a page.
   const itSupport = itSupportConnected();
@@ -84,6 +86,11 @@ export default async function AppLayout({
       <PresencePing />
       <NotifyPoller />
       <div data-shell className="flex h-dvh flex-col overflow-hidden">
+        {staging ? (
+          <div className="shrink-0 bg-amber-400 px-3 py-0.5 text-center text-xs font-semibold text-amber-950">
+            STAGING - test data only, WhatsApp is off
+          </div>
+        ) : null}
         <div className="flex min-h-0 flex-1">
           <Sidebar unread={unread} internalUnread={internalUnread} live={live} itSupport={itSupport} me={{ name: me.name, photo: await getMyPhotoSrc() }} />
           <div className="flex min-w-0 flex-1">{children}</div>

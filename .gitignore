@@ -48,6 +48,8 @@ dev.db-journal
 
 # Cloudflare / OpenNext
 .dev.vars
+.dev.vars.*
+!.dev.vars.example
 .open-next/
 .wrangler/
 
