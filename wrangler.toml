@@ -132,5 +132,5 @@ enabled = true
 # refuses to run while this is still the placeholder.
 [[env.staging.hyperdrive]]
 binding = "HYPERDRIVE"
-id = "STAGING_HYPERDRIVE_ID"
+id = "2d7e54e6366a4190985cd2bfb4a6759c"
 localConnectionString = "postgresql://postgres:postgres@localhost:5432/postgres"
