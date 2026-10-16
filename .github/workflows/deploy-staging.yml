@@ -1,0 +1,60 @@
+name: Deploy Houzs Connect (staging)
+
+# Publishes the `staging` branch to the houzs-connect-staging Worker
+# (wrangler.toml [env.staging]): its own Supabase project, WhatsApp in DEMO, no
+# Meta token, no ERP calls. Production (deploy.yml, chat.houzscentury.com) is
+# never touched. Applies new migrations to the staging database first when the
+# STAGING_DATABASE_URL secret is set.
+on:
+  push:
+    branches: [staging]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-connect-staging
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE: "postgresql://user:pass@localhost:5432/placeholder"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Staging database configured
+        run: |
+          if grep -q '"STAGING_HYPERDRIVE_ID"' wrangler.toml; then
+            echo "::error::[env.staging.hyperdrive] id is still the placeholder. Create the staging Hyperdrive config and put its id in wrangler.toml."
+            exit 1
+          fi
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - name: Install deps
+        run: pnpm install --frozen-lockfile
+
+      - name: Apply migrations to the staging database
+        env:
+          DATABASE_URL: ${{ secrets.STAGING_DATABASE_URL }}
+          # GitHub runners have no IPv6; Supabase's pooler also advertises AAAA.
+          NODE_OPTIONS: --dns-result-order=ipv4first
+        run: |
+          if [ -z "$DATABASE_URL" ]; then
+            echo "STAGING_DATABASE_URL is not set; skipping migrations."
+            exit 0
+          fi
+          pnpm staging:setup
+
+      - name: Build (OpenNext, Linux)
+        run: pnpm run cf:build
+      - name: Deploy to Cloudflare (staging)
+        run: node node_modules/@opennextjs/cloudflare/dist/cli/index.js deploy --env staging
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: "816e457307d7fa0491c2a08a72ad5dcd"

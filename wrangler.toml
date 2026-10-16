@@ -102,3 +102,35 @@ id = "8da3d98a8fc94f6f938fc06689f9c611"
 # goes through DATABASE_URL in .dev.vars (see .dev.vars.example), which
 # resolveDatabaseUrl() prefers.
 localConnectionString = "postgresql://postgres:postgres@localhost:5432/postgres"
+
+# ── Staging ───────────────────────────────────────────────────────────────────
+# `--env staging` deploys a separate Worker, houzs-connect-staging, on its OWN
+# Supabase project, so testing there never touches live contacts, chats or
+# automations. Published by .github/workflows/deploy-staging.yml on a push to the
+# `staging` branch. Vars and bindings are not inherited from the top level, so
+# nothing below the production [vars]/[[services]] reaches staging unless it is
+# repeated here: no ERP service binding, no IT Hub, no Meta token.
+[env.staging]
+name = "houzs-connect-staging"
+# Inherited otherwise: staging must never claim chat.houzscentury.com.
+routes = []
+workers_dev = true
+
+[env.staging.vars]
+# DEMO stubs every WhatsApp send. CONNECT_PREVIEW=1 additionally withholds the
+# Meta token (src/lib/whatsapp/token.ts) and stops automations' call_rest_api
+# nodes from reaching the ERP or any other outside address.
+WHATSAPP_MODE = "DEMO"
+CONNECT_PREVIEW = "1"
+CONNECT_STAGING = "1"
+
+[env.staging.observability]
+enabled = true
+
+# Hyperdrive config houzs-connect-staging-pg -> the staging Supabase project.
+# Not a secret (the connection string lives on Cloudflare); the deploy workflow
+# refuses to run while this is still the placeholder.
+[[env.staging.hyperdrive]]
+binding = "HYPERDRIVE"
+id = "STAGING_HYPERDRIVE_ID"
+localConnectionString = "postgresql://postgres:postgres@localhost:5432/postgres"
