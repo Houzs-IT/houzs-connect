@@ -18,6 +18,7 @@ import { interpolate } from "./vars";
 import { attrs } from "@/lib/format";
 import { getOrCreateConversation, sendOutbound } from "@/lib/whatsapp/transport";
 import { generateAgentReply } from "@/lib/ai";
+import { stagingRestRefusal } from "@/lib/staging";
 
 /**
  * Automation runtime. Interprets a FlowGraph node-by-node, performing side
@@ -41,7 +42,7 @@ function erpBindings(): RestBindings {
   if (!erp) return {};
   return Object.fromEntries(ERP_HOSTS.map((h) => [h, erp]));
 }
-/** PR preview or staging. Read from the Worker env as well: `next dev` puts
+/** PR preview. Read from the Worker env as well: `next dev` puts
  *  .dev.vars there but not on process.env. */
 function isPreview(): boolean {
   if (process.env.CONNECT_PREVIEW === "1") return true;
@@ -349,10 +350,15 @@ async function execNode(
     }
 
     case "call_rest_api": {
-      // Staging and PR previews must never reach the ERP or a live sheet: a
-      // preview shares production data, and staging's flows are test copies.
+      // PR previews must never reach the ERP or a live sheet: a preview shares
+      // production data. Staging reaches the ERP staging Worker and nothing else.
       if (isPreview()) {
         await logStep(ctx.runId, { node: node.id, type: node.type, skipped: "preview" });
+        return { next: nextNodeId(ctx.graph, node.id) };
+      }
+      const offStaging = stagingRestRefusal(interpolate(String(d.url ?? ""), varCtx));
+      if (offStaging) {
+        await logStep(ctx.runId, { node: node.id, type: node.type, skipped: offStaging });
         return { next: nextNodeId(ctx.graph, node.id) };
       }
       // Real outbound HTTP (see lib/automation/rest.ts). callRestApi never

@@ -14,6 +14,7 @@
 import { MAX_CAPTION_CHARS, type AttachmentKind } from "./media-limits";
 import { addressing } from "./cloud-api";
 import { metaToken } from "./token";
+import { stagingRecipientRefusal } from "@/lib/staging";
 
 // v23.0 to match cloud-api.ts. The `recipient` field that addresses a WhatsApp
 // username was verified against v23.0; v21.0 predates usernames entirely, so
@@ -131,6 +132,8 @@ async function postMessage(
   // or contact card sent to a username customer is accepted by Meta and
   // delivered to a phantom number — see addressing() in cloud-api.ts.
   const to = typeof payload.to === "string" ? payload.to : "";
+  const refused = stagingRecipientRefusal(to);
+  if (refused) return { ok: false, error: refused };
   const rest = { ...payload };
   delete rest.to;
   let res: Response;

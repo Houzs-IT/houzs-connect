@@ -22,10 +22,17 @@ interface CloudflareEnv {
   /** WhatsApp Business Account id — needed to list/create message templates. */
   WHATSAPP_WABA_ID?: string;
 
-  // "1" on PR previews and staging: no Meta token, no call_rest_api.
+  // "1" on PR previews: no Meta token, no call_rest_api.
   CONNECT_PREVIEW?: string;
-  // "1" on the staging Worker only: shows the STAGING strip.
+  // "1" on the staging Worker only: the STAGING strip and the fence in
+  // src/lib/staging-fence.ts (sends to STAGING_ALLOWED_PHONES only, call_rest_api
+  // to the ERP staging Worker only, no WhatsApp account changes).
   CONNECT_STAGING?: string;
+  // Staging: the test phones it may message, comma-separated. Empty = none.
+  STAGING_ALLOWED_PHONES?: string;
+  // Production: the test phones whose WhatsApp deliveries are forwarded to
+  // staging instead of handled here. Empty = none.
+  STAGING_RELAY_PHONES?: string;
 
   // ERP org sync (see src/lib/sync/erp-org.ts + app/api/admin/sync-org).
   // ERP_API_BASE defaults to https://erp.houzscentury.com when unset.

@@ -4,6 +4,7 @@
 // code change. Docs: https://developers.facebook.com/docs/whatsapp/cloud-api
 import type { FlowButton } from "@/lib/automation/types";
 import { metaToken } from "./token";
+import { stagingRecipientRefusal } from "@/lib/staging";
 
 export function isLive(): boolean {
   return (
@@ -81,6 +82,11 @@ async function post(
   const phoneId = from ?? process.env.WHATSAPP_PHONE_NUMBER_ID!;
   const token = metaToken()!;
   const to = typeof payload.to === "string" ? payload.to : "";
+  const refused = stagingRecipientRefusal(to);
+  if (refused) {
+    if (out) out.error = refused;
+    return null;
+  }
   // `to` is re-added by addressing() only when it is a phone number. Deleting it
   // here is what keeps it out of a username send — Meta says that if both `to`
   // and `recipient` are present, `to` wins, so leaving it in would silently

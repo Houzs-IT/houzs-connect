@@ -88,7 +88,7 @@ export default async function AppLayout({
       <div data-shell className="flex h-dvh flex-col overflow-hidden">
         {staging ? (
           <div className="shrink-0 bg-amber-400 px-3 py-0.5 text-center text-xs font-semibold text-amber-950">
-            STAGING - test data only, WhatsApp is off
+            STAGING - test data only, WhatsApp goes to the test numbers only
           </div>
         ) : null}
         <div className="flex min-h-0 flex-1">

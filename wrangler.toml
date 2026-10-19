@@ -109,7 +109,7 @@ localConnectionString = "postgresql://postgres:postgres@localhost:5432/postgres"
 # automations. Published by .github/workflows/deploy-staging.yml on a push to the
 # `staging` branch. Vars and bindings are not inherited from the top level, so
 # nothing below the production [vars]/[[services]] reaches staging unless it is
-# repeated here: no ERP service binding, no IT Hub, no Meta token.
+# repeated here: no ERP service binding, no IT Hub.
 [env.staging]
 name = "houzs-connect-staging"
 # Inherited otherwise: staging must never claim chat.houzscentury.com.
@@ -117,11 +117,13 @@ routes = []
 workers_dev = true
 
 [env.staging.vars]
-# DEMO stubs every WhatsApp send. CONNECT_PREVIEW=1 additionally withholds the
-# Meta token (src/lib/whatsapp/token.ts) and stops automations' call_rest_api
-# nodes from reaching the ERP or any other outside address.
-WHATSAPP_MODE = "DEMO"
-CONNECT_PREVIEW = "1"
+# LIVE on the company's Meta token and number (Worker secrets WHATSAPP_TOKEN,
+# WHATSAPP_PHONE_NUMBER_ID, WHATSAPP_WABA_ID), fenced by CONNECT_STAGING
+# (src/lib/staging-fence.ts): sends only to the STAGING_ALLOWED_PHONES secret,
+# call_rest_api only to the ERP staging Worker, no template / number / profile /
+# Flow changes. Until WHATSAPP_TOKEN is set nothing reaches Meta at all.
+# Production relays the testers' replies here (STAGING_RELAY_PHONES on prod).
+WHATSAPP_MODE = "LIVE"
 CONNECT_STAGING = "1"
 
 [env.staging.observability]

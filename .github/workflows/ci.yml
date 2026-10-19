@@ -77,6 +77,11 @@ jobs:
       - name: Inbound webhook shared-secret smoke test (pure, no DB)
         run: node scripts/smoke-webhook-auth.mjs
 
+      # Staging runs LIVE on the company number: it may message only the test
+      # phones, call only the ERP staging Worker, and never change the account.
+      - name: Staging fence smoke test (pure, no DB)
+        run: node scripts/smoke-staging-fence.mjs
+
       - name: IT Support rules smoke test (pure, no DB)
         run: node scripts/smoke-it-support.mjs
 
