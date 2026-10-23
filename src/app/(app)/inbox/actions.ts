@@ -3,8 +3,10 @@
 import { revalidatePath } from "next/cache";
 import { and, desc, eq, gt, inArray, isNotNull } from "drizzle-orm";
 import { getCurrentMember } from "@/lib/current-member";
-import { getDb } from "@/db/client";
-import { automationRun, contact, conversation, conversationMember, member } from "@/db/schema";
+import { getDb, type DB } from "@/db/client";
+import { automationRun, contact, conversation, conversationMember, member, message } from "@/db/schema";
+import { senderForChannel } from "@/lib/whatsapp/channels";
+import { markRead } from "@/lib/whatsapp/cloud-api";
 import { ensureConversationMemberTable } from "@/db/ensure-conversation-member";
 import { conversationCompanyWhere, conversationVisibilityWhere, getVisibility } from "@/lib/access";
 import type { ConversationListItem } from "@/components/inbox/ConversationList";
@@ -188,7 +190,36 @@ export async function markConversationRead(conversationId: string): Promise<void
     .set({ unreadCount: 0 })
     .where(and(eq(conversation.id, conversationId), gt(conversation.unreadCount, 0)))
     .returning({ id: conversation.id });
-  if (changed) revalidatePath("/inbox");
+  // Only when a thread was genuinely unread: re-opening an already-read thread
+  // (every poll re-renders it) stays a no-op, so the read receipt fires once per
+  // batch of unread messages, not on every render.
+  if (changed) {
+    revalidatePath("/inbox");
+    await markLatestInboundRead(auth.db, conversationId, auth.convo.channelId);
+  }
+}
+
+/**
+ * Blue ticks: tell Meta we read the customer's latest message. WhatsApp shows
+ * the blue double tick only when the app marks a message read, and marking one
+ * id marks every earlier inbound in that conversation too, so the newest inbound
+ * wamid covers the whole thread. Sent from the conversation's own number; skips
+ * silently when there is no inbound wamid (DEMO / pre-receipt messages) or the
+ * channel has no number assigned. markRead() is LIVE-only and best-effort.
+ */
+async function markLatestInboundRead(db: DB, conversationId: string, channelId: string): Promise<void> {
+  const latest = await db.query.message.findFirst({
+    where: and(
+      eq(message.conversationId, conversationId),
+      eq(message.direction, "IN"),
+      isNotNull(message.waMessageId)
+    ),
+    orderBy: desc(message.createdAt),
+    columns: { waMessageId: true },
+  });
+  if (!latest?.waMessageId) return;
+  const from = await senderForChannel(db, channelId);
+  if (from) await markRead(latest.waMessageId, from);
 }
 
 /** Hand a conversation back to the shared queue. */
