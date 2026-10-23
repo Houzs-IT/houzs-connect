@@ -20,6 +20,7 @@ import { interpolate } from "./vars";
 import { attrs } from "@/lib/format";
 import { getOrCreateConversation, sendOutbound } from "@/lib/whatsapp/transport";
 import { generateAgentReply } from "@/lib/ai";
+import { enrollContactInDrip, removeContactFromDrip } from "@/lib/drip";
 
 /**
  * Automation runtime. Interprets a FlowGraph node-by-node, performing side
@@ -403,21 +404,18 @@ async function execNode(
 
     case "add_to_drip":
     case "remove_from_drip": {
-      // STUB: record intent onto the contact so a flow can branch on it; a real
-      // drip enrolment engine is future work.
-      if (d.campaignName) {
-        await setContactAttr(
-          ctx.contactId,
-          "drip_campaign",
-          node.type === "add_to_drip" ? String(d.campaignName) : ""
-        );
+      // d.campaignId is the drip campaign id (the builder's drip dropdown sets it).
+      if (d.campaignId) {
+        if (node.type === "add_to_drip") {
+          const result = await enrollContactInDrip(db, d.campaignId, ctx.contactId);
+          await logStep(ctx.runId, { node: node.id, type: node.type, drip: d.campaignName, result });
+        } else {
+          await removeContactFromDrip(db, d.campaignId, ctx.contactId);
+          await logStep(ctx.runId, { node: node.id, type: node.type, drip: d.campaignName });
+        }
+      } else {
+        await logStep(ctx.runId, { node: node.id, type: node.type, skipped: "no drip selected" });
       }
-      await logStep(ctx.runId, {
-        node: node.id,
-        type: node.type,
-        campaign: d.campaignName,
-        stub: true,
-      });
       return { next: nextNodeId(ctx.graph, node.id) };
     }
 

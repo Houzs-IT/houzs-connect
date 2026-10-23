@@ -3,6 +3,7 @@ import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { getDb } from "@/db/client";
 import { webhookEvent } from "@/db/schema";
 import { resumeDueDelays, sendDueScheduledCampaigns } from "@/lib/automation/sweeper";
+import { advanceDueDripEnrollments } from "@/lib/drip";
 
 /**
  * POST /api/cron — the scheduler tick.
@@ -45,6 +46,11 @@ export async function POST(req: NextRequest) {
   } catch (e) {
     errors.campaigns = e instanceof Error ? e.message : String(e);
   }
+  try {
+    summary.drip = await advanceDueDripEnrollments();
+  } catch (e) {
+    errors.drip = e instanceof Error ? e.message : String(e);
+  }
 
   const hadError = Object.keys(errors).length > 0;
   // One System Logs row per tick that actually did something or failed — a tick
@@ -52,6 +58,7 @@ export async function POST(req: NextRequest) {
   const didWork =
     (summary.delays as { resumed?: number })?.resumed ||
     (summary.campaigns as { campaigns?: number })?.campaigns ||
+    (summary.drip as { sent?: number })?.sent ||
     hadError;
   if (didWork) {
     try {

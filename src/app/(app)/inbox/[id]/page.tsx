@@ -2,7 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { and, asc, desc, eq } from "drizzle-orm";
 import { getDb } from "@/db/client";
-import { contactField, conversation, department, member, note, payment, tag } from "@/db/schema";
+import { contactField, conversation, department, dripCampaign, member, note, payment, tag } from "@/db/schema";
 import { MarkRead } from "@/components/inbox/MarkRead";
 import { Thread, type ThreadItem } from "@/components/inbox/Thread";
 import { Composer } from "@/components/inbox/Composer";
@@ -16,6 +16,7 @@ import { getCurrentMember } from "@/lib/current-member";
 import { photoSrcs } from "@/lib/member-photo";
 import { PersonAvatar } from "@/components/PersonAvatar";
 import { ensureConversationMemberTable } from "@/db/ensure-conversation-member";
+import { ensureDripTables } from "@/db/ensure-drip";
 import { isLive } from "@/lib/whatsapp/cloud-api";
 import { attrs, displayName, initials, stamp, tint, waIdentifier } from "@/lib/format";
 import { bypassReadCache } from "@/db/fresh";
@@ -69,6 +70,16 @@ export default async function ConversationPage({
   // not protect this route — without the company check any signed-in member
   // could read another tenant's thread, phone number and order attributes.
   if (!convo || convo.contact.companyId !== me.companyId) notFound();
+
+  // Live drips the agent can enrol this contact into, for the conversation menu.
+  await ensureDripTables(db).catch(() => {});
+  const liveDrips = await db.query.dripCampaign
+    .findMany({
+      where: and(eq(dripCampaign.companyId, me.companyId), eq(dripCampaign.status, "live")),
+      columns: { id: true, name: true },
+      orderBy: asc(dripCampaign.name),
+    })
+    .catch(() => [] as { id: string; name: string }[]);
 
   // Newest-first off the index, oldest-first on screen.
   const messages = convo.messages.slice().reverse();
@@ -278,7 +289,7 @@ export default async function ConversationPage({
             <PanelToggle />
             {/* The panel (and its menu) is hidden below xl or when put away; keep the actions. */}
             <MenuWithoutPanel>
-              <ConversationMenu conversationId={convo.id} />
+              <ConversationMenu conversationId={convo.id} drips={liveDrips} />
             </MenuWithoutPanel>
           </div>
         </div>
