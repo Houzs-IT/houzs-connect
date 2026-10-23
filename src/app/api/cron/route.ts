@@ -8,10 +8,10 @@ import { advanceDueDripEnrollments } from "@/lib/drip";
 /**
  * POST /api/cron — the scheduler tick.
  *
- * A Cloudflare Cron Trigger fires worker.ts's scheduled() handler every couple of
- * minutes, which self-fetches this route (so the work runs in a normal request
- * context where getDb() and secrets behave exactly as in any request — a
- * scheduled() handler cannot call getDb() directly). It runs the time-based
+ * The dedicated cron worker (cron-worker/) fires on a Cloudflare Cron Trigger
+ * every couple of minutes and POSTs this route, so the work runs in a normal
+ * request context where getDb() and secrets behave exactly as in any request (a
+ * Worker scheduled() handler cannot call getDb() directly). It runs the time-based
  * sweeps: resume Delay runs that are due, and send scheduled campaigns that are
  * due. Each sweep is isolated so one failing does not block the others, and a
  * summary is written to System Logs (webhook_event, source "cron").
