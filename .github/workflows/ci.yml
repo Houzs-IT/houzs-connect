@@ -63,6 +63,11 @@ jobs:
       - name: Multi-number routing smoke test (pure, no DB)
         run: node scripts/smoke-channel-routing.mjs
 
+      # The scheduler's delay timing: a Delay node / Drip step's unit→ms. A zero
+      # or garbage amount must be 0 (resume next tick), never a hang.
+      - name: Delay timing smoke test (pure, no DB)
+        run: node scripts/smoke-delay.mjs
+
       - name: Business profile validation smoke test (pure, no DB)
         run: node scripts/smoke-business-profile.mjs
 

@@ -3,6 +3,12 @@ name = "houzs-connect"
 # adapter build (.open-next/worker.js) produced by `opennextjs-cloudflare build`.
 main = ".open-next/worker.js"
 
+# The scheduler lives in a DEDICATED worker (cron-worker/), not here: OpenNext
+# 1.20.2 exposes no scheduled() handler, and wrapping .open-next/worker.js to add
+# one makes wrangler re-bundle OpenNext's server function and fail to resolve
+# node built-ins (perf_hooks/net/http). The cron worker fires every 2 min and
+# POSTs this Worker's /api/cron. See cron-worker/wrangler.toml.
+
 # Pin the COMPANY account (hello@houzscentury.com) — the same account the ERP
 # (autocount-sync-api) deploys to, so Connect lives beside it. The account id is
 # not a secret. Prevents a stray `wrangler login` from targeting the wrong account.
