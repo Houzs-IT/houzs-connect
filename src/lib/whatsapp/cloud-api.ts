@@ -314,3 +314,47 @@ export async function sendTemplate(
     from
   );
 }
+
+/**
+ * Mark a customer's message read, so WhatsApp shows the blue double tick.
+ *
+ * Cloud API shows blue ticks only when the application explicitly marks a
+ * message read — on its own it never gets past the grey (delivered) tick. This
+ * is a separate shape from a send: no recipient, just the inbound message id,
+ * POSTed to the SAME {phone-number-id}/messages endpoint. Marking one id marks
+ * it and every earlier message in that conversation read, so the newest inbound
+ * id is all a caller needs.
+ *
+ * `from` is the conversation's own number id (senderForChannel) — a receipt must
+ * go out on the number the customer wrote to, never borrow another company's,
+ * so a caller with no resolved number simply does not call this. Best-effort:
+ * LIVE only, its own timeout, swallows every error — a missing blue tick must
+ * never break opening a thread.
+ * Docs: https://developers.facebook.com/docs/whatsapp/cloud-api/guides/mark-messages-as-read
+ */
+export async function markRead(messageId: string, from?: string): Promise<void> {
+  if (!isLive() || !messageId) return;
+  const phoneId = from ?? process.env.WHATSAPP_PHONE_NUMBER_ID!;
+  const token = metaToken()!;
+  try {
+    const res = await fetch(`${GRAPH}/${phoneId}/messages`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        messaging_product: "whatsapp",
+        status: "read",
+        message_id: messageId,
+      }),
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!res.ok) {
+      const raw = await res.text().catch(() => "");
+      console.error("WA_MARK_READ_FAIL", res.status, raw);
+    }
+  } catch {
+    // Network error or timeout. A read receipt is not worth surfacing.
+  }
+}
