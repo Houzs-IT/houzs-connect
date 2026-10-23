@@ -12,6 +12,7 @@ import {
   webhookEvent,
 } from "@/db/schema";
 import { attrs } from "@/lib/format";
+import { ensureAutomationRunColumns } from "@/db/ensure-automation-run";
 import { startRun, resumeRun, supersedeRuns } from "./engine";
 import { getOrCreateConversation } from "@/lib/whatsapp/transport";
 import { runOcr } from "@/lib/ocr";
@@ -303,6 +304,7 @@ export async function handleCustomerReply(
   input: { buttonId?: string; text?: string; flow?: { fields: Record<string, string> } }
 ) {
   const db = getDb();
+  await ensureAutomationRunColumns(db);
   const waiting = await db.query.automationRun.findMany({
     where: and(
       eq(automationRunTable.contactId, contactId),
@@ -349,6 +351,7 @@ export async function handleInboundMessage(
   input: { buttonId?: string; text?: string; flow?: { fields: Record<string, string> } }
 ) {
   const db = getDb();
+  await ensureAutomationRunColumns(db);
   // Persist what the customer just sent so a NEW_INCOMING_MESSAGE guard can
   // branch on it — resumeRun stores neither. last_button carries a tap (the
   // Delivery Lock reads it); last_message carries the text LOWERCASED for

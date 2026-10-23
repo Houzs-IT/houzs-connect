@@ -1,7 +1,17 @@
 name = "houzs-connect"
-# Next.js on Cloudflare Workers via OpenNext. `wrangler deploy` uploads the
-# adapter build (.open-next/worker.js) produced by `opennextjs-cloudflare build`.
-main = ".open-next/worker.js"
+# Next.js on Cloudflare Workers via OpenNext. `opennextjs-cloudflare build`
+# produces the adapter build (.open-next/worker.js); worker.ts is a thin wrapper
+# that re-exports its fetch handler and adds a cron scheduled() handler (OpenNext
+# 1.20.2 has no hook for one). wrangler bundles worker.ts at deploy, importing the
+# freshly-built .open-next/worker.js.
+main = "worker.ts"
+
+# The scheduler. Every 2 minutes Cloudflare invokes worker.ts's scheduled()
+# handler, which self-fetches POST /api/cron to resume due Delay runs and send due
+# scheduled campaigns. Applies to this (production) Worker only; the staging env
+# below gets no trigger. The tick is a no-op until the CRON_SECRET secret is set.
+[triggers]
+crons = ["*/2 * * * *"]
 
 # Pin the COMPANY account (hello@houzscentury.com) — the same account the ERP
 # (autocount-sync-api) deploys to, so Connect lives beside it. The account id is

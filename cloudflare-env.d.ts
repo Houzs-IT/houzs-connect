@@ -57,4 +57,12 @@ interface CloudflareEnv {
   // unset => IT Support is off: no menu entry, and /it-support says so.
   IT_HUB_URL?: string;
   IT_HUB_API_KEY?: string;
+
+  // The scheduler (Cloudflare Cron Trigger -> worker.ts scheduled() -> self-fetch
+  // POST /api/cron). CRON_SECRET guards the route (sent as `x-cron-key`); unset =>
+  // the route refuses every call (503) and scheduled() does nothing, so the cron
+  // is off until the secret is set. APP_ORIGIN overrides the self-fetch base
+  // (defaults to the production custom domain).
+  CRON_SECRET?: string;
+  APP_ORIGIN?: string;
 }

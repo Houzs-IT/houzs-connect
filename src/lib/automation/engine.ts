@@ -1,5 +1,6 @@
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { getDb } from "@/db/client";
+import { ensureAutomationRunColumns } from "@/db/ensure-automation-run";
 import {
   automation as automationTable,
   automationRun,
@@ -12,6 +13,7 @@ import {
   tag as tagTable,
 } from "@/db/schema";
 import { asGraph, type FlowGraph, type FlowNode } from "./types";
+import { dueAt } from "./time";
 import { callRestApi, type RestBindings, type RestSecrets } from "./rest";
 import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { interpolate } from "./vars";
@@ -125,7 +127,7 @@ async function logStep(runId: string, entry: Record<string, unknown>) {
 async function execNode(
   node: FlowNode,
   ctx: RunCtx
-): Promise<{ next?: string } | { pause: "button" | "text" | "form" | "delay"; branch?: never }> {
+): Promise<{ next?: string } | { pause: "button" | "text" | "form" | "delay"; resumeAt?: Date; branch?: never }> {
   const db = getDb();
   const d = node.data ?? {};
   const varCtx = {
@@ -443,9 +445,20 @@ async function execNode(
       return { next: nextNodeId(ctx.graph, node.id) };
     }
 
-    case "delay":
-      await logStep(ctx.runId, { node: node.id, type: node.type, unit: d.unit, amount: d.amount });
-      return { pause: "delay" };
+    case "delay": {
+      // Pause until now + the configured delay. The scheduler (sweeper.ts) wakes
+      // the run after resumeAt and continues from the node after this one. A
+      // missing/zero amount resumes on the next tick rather than hanging.
+      const resumeAt = dueAt(d.unit, d.amount);
+      await logStep(ctx.runId, {
+        node: node.id,
+        type: node.type,
+        unit: d.unit,
+        amount: d.amount,
+        resumeAt: resumeAt.toISOString(),
+      });
+      return { pause: "delay", resumeAt };
+    }
 
     case "end":
     default:
@@ -467,6 +480,9 @@ async function advance(ctx: RunCtx, startNodeId: string | undefined) {
         .set({
           status: "waiting",
           cursorNodeId: node.id,
+          // Only a delay carries a wake time; a button/text/form wait clears it
+          // so a run that used to be on a delay cannot be swept after it moves on.
+          resumeAt: res.resumeAt ?? null,
           context: {
             conversationId: ctx.conversationId,
             waitingFor: res.pause,
@@ -480,7 +496,7 @@ async function advance(ctx: RunCtx, startNodeId: string | undefined) {
   }
   await db
     .update(automationRun)
-    .set({ status: "completed", cursorNodeId: null })
+    .set({ status: "completed", cursorNodeId: null, resumeAt: null })
     .where(eq(automationRun.id, ctx.runId));
 }
 
@@ -556,6 +572,7 @@ export async function supersedeRuns(
   reason: string
 ): Promise<string[]> {
   const db = getDb();
+  await ensureAutomationRunColumns(db);
   const live = await db.query.automationRun.findMany({
     where: and(
       eq(automationRun.automationId, automationId),
@@ -581,6 +598,7 @@ export async function startRun(
   jumpDepth = 0
 ) {
   const db = getDb();
+  await ensureAutomationRunColumns(db);
   const automation = await db.query.automation.findFirst({
     where: eq(automationTable.id, automationId),
   });
@@ -615,6 +633,7 @@ export async function resumeRun(
   input: { buttonId?: string; text?: string; flow?: { fields: Record<string, string> } }
 ): Promise<boolean> {
   const db = getDb();
+  await ensureAutomationRunColumns(db);
   const run = await db.query.automationRun.findFirst({
     where: eq(automationRun.id, runId),
   });
@@ -654,4 +673,28 @@ export async function resumeRun(
     return true;
   }
   return false;
+}
+
+/**
+ * Resume a run that paused on a Delay node whose time is up. Unlike resumeRun
+ * (which is fed a customer reply), a delay carries no input — it simply continues
+ * from the node after the delay. Returns whether it moved.
+ *
+ * The caller (the cron sweeper, src/lib/automation/sweeper.ts) has already claimed
+ * the row (waiting → running, clearing resume_at) so two ticks cannot double-fire
+ * it; this guards on the stored waitingFor so a non-delay wait is never run here.
+ */
+export async function resumeDelayRun(runId: string): Promise<boolean> {
+  const db = getDb();
+  await ensureAutomationRunColumns(db);
+  const run = await db.query.automationRun.findFirst({
+    where: eq(automationRun.id, runId),
+  });
+  if (!run || !run.cursorNodeId) return false;
+  const context = (run.context as { waitingFor?: string } | null) ?? {};
+  if (context.waitingFor !== "delay") return false;
+  const ctx = await buildCtx(runId);
+  if (!ctx) return false;
+  await advance(ctx, nextNodeId(ctx.graph, run.cursorNodeId));
+  return true;
 }
