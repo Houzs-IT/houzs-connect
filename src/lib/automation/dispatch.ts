@@ -13,6 +13,7 @@ import {
 } from "@/db/schema";
 import { attrs } from "@/lib/format";
 import { ensureAutomationRunColumns } from "@/db/ensure-automation-run";
+import { removeRepliedEnrollments } from "@/lib/drip";
 import { startRun, resumeRun, supersedeRuns } from "./engine";
 import { getOrCreateConversation } from "@/lib/whatsapp/transport";
 import { runOcr } from "@/lib/ocr";
@@ -352,6 +353,9 @@ export async function handleInboundMessage(
 ) {
   const db = getDb();
   await ensureAutomationRunColumns(db);
+  // A reply drops the contact from any drip whose last-sent step is marked
+  // remove-after-replied. Best-effort: a reply must never fail on this.
+  await removeRepliedEnrollments(db, contactId).catch(() => {});
   // Persist what the customer just sent so a NEW_INCOMING_MESSAGE guard can
   // branch on it — resumeRun stores neither. last_button carries a tap (the
   // Delivery Lock reads it); last_message carries the text LOWERCASED for

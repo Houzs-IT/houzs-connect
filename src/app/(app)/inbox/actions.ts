@@ -12,6 +12,7 @@ import { bypassReadCache } from "@/db/fresh";
 import { photoSrcs } from "@/lib/member-photo";
 import { attrs, displayName, mediaCaption } from "@/lib/format";
 import { can } from "@/lib/permissions";
+import { enrollContactInDrip } from "@/lib/drip";
 
 /**
  * A signed-in member, and the conversation must be in THEIR company.
@@ -203,6 +204,16 @@ export async function pushConversationToQueue(formData: FormData) {
     .where(eq(conversation.id, conversationId));
   revalidatePath(`/inbox/${conversationId}`);
   revalidatePath("/inbox");
+}
+
+/** Enrol this conversation's contact into a drip campaign (the inbox menu). */
+export async function enrollConversationInDrip(formData: FormData) {
+  const conversationId = String(formData.get("conversationId") ?? "");
+  const dripId = String(formData.get("dripId") ?? "");
+  const auth = await authorizeConversation(conversationId);
+  if (!auth || !dripId) return;
+  await enrollContactInDrip(auth.db, dripId, auth.convo.contactId);
+  revalidatePath(`/inbox/${conversationId}`);
 }
 
 /**

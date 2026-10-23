@@ -169,6 +169,13 @@
       "when": 1792500000000,
       "tag": "0023_automation_run_resume_at",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1792600000000,
+      "tag": "0024_drip",
+      "breakpoints": true
     }
   ]
 }

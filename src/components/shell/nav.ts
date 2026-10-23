@@ -39,6 +39,7 @@ export const NAV: NavItem[] = [
   { key: "automations", href: "/automations", Icon: IconAutomation },
   { key: "campaigns", href: "/campaigns", Icon: IconCampaign },
   { key: "broadcast", href: "/broadcast", Icon: IconSend },
+  { key: "drip", href: "/drip-campaigns", Icon: IconCampaign },
   { key: "templates", href: "/templates", match: ["/templates", "/forms"], Icon: IconForm },
   { key: "payments", href: "/payments", Icon: IconPayments },
   { key: "logs", href: "/logs", Icon: IconLogs },

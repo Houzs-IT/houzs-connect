@@ -11,6 +11,7 @@ import { useState } from "react";
 import { IconDots } from "@/components/icons";
 import { setConversationStatus } from "@/app/actions";
 import {
+  enrollConversationInDrip,
   markConversationUnread,
   pushConversationToQueue,
   unassignConversation,
@@ -22,7 +23,14 @@ async function markPending(fd: FormData) {
   await setConversationStatus(fd);
 }
 
-export function ConversationMenu({ conversationId }: { conversationId: string }) {
+export function ConversationMenu({
+  conversationId,
+  drips = [],
+}: {
+  conversationId: string;
+  /** Live drips the agent can enrol this contact into (inbox menu). */
+  drips?: { id: string; name: string }[];
+}) {
   const { t } = useShell();
   const s = t.service;
   const [open, setOpen] = useState(false);
@@ -69,6 +77,31 @@ export function ConversationMenu({ conversationId }: { conversationId: string })
                 </button>
               </form>
             ))}
+            {drips.length > 0 && (
+              <div className="border-t border-[var(--color-border)] pt-1">
+                <div className="px-3 py-1 text-[10.5px] font-semibold uppercase tracking-[0.06em] text-[var(--color-faint)]">
+                  {t.drip.addToDrip}
+                </div>
+                {drips.map((d) => (
+                  <form
+                    key={d.id}
+                    action={async (fd) => {
+                      await enrollConversationInDrip(fd);
+                      setOpen(false);
+                    }}
+                  >
+                    <input type="hidden" name="conversationId" value={conversationId} />
+                    <input type="hidden" name="dripId" value={d.id} />
+                    <button
+                      type="submit"
+                      className="w-full truncate px-3 py-2 text-left text-[13px] text-[var(--color-ink)] transition-colors hover:bg-[var(--color-surface-2)]"
+                    >
+                      {d.name}
+                    </button>
+                  </form>
+                ))}
+              </div>
+            )}
           </div>
         </>
       )}

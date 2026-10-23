@@ -4,8 +4,9 @@ import { and, eq, ne } from "drizzle-orm";
 import { getDb } from "@/db/client";
 import {
   automation as automationTable,
-  campaign as campaignTable,
+  dripCampaign,
 } from "@/db/schema";
+import { ensureDripTables } from "@/db/ensure-drip";
 import { asGraph, type TriggerEvent } from "@/lib/automation/types";
 import { FlowCanvas } from "@/components/automation/FlowCanvas";
 import { getCurrentMember } from "@/lib/current-member";
@@ -41,7 +42,10 @@ export default async function AutomationDetail({
   });
   if (!automation) notFound();
 
-  // Option lists for node pickers (jump-to-automation, drip campaigns).
+  // Option lists for node pickers (jump-to-automation, drip campaigns). The drip
+  // dropdown lists this company's drip campaigns — the add_to_drip node stores
+  // the chosen drip's id, which the engine enrols the contact into.
+  await ensureDripTables(db).catch(() => {});
   const [otherAutomations, campaigns] = await Promise.all([
     db.query.automation.findMany({
       where: and(
@@ -50,8 +54,8 @@ export default async function AutomationDetail({
       ),
       columns: { id: true, name: true },
     }),
-    db.query.campaign.findMany({
-      where: eq(campaignTable.companyId, automation.companyId),
+    db.query.dripCampaign.findMany({
+      where: eq(dripCampaign.companyId, automation.companyId),
       columns: { id: true, name: true },
     }),
   ]);
