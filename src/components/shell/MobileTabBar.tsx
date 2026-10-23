@@ -21,7 +21,7 @@ import { LangToggle } from "./TopbarControls";
 type Tab = { href: string; label: string; Icon: NavItem["Icon"]; match: string[]; badge?: number };
 
 /** Modules reached through "More" rather than a tab of their own. */
-const MORE_KEYS = ["contacts", "campaigns", "drip", "templates", "payments", "logs"] as const;
+const MORE_KEYS = ["contacts", "campaigns", "drip", "payments", "logs"] as const;
 const moreItems = (itSupport: boolean): NavItem[] => [
   ...NAV.filter((n) => (MORE_KEYS as readonly string[]).includes(n.key)),
   ...(itSupport ? [IT_SUPPORT_NAV] : []),

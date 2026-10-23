@@ -13,6 +13,7 @@ import Link from "next/link";
 import { useState, useTransition } from "react";
 import { formatPhone } from "@/lib/format";
 import { ActionConfirm } from "@/components/ActionConfirm";
+import { SearchableSelect } from "@/components/SearchableSelect";
 import {
   addPhoneNumber,
   assignNumberToCompany,
@@ -578,19 +579,16 @@ function CompanyAssignment({
         </button>
       ) : (
         <div className="mt-2 flex flex-wrap items-end gap-2">
-          <select
+          <SearchableSelect
             className={inputCls}
             value={choice}
-            onChange={(e) => setChoice(e.target.value)}
+            onChange={(v) => setChoice(v)}
             aria-label="Company for this number"
-          >
-            {companies.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name}
-              </option>
-            ))}
-            <option value={NEW_COMPANY}>New company…</option>
-          </select>
+            options={[
+              ...companies.map((c) => ({ value: c.id, label: c.name })),
+              { value: NEW_COMPANY, label: "New company…" },
+            ]}
+          />
           {choice === NEW_COMPANY && (
             <input
               className={`${inputCls} w-56`}
@@ -710,7 +708,7 @@ function NumberCard({
         </button>
         {assignment && (
           <>
-            <Link href="/templates" className={chip(false)}>
+            <Link href="/settings/templates" className={chip(false)}>
               {dot("purple", "✎")}
               Manage templates
             </Link>

@@ -4,6 +4,7 @@ import { getDb } from "@/db/client";
 import { contactField, quickReply, tag } from "@/db/schema";
 import { DataTable, type DataColumn, type DataRow } from "@/components/DataTable";
 import { PageChrome } from "@/components/PageChrome";
+import { SearchableSelect } from "@/components/SearchableSelect";
 import { getCurrentMember } from "@/lib/current-member";
 import { getDict } from "@/lib/i18n/server";
 import { addContactField, addQuickReply, addTag, deleteContactField, deleteQuickReply, deleteTag } from "../actions";
@@ -169,13 +170,12 @@ export default async function LibraryPage() {
             <DataTable columns={fieldCols} rows={fieldRows} minWidth={560} stateKey="settings-contact-fields" empty={L.noneYet} />
             <form action={addContactField} className={addRow}>
               <input name="name" placeholder={L.fieldName} required className={`${input} min-w-0 flex-1`} />
-              <select name="type" className={input} defaultValue="TEXT">
-                {FIELD_TYPES.map(([value, name]) => (
-                  <option key={value} value={value}>
-                    {name}
-                  </option>
-                ))}
-              </select>
+              <SearchableSelect
+                name="type"
+                defaultValue="TEXT"
+                className={input}
+                options={FIELD_TYPES.map(([value, name]) => ({ value, label: name }))}
+              />
               <button type="submit" className={addBtn}>
                 {L.add}
               </button>

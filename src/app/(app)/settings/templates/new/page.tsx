@@ -1,6 +1,6 @@
 import { getCurrentMember } from "@/lib/current-member";
-import { loadFieldsAndSample } from "../data";
-import { TemplateEditor } from "../TemplateEditor";
+import { loadFieldsAndSample } from "@/app/(app)/templates/data";
+import { TemplateEditor } from "@/app/(app)/templates/TemplateEditor";
 
 export const dynamic = "force-dynamic";
 

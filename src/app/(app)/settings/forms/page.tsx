@@ -10,9 +10,9 @@ import { getCurrentMember } from "@/lib/current-member";
 import { fmt } from "@/lib/i18n/dict";
 import { agoLabel } from "@/lib/i18n/ago";
 import { getDict } from "@/lib/i18n/server";
-import { createForm } from "./actions";
-import { FormBuilder } from "./FormBuilder";
-import { readFields, type FieldType } from "./fields";
+import { createForm } from "@/app/(app)/forms/actions";
+import { FormBuilder } from "@/app/(app)/forms/FormBuilder";
+import { readFields, type FieldType } from "@/app/(app)/forms/fields";
 
 /** Newest answers first; enough to work from without paging a whole year in. */
 const RESPONSE_LIMIT = 200;
@@ -54,7 +54,7 @@ export default async function FormsPage({ searchParams }: { searchParams: Promis
   const href = (extra: Record<string, string>) => {
     const p = new URLSearchParams();
     for (const [k, v] of Object.entries({ status, ...extra })) if (v) p.set(k, v);
-    return `/forms${p.size ? `?${p}` : ""}`;
+    return `/settings/forms${p.size ? `?${p}` : ""}`;
   };
 
   // Answers for the selected form, only when that view is open.

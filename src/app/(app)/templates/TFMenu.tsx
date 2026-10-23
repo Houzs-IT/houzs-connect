@@ -22,26 +22,26 @@ export async function TFMenu() {
         {
           title: L.templates,
           items: [
-            { href: "/templates", label: L.all, count: tpl.length, exact: true },
-            { href: "/templates?status=APPROVED", label: L.approved, count: by("APPROVED"), dot: "var(--color-success)" },
-            { href: "/templates?status=PENDING", label: L.inReview, count: by("PENDING"), dot: "var(--color-pastel-orange-ink)" },
-            { href: "/templates?status=REJECTED", label: L.rejected, count: by("REJECTED"), dot: "var(--color-danger)" },
-            { href: "/templates?mapping=missing", label: L.needsMapping, count: unmapped, dot: "var(--color-danger)" },
+            { href: "/settings/templates", label: L.all, count: tpl.length, exact: true },
+            { href: "/settings/templates?status=APPROVED", label: L.approved, count: by("APPROVED"), dot: "var(--color-success)" },
+            { href: "/settings/templates?status=PENDING", label: L.inReview, count: by("PENDING"), dot: "var(--color-pastel-orange-ink)" },
+            { href: "/settings/templates?status=REJECTED", label: L.rejected, count: by("REJECTED"), dot: "var(--color-danger)" },
+            { href: "/settings/templates?mapping=missing", label: L.needsMapping, count: unmapped, dot: "var(--color-danger)" },
           ],
         },
         {
           title: L.forms,
           items: [
-            { href: "/forms", label: L.allForms, count: forms.total, match: [] },
-            { href: "/forms?status=published", label: L.inUse, count: forms.published, dot: "var(--color-success)" },
-            { href: "/forms?status=draft", label: L.draft, count: forms.draft, dot: "var(--color-border-strong)" },
+            { href: "/settings/forms", label: L.allForms, count: forms.total, match: [] },
+            { href: "/settings/forms?status=published", label: L.inUse, count: forms.published, dot: "var(--color-success)" },
+            { href: "/settings/forms?status=draft", label: L.draft, count: forms.draft, dot: "var(--color-border-strong)" },
           ],
         },
         {
           title: L.tools,
           items: [
-            { href: "/templates?tool=starter", label: L.starter },
-            { href: "/templates?tool=sync", label: L.sync },
+            { href: "/settings/templates?tool=starter", label: L.starter },
+            { href: "/settings/templates?tool=sync", label: L.sync },
           ],
         },
       ]}

@@ -2,8 +2,8 @@ import { notFound } from "next/navigation";
 import { getCurrentMember } from "@/lib/current-member";
 import { editBlockedReason, type TemplateStatus } from "@/lib/whatsapp/templates";
 import { bindingKey } from "@/lib/whatsapp/templateBindings";
-import { loadBindings, loadFieldsAndSample, loadTemplateList } from "../data";
-import { TemplateEditor } from "../TemplateEditor";
+import { loadBindings, loadFieldsAndSample, loadTemplateList } from "@/app/(app)/templates/data";
+import { TemplateEditor } from "@/app/(app)/templates/TemplateEditor";
 
 // A template's status changes on Meta's side; read it fresh.
 export const dynamic = "force-dynamic";

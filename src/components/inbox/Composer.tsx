@@ -127,6 +127,10 @@ export function Composer({
   >(null);
   const [quickReplies, setQuickReplies] = useState<QuickReply[]>([]);
   const [templates, setTemplates] = useState<Template[]>([]);
+  // In-panel search over the quick-reply and template pickers — both lists run
+  // long once a company has many shortcuts or approved templates.
+  const [quickQuery, setQuickQuery] = useState("");
+  const [templateQuery, setTemplateQuery] = useState("");
   const [loading, setLoading] = useState(false);
   const [chosen, setChosen] = useState<Template | null>(null);
   const [params, setParams] = useState<string[]>([]);
@@ -169,6 +173,7 @@ export function Composer({
 
   async function openQuick() {
     setPanel("quick");
+    setQuickQuery("");
     if (quickReplies.length === 0) {
       setLoading(true);
       setQuickReplies(await listQuickReplies());
@@ -178,6 +183,7 @@ export function Composer({
 
   async function openTemplates() {
     setPanel("template");
+    setTemplateQuery("");
     if (templates.length === 0) {
       setLoading(true);
       setTemplates(await listSendableTemplates());
@@ -476,16 +482,40 @@ export function Composer({
     setPanel(null);
   }
 
+  const tQuery = templateQuery.trim().toLowerCase();
+  const shownTemplates = tQuery
+    ? templates.filter(
+        (tpl) => tpl.name.toLowerCase().includes(tQuery) || tpl.body.toLowerCase().includes(tQuery)
+      )
+    : templates;
+  const qQuery = quickQuery.trim().toLowerCase();
+  const shownQuickReplies = qQuery
+    ? quickReplies.filter(
+        (qr) => qr.shortcut.toLowerCase().includes(qQuery) || qr.body.toLowerCase().includes(qQuery)
+      )
+    : quickReplies;
+
   return (
     <div className="relative shrink-0 border-t border-[var(--color-border)] bg-[var(--color-surface)] px-3 pb-3.5 pt-2.5 md:px-4">
       {/* ── Quick replies ── */}
       {panel === "quick" && (
         <Panel title="Quick replies" onClose={() => setPanel(null)}>
+          {!loading && quickReplies.length > 0 && (
+            <input
+              value={quickQuery}
+              onChange={(e) => setQuickQuery(e.target.value)}
+              placeholder="Search quick replies…"
+              className="mb-1.5 w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] px-2.5 py-1.5 text-[12.5px] outline-none focus:border-[var(--color-accent)]"
+            />
+          )}
           {loading && <Empty>Loading…</Empty>}
           {!loading && quickReplies.length === 0 && (
             <Empty>No quick replies yet — add them in Settings.</Empty>
           )}
-          {quickReplies.map((q) => (
+          {!loading && quickReplies.length > 0 && shownQuickReplies.length === 0 && (
+            <Empty>No quick reply matches.</Empty>
+          )}
+          {shownQuickReplies.map((q) => (
             <button
               key={q.shortcut}
               type="button"
@@ -513,6 +543,14 @@ export function Composer({
             setChosen(null);
           }}
         >
+          {!loading && !chosen && templates.length > 0 && (
+            <input
+              value={templateQuery}
+              onChange={(e) => setTemplateQuery(e.target.value)}
+              placeholder="Search templates…"
+              className="mb-1.5 w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] px-2.5 py-1.5 text-[12.5px] outline-none focus:border-[var(--color-accent)]"
+            />
+          )}
           {loading && <Empty>Loading approved templates…</Empty>}
           {!loading && !chosen && templates.length === 0 && (
             <Empty>
@@ -520,9 +558,12 @@ export function Composer({
               about 24 hours.
             </Empty>
           )}
+          {!loading && !chosen && templates.length > 0 && shownTemplates.length === 0 && (
+            <Empty>No template matches.</Empty>
+          )}
 
           {!chosen &&
-            templates.map((t) => (
+            shownTemplates.map((t) => (
               <button
                 key={`${t.name}-${t.language}`}
                 type="button"

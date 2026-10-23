@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, useTransition } from "react";
 import { useShell } from "@/components/shell/ShellProvider";
+import { SearchableSelect } from "@/components/SearchableSelect";
 import { fmt } from "@/lib/i18n/dict";
 import { STAGING_ROLE_NAMES } from "@/lib/staging-logins";
 import { createStagingLogin, type StagingLoginResult } from "./staging-login-actions";
@@ -103,13 +104,13 @@ export function StagingLogin() {
               </label>
               <label className="flex flex-col gap-1 text-[12px] font-semibold text-[var(--color-ink)]">
                 {L.stagingRole}
-                <select value={role} onChange={(e) => setRole(e.target.value)} className={field}>
-                  {ROLES.map((r) => (
-                    <option key={r} value={r}>
-                      {t.role[r] ?? r}
-                    </option>
-                  ))}
-                </select>
+                <SearchableSelect
+                  value={role}
+                  onChange={(v) => setRole(v)}
+                  aria-label={L.stagingRole}
+                  className={field}
+                  options={ROLES.map((r) => ({ value: r, label: t.role[r] ?? r }))}
+                />
               </label>
               {result && !result.ok ? <p className="text-[12px] text-red-600">{result.error}</p> : null}
               <button
