@@ -107,16 +107,15 @@ export function SearchableSelect({
     return () => document.removeEventListener("mousedown", onDown);
   }, [open]);
 
-  // On open: clear the query, highlight the current value, focus search/list.
+  // On open, move focus into the menu (search box, else the list). The query /
+  // active-row reset lives in openMenu() — an event handler — because calling
+  // setState synchronously inside an effect body is disallowed (it cascades
+  // renders: react-hooks/set-state-in-effect).
   useEffect(() => {
     if (!open) return;
-    setQuery("");
-    const idx = options.findIndex((o) => o.value === current);
-    setActive(idx < 0 ? 0 : idx);
     const el = showSearch ? searchRef.current : listRef.current;
     requestAnimationFrame(() => el?.focus());
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open]);
+  }, [open, showSearch]);
 
   // Keep the highlighted row in view.
   useEffect(() => {
@@ -125,6 +124,13 @@ export function SearchableSelect({
       ?.querySelector<HTMLElement>(`[data-idx="${active}"]`)
       ?.scrollIntoView({ block: "nearest" });
   }, [active, open]);
+
+  function openMenu() {
+    setQuery("");
+    const idx = options.findIndex((o) => o.value === current);
+    setActive(idx < 0 ? 0 : idx);
+    setOpen(true);
+  }
 
   function pick(opt: SelectOption) {
     if (opt.disabled) return;
@@ -142,7 +148,7 @@ export function SearchableSelect({
     if (!open) {
       if (e.key === "Enter" || e.key === " " || e.key === "ArrowDown") {
         e.preventDefault();
-        setOpen(true);
+        openMenu();
       }
       return;
     }
@@ -175,7 +181,11 @@ export function SearchableSelect({
         aria-haspopup="listbox"
         aria-expanded={open}
         aria-label={ariaLabel}
-        onClick={() => !disabled && setOpen((o) => !o)}
+        onClick={() => {
+          if (disabled) return;
+          if (open) setOpen(false);
+          else openMenu();
+        }}
         className={triggerContent ? className : `flex items-center justify-between gap-2 ${className}`}
       >
         {triggerContent ?? (
