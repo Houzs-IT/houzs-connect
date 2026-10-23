@@ -442,6 +442,10 @@ export const automationRun = connect.table(
     cursorNodeId: text("cursor_node_id"),
     context: jsonb("context"),
     log: jsonb("log"),
+    // When a run paused on a Delay node is due to resume. Null for every other
+    // wait (button/text/form) and for running/finished runs. The scheduler sweeps
+    // `status='waiting' AND resume_at <= now()` and continues from the delay node.
+    resumeAt: timestamp("resume_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true })
       .notNull()
@@ -451,6 +455,7 @@ export const automationRun = connect.table(
   (t) => ({
     automationIdx: index("automation_run_automation_idx").on(t.automationId),
     contactIdx: index("automation_run_contact_idx").on(t.contactId),
+    resumeIdx: index("automation_run_resume_idx").on(t.resumeAt),
   })
 );
 

@@ -1,6 +1,7 @@
 import { and, desc, eq, gte } from "drizzle-orm";
 import { getDb } from "@/db/client";
 import { automation, automationRun } from "@/db/schema";
+import { ensureAutomationRunColumns } from "@/db/ensure-automation-run";
 import { nodeMeta } from "./nodeCatalog";
 import { asGraph, type FlowGraph, type FlowNode } from "./types";
 
@@ -133,6 +134,7 @@ function buildSteps(
  */
 export async function getAutomationProgress(contactId: string): Promise<AutomationProgress | null> {
   const db = getDb();
+  await ensureAutomationRunColumns(db).catch(() => {});
   const runs = await db.query.automationRun.findMany({
     where: eq(automationRun.contactId, contactId),
     orderBy: desc(automationRun.updatedAt),
@@ -168,6 +170,7 @@ export async function getAutomationProgress(contactId: string): Promise<Automati
  */
 export async function getAutomationEvents(contactId: string, since: Date): Promise<AutomationEvent[]> {
   const db = getDb();
+  await ensureAutomationRunColumns(db).catch(() => {});
   const runs = await db.query.automationRun.findMany({
     where: and(eq(automationRun.contactId, contactId), gte(automationRun.createdAt, since)),
     orderBy: desc(automationRun.createdAt),
