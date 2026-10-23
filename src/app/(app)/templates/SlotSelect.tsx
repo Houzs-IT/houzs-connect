@@ -1,6 +1,7 @@
 "use client";
 
 import type { VarBinding } from "@/lib/automation/vars";
+import { SearchableSelect } from "@/components/SearchableSelect";
 import { useShell } from "@/components/shell/ShellProvider";
 import { decodeBinding, encodeBinding } from "./TemplateFields";
 import type { FieldOption } from "./types";
@@ -28,20 +29,20 @@ export function SlotSelect({
     "h-[36px] w-full rounded-[8px] border border-[var(--color-border)] bg-[var(--color-surface)] px-2.5 text-[13px] text-[var(--color-ink)] outline-none focus:border-[var(--color-accent)]";
   return (
     <div className={`flex min-w-0 flex-col gap-1.5 ${className}`}>
-      <select
+      <SearchableSelect
         aria-label={`{{${index}}}`}
         value={encodeBinding(binding)}
-        onChange={(e) => onChange(decodeBinding(index, e.target.value, binding))}
+        onChange={(v) => onChange(decodeBinding(index, v, binding))}
         className={sel}
-      >
-        <option value="">{L.notMappedOpt}</option>
-        {fields.map((f) => (
-          <option key={`${f.builtin ? "builtin" : "field"}:${f.key}`} value={`${f.builtin ? "builtin" : "field"}:${f.key}`}>
-            {f.name}
-          </option>
-        ))}
-        <option value="literal">{L.fixedText}</option>
-      </select>
+        options={[
+          { value: "", label: L.notMappedOpt },
+          ...fields.map((f) => ({
+            value: `${f.builtin ? "builtin" : "field"}:${f.key}`,
+            label: f.name,
+          })),
+          { value: "literal", label: L.fixedText },
+        ]}
+      />
       {binding?.source === "literal" && (
         <input
           value={binding.value ?? ""}

@@ -68,7 +68,7 @@ export async function submitTemplate(draft: TemplateDraft): Promise<SubmitResult
     };
   }
   const res = await createTemplate(cfg, draft);
-  revalidatePath("/templates");
+  revalidatePath("/settings/templates");
   return res.ok ? { ok: true, id: res.id, status: res.status } : { ok: false, error: res.error };
 }
 
@@ -217,7 +217,7 @@ export async function setTemplateHeaderFile(fd: FormData): Promise<{ ok: boolean
     console.warn("[templates] header file not saved:", e);
     return { ok: false, error: "The file could not be saved. Try again." };
   }
-  revalidatePath("/templates");
+  revalidatePath("/settings/templates");
   return { ok: true };
 }
 
@@ -267,7 +267,7 @@ export async function saveBindingAction(
   if (!me) return { ok: false, error: "Not signed in." };
   if (!templateName || !language) return { ok: false, error: "Missing template name or language." };
   await saveTemplateBinding(me.companyId, templateName, language, asBindings(bindings));
-  revalidatePath("/templates");
+  revalidatePath("/settings/templates");
   return { ok: true };
 }
 
@@ -326,7 +326,7 @@ export async function editTemplateAction(
     payload.language,
     asBindings(payload.bindings)
   );
-  revalidatePath("/templates");
+  revalidatePath("/settings/templates");
   return { ok: true };
 }
 
@@ -337,7 +337,7 @@ export async function removeTemplate(formData: FormData): Promise<void> {
   const name = String(formData.get("name") ?? "").trim();
   if (!name) return;
   await deleteTemplate(cfg, name);
-  revalidatePath("/templates");
+  revalidatePath("/settings/templates");
 }
 
 export interface StarterResult {
@@ -377,7 +377,7 @@ export async function submitStarterSet(): Promise<StarterResult[]> {
         : { name: t.name, ok: false, error: res.error }
     );
   }
-  revalidatePath("/templates");
+  revalidatePath("/settings/templates");
   return out;
 }
 
@@ -391,7 +391,7 @@ export async function submitStarterSet(): Promise<StarterResult[]> {
  * only way to learn about it is to look again.
  */
 export async function syncTemplates(): Promise<void> {
-  revalidatePath("/templates");
+  revalidatePath("/settings/templates");
 }
 
 /**

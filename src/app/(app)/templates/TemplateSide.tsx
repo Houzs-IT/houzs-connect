@@ -99,7 +99,7 @@ export function TemplateSide({
           </div>
         </div>
         <Link
-          href={`/templates/${template.id}`}
+          href={`/settings/templates/${template.id}`}
           className="flex h-[30px] items-center rounded-[8px] border border-[var(--color-border)] px-2.5 text-[12.5px] font-semibold text-[var(--color-ink)] hover:bg-[var(--color-surface-2)]"
         >
           {L.edit}
@@ -237,7 +237,7 @@ export function TemplateSide({
             fd.set("name", template.name);
             await removeTemplate(fd);
             setConfirm(false);
-            router.push("/templates");
+            router.push("/settings/templates");
             router.refresh();
           })
         }

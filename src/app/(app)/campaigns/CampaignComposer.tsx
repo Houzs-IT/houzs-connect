@@ -14,6 +14,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { ActionDialog } from "@/components/ActionConfirm";
 import { IconClose } from "@/components/icons";
+import { SearchableSelect } from "@/components/SearchableSelect";
 import { useShell } from "@/components/shell/ShellProvider";
 import { templateBindingGaps, type VarBinding } from "@/lib/automation/vars";
 import { formatPhone, initials, tint } from "@/lib/format";
@@ -384,19 +385,18 @@ export function CampaignComposer({
                     <label className={label} htmlFor="campaign-channel">
                       {L.sender}
                     </label>
-                    <select
+                    <SearchableSelect
                       id="campaign-channel"
                       value={channelId}
-                      onChange={(e) => setChannelId(e.target.value)}
+                      onChange={(v) => setChannelId(v)}
                       disabled={channels.length === 0}
+                      aria-label={L.sender}
                       className={input}
-                    >
-                      {channels.map((c) => (
-                        <option key={c.id} value={c.id}>
-                          {c.displayName} · {formatPhone(c.phone)}
-                        </option>
-                      ))}
-                    </select>
+                      options={channels.map((c) => ({
+                        value: c.id,
+                        label: `${c.displayName} · ${formatPhone(c.phone)}`,
+                      }))}
+                    />
                   </div>
                 </section>
 
@@ -445,20 +445,20 @@ export function CampaignComposer({
                   )}
                   {spec.audience.kind === "attribute" && (
                     <div className="grid gap-2 md:grid-cols-2">
-                      <select
+                      <SearchableSelect
                         aria-label={L.byAttr}
                         value={spec.audience.attrKey ?? ""}
-                        onChange={(e) => setAudience({ attrKey: e.target.value })}
+                        onChange={(v) => setAudience({ attrKey: v })}
                         disabled={attributeFields.length === 0}
                         className={input}
-                      >
-                        <option value="">{L.chooseAttr}</option>
-                        {attributeFields.map((f) => (
-                          <option key={f.key} value={f.key}>
-                            {f.name} ({f.key})
-                          </option>
-                        ))}
-                      </select>
+                        options={[
+                          { value: "", label: L.chooseAttr },
+                          ...attributeFields.map((f) => ({
+                            value: f.key,
+                            label: `${f.name} (${f.key})`,
+                          })),
+                        ]}
+                      />
                       <input
                         aria-label="Value"
                         value={spec.audience.attrValue ?? ""}
@@ -489,7 +489,7 @@ export function CampaignComposer({
                       >
                         {refreshing ? L.checking : L.refresh}
                       </button>
-                      <Link href="/templates" className="text-[var(--color-accent)] hover:underline">
+                      <Link href="/settings/templates" className="text-[var(--color-accent)] hover:underline">
                         {L.createTpl}
                       </Link>
                     </div>

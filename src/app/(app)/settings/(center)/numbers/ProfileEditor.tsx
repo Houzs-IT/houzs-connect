@@ -15,6 +15,7 @@
 // from a real button.
 
 import { useRef, useState, useTransition } from "react";
+import { SearchableSelect } from "@/components/SearchableSelect";
 import type { WabaNumber } from "@/lib/whatsapp/numbers";
 import {
   PHOTO_MAX_BYTES,
@@ -287,14 +288,16 @@ export function ProfileEditor({ n }: { n: WabaNumber }) {
             </div>
             <div>
               <label className={labelCls}>Category</label>
-              <select className={`${inputCls} mt-1`} value={vertical} onChange={(e) => setVertical(e.target.value)}>
-                <option value="">Not set</option>
-                {VERTICALS.map((v) => (
-                  <option key={v.value} value={v.value}>
-                    {v.label}
-                  </option>
-                ))}
-              </select>
+              <SearchableSelect
+                className={`${inputCls} mt-1`}
+                value={vertical}
+                onChange={(v) => setVertical(v)}
+                aria-label="Category"
+                options={[
+                  { value: "", label: "Not set" },
+                  ...VERTICALS.map((v) => ({ value: v.value, label: v.label })),
+                ]}
+              />
             </div>
             <div>
               <label className={labelCls}>Website 1</label>

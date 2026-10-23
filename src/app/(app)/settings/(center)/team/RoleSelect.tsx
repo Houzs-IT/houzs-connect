@@ -1,6 +1,7 @@
 "use client";
 
 import { useShell } from "@/components/shell/ShellProvider";
+import { SearchableSelect } from "@/components/SearchableSelect";
 import { fmt } from "@/lib/i18n/dict";
 import { setRoleForm } from "./actions";
 
@@ -47,28 +48,21 @@ export function RoleSelect({
       <input type="hidden" name="email" value={email} />
       {/* Keyed by the saved role: after the form action React resets the form, which
           put the select back on the role it first rendered with until a reload. */}
-      <select
+      <SearchableSelect
         key={role}
         name="role"
         defaultValue={role}
+        submitOnChange
         disabled={role === "SUPER_ADMIN" && !canSuper}
         aria-label={`Role for ${name}`}
-        onChange={(e) => e.currentTarget.form?.requestSubmit()}
         className={`h-[28px] w-[128px] cursor-pointer appearance-none rounded-full border-0 bg-[length:10px] bg-[right_10px_center] bg-no-repeat px-3 text-[11px] font-semibold uppercase tracking-[0.04em] outline-none focus:shadow-[0_0_0_3px_var(--color-accent-ring)] ${PILL[role] ?? PILL.VIEWER}`}
-        style={{
-          backgroundImage:
-            "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%23737c8c' stroke-width='1.5'/%3E%3C/svg%3E\")",
-        }}
-      >
-        {(canSuper || role === "SUPER_ADMIN") && <option value="SUPER_ADMIN">SUPER ADMIN</option>}
-        {role === "OWNER" && <option value="OWNER">OWNER</option>}
-        {ROLE_OPTIONS.map((r) => (
-          <option key={r} value={r}>
-            {r}
-          </option>
-        ))}
-        {setHere && erpRole && <option value="ERP">{fmt(L.useErpRole, { r: erpRole })}</option>}
-      </select>
+        options={[
+          ...(canSuper || role === "SUPER_ADMIN" ? [{ value: "SUPER_ADMIN", label: "SUPER ADMIN" }] : []),
+          ...(role === "OWNER" ? [{ value: "OWNER", label: "OWNER" }] : []),
+          ...ROLE_OPTIONS.map((r) => ({ value: r, label: r })),
+          ...(setHere && erpRole ? [{ value: "ERP", label: fmt(L.useErpRole, { r: erpRole }) }] : []),
+        ]}
+      />
       {setHere && erpRole && erpRole !== role && (
         <span className="pl-3 text-[10px] text-[var(--color-faint)]">{fmt(L.roleErpWas, { r: erpRole })}</span>
       )}

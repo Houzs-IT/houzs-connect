@@ -54,6 +54,13 @@ export async function SettingsMenu() {
           ],
         },
         {
+          title: t.nav.templates,
+          items: [
+            { href: "/settings/templates", label: t.tf.templates, icon: "▤", tone: "purple" },
+            { href: "/settings/forms", label: t.tf.forms, icon: "❏", tone: "cyan" },
+          ],
+        },
+        {
           title: L.more,
           items: [
             { href: "/settings/numbers", label: L.channels, sub: numbers === 1 ? L.nNumber1 : fmt(L.nNumbers, { n: numbers }), icon: "☏", tone: "green" },

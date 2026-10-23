@@ -18,11 +18,11 @@ import {
   type TemplateStatus,
 } from "@/lib/whatsapp/templates";
 import { bindingKey } from "@/lib/whatsapp/templateBindings";
-import { loadBindings, loadFieldsAndSample, loadTemplateList, needsMapping } from "../data";
-import { StarterSetButton } from "../StarterSetButton";
-import { TemplateSide } from "../TemplateSide";
-import { AnalyticsIncompleteNote, AnalyticsRefusalBanner } from "../TemplateInsights";
-import type { TemplateRowData } from "../types";
+import { loadBindings, loadFieldsAndSample, loadTemplateList, needsMapping } from "@/app/(app)/templates/data";
+import { StarterSetButton } from "@/app/(app)/templates/StarterSetButton";
+import { TemplateSide } from "@/app/(app)/templates/TemplateSide";
+import { AnalyticsIncompleteNote, AnalyticsRefusalBanner } from "@/app/(app)/templates/TemplateInsights";
+import type { TemplateRowData } from "@/app/(app)/templates/types";
 
 // Live, never cached — a template's status changes on Meta's side, not ours.
 export const dynamic = "force-dynamic";
@@ -109,7 +109,7 @@ export default async function TemplatesPage({ searchParams }: { searchParams: Pr
     for (const [k, v] of Object.entries({ category: fCat, language: fLang, status: fStatus, mapping: fMap, q, ...extra })) {
       if (v) p.set(k, v);
     }
-    return `/templates${p.size ? `?${p}` : ""}`;
+    return `/settings/templates${p.size ? `?${p}` : ""}`;
   };
 
   const opts = (vals: string[], labels?: Record<string, string>) =>
@@ -237,14 +237,14 @@ export default async function TemplatesPage({ searchParams }: { searchParams: Pr
       actions={
         <>
           <Link
-            href="/templates?tool=sync"
+            href="/settings/templates?tool=sync"
             className="flex h-[34px] items-center gap-1.5 rounded-[8px] border border-[var(--color-border)] bg-[var(--color-surface)] px-3 text-[13px] font-semibold text-[var(--color-ink)] hover:bg-[var(--color-surface-2)]"
           >
             <span aria-hidden>↻</span>
             {L.sync}
           </Link>
           <Link
-            href="/templates/new"
+            href="/settings/templates/new"
             className="flex h-[34px] items-center gap-1.5 rounded-[8px] bg-[var(--color-accent)] px-3.5 text-[13px] font-semibold text-white shadow-[var(--shadow-primary)] hover:bg-[var(--color-accent-hi)]"
           >
             <span className="text-[16px] leading-none">+</span>

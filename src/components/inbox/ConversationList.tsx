@@ -7,6 +7,7 @@ import { initials, listTime, previewText, shortDay, tint } from "@/lib/format";
 import { fmt } from "@/lib/i18n/dict";
 import { PersonAvatar } from "@/components/PersonAvatar";
 import { IconClose, IconSearch } from "@/components/icons";
+import { SearchableSelect } from "@/components/SearchableSelect";
 import { useShell } from "@/components/shell/ShellProvider";
 import { SlaTimer, isOverdue } from "./SlaTimer";
 import { fetchConversations } from "@/app/(app)/inbox/actions";
@@ -638,11 +639,17 @@ function FilterPopover({
           </div>
 
           <Field label={s.sortBy}>
-            <select className={selectCls} value={value.sort} onChange={(e) => set({ sort: e.target.value as Sort })}>
-              <option value="latest">{s.latest}</option>
-              <option value="oldest">{s.oldest}</option>
-              <option value="wait">{s.longestWait}</option>
-            </select>
+            <SearchableSelect
+              className={selectCls}
+              value={value.sort}
+              onChange={(v) => set({ sort: v as Sort })}
+              aria-label={s.sortBy}
+              options={[
+                { value: "latest", label: s.latest },
+                { value: "oldest", label: s.oldest },
+                { value: "wait", label: s.longestWait },
+              ]}
+            />
           </Field>
 
           {opts.tags.length > 0 && (
@@ -675,30 +682,42 @@ function FilterPopover({
           )}
 
           <Field label={s.fAssigned}>
-            <select className={selectCls} value={value.agentId} onChange={(e) => set({ agentId: e.target.value })}>
-              <option value="">{s.anyone}</option>
-              {opts.agents.map(([id, name]) => (
-                <option key={id} value={id}>{name}</option>
-              ))}
-            </select>
+            <SearchableSelect
+              className={selectCls}
+              value={value.agentId}
+              onChange={(v) => set({ agentId: v })}
+              aria-label={s.fAssigned}
+              options={[
+                { value: "", label: s.anyone },
+                ...opts.agents.map(([id, name]) => ({ value: id, label: name })),
+              ]}
+            />
           </Field>
 
           <Field label={s.fDept}>
-            <select className={selectCls} value={value.deptId} onChange={(e) => set({ deptId: e.target.value })}>
-              <option value="">{s.anyDept}</option>
-              {opts.depts.map(([id, name]) => (
-                <option key={id} value={id}>{name}</option>
-              ))}
-            </select>
+            <SearchableSelect
+              className={selectCls}
+              value={value.deptId}
+              onChange={(v) => set({ deptId: v })}
+              aria-label={s.fDept}
+              options={[
+                { value: "", label: s.anyDept },
+                ...opts.depts.map(([id, name]) => ({ value: id, label: name })),
+              ]}
+            />
           </Field>
 
           <Field label={s.fMsg}>
-            <select className={selectCls} value={value.msgType} onChange={(e) => set({ msgType: e.target.value })}>
-              <option value="">{s.anyMsg}</option>
-              {opts.types.map((ty) => (
-                <option key={ty} value={ty}>{s.msgType[ty] ?? ty}</option>
-              ))}
-            </select>
+            <SearchableSelect
+              className={selectCls}
+              value={value.msgType}
+              onChange={(v) => set({ msgType: v })}
+              aria-label={s.fMsg}
+              options={[
+                { value: "", label: s.anyMsg },
+                ...opts.types.map((ty) => ({ value: ty, label: s.msgType[ty] ?? ty })),
+              ]}
+            />
           </Field>
         </div>
 

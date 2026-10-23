@@ -33,6 +33,15 @@ const nextConfig: NextConfig = {
   outputFileTracingExcludes: {
     "*": ["**/node_modules/sharp/**", "**/node_modules/@img/**"],
   },
+  // Templates & Forms moved under Settings; keep old links and bookmarks working.
+  async redirects() {
+    return [
+      { source: "/templates", destination: "/settings/templates", permanent: false },
+      { source: "/templates/:path*", destination: "/settings/templates/:path*", permanent: false },
+      { source: "/forms", destination: "/settings/forms", permanent: false },
+      { source: "/forms/:path*", destination: "/settings/forms/:path*", permanent: false },
+    ];
+  },
 };
 
 export default nextConfig;
