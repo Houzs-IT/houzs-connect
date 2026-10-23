@@ -58,11 +58,8 @@ interface CloudflareEnv {
   IT_HUB_URL?: string;
   IT_HUB_API_KEY?: string;
 
-  // The scheduler (Cloudflare Cron Trigger -> worker.ts scheduled() -> self-fetch
-  // POST /api/cron). CRON_SECRET guards the route (sent as `x-cron-key`); unset =>
-  // the route refuses every call (503) and scheduled() does nothing, so the cron
-  // is off until the secret is set. APP_ORIGIN overrides the self-fetch base
-  // (defaults to the production custom domain).
+  // Guards POST /api/cron: the dedicated cron worker (cron-worker/) sends this as
+  // `x-cron-key` every 2 min. Unset => the route refuses every call (503), so the
+  // scheduler is off until the secret is set on BOTH this Worker and the cron one.
   CRON_SECRET?: string;
-  APP_ORIGIN?: string;
 }

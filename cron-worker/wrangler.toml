@@ -1,0 +1,17 @@
+# The dedicated Cron Trigger worker (see cron-worker/worker.js for why it is
+# separate from the main OpenNext worker). Deployed by deploy.yml.
+name = "houzs-connect-cron"
+main = "worker.js"
+account_id = "816e457307d7fa0491c2a08a72ad5dcd"
+compatibility_date = "2024-12-30"
+
+# Every 2 minutes. Matches the main app's expectations; delays/drip/scheduled
+# campaigns are hour/day-scale, so this granularity is ample.
+[triggers]
+crons = ["*/2 * * * *"]
+
+# The main app's cron endpoint. CRON_SECRET is a secret (set it with
+# `wrangler secret put CRON_SECRET --config cron-worker/wrangler.toml`), equal to
+# the main Worker's CRON_SECRET.
+[vars]
+CRON_TARGET_URL = "https://chat.houzscentury.com/api/cron"
