@@ -4,34 +4,34 @@ import type { SeedFlow } from "./types";
  * Balance Reminder — a standalone outstanding-balance nudge (decision B).
  *
  * The ERP fires this by name (trigger WEBHOOK) to chase an unpaid balance on its
- * own, e.g. days after a delivery was confirmed. It is business-initiated and
- * almost always lands OUTSIDE the 24-hour customer-service window, so it MUST
- * open with an approved template: free text here failed with Meta 131047
- * ("more than 24 hours have passed since the customer last replied"). It sends
- * the approved `hc_balance_reminder` template; {full_name} / {bank_block} /
- * {amount} fill its {{1}} {{2}} {{3}} IN ORDER, per company/contact — no account
- * number in source. The engine flattens every template param to one line (Meta
- * rejects a newline in a body parameter), so the multi-line {bank_block} arrives
- * as a single line.
+ * own. It is business-initiated and almost always lands OUTSIDE the 24-hour
+ * customer-service window, so it MUST open with an approved template: free text
+ * here failed with Meta 131047 ("more than 24 hours have passed since the
+ * customer last replied"). It sends the approved `hc_order_balance_collection`
+ * UTILITY template (en). The bank details are fixed IN the template itself
+ * (Houzs Century's account), so the only variables are {{1}} customer name and
+ * {{2}} amount — filled by {full_name} / {amount} IN ORDER. No account number in
+ * source: the preview below uses the ERP's {bank_block} variable for the inbox,
+ * never a literal account.
  */
 
 // Inbox / DEMO preview — what the thread shows. The real send uses the named
-// Meta template; this mirrors its approved copy with named placeholders.
-const BALANCE_REMINDER_MSG = `Hi {full_name}, our records show an outstanding balance payment for your order(s) with Houzs Century.
+// Meta template (bank details static there); this mirrors its copy, with
+// {bank_block} / {amount} filled from the contact so no account number lives here.
+const BALANCE_REMINDER_MSG = `Hi {full_name} 📢 Payment Status Update:
+A pending balance has been identified for your order with Houzs Century.
 
-Kindly complete the payment so we can proceed with your delivery as planned.
-
+Transaction Details:
 {bank_block}
+💰 Amount: RM {amount}
 
-💵 Amount Due: RM {amount}
-
-Please send the payment slip here once done — we'll verify and secure your delivery slot right away 🚚`;
+Settling this balance keeps your current delivery schedule. Please upload the transaction record (receipt) to this chat for verification. 🧾`;
 
 export const balanceReminderFlow: SeedFlow = {
   key: "balance_reminder",
   name: "Balance Reminder",
   description:
-    "Standalone outstanding-balance nudge via the hc_balance_reminder template: bank block + amount, tagged for collection.",
+    "Standalone outstanding-balance nudge via the hc_order_balance_collection template: customer name + amount, tagged for collection.",
   triggerType: "WEBHOOK",
   triggerConfig: { source: "erp", event: "balance_due" },
   forms: [],
@@ -44,9 +44,9 @@ export const balanceReminderFlow: SeedFlow = {
         x: 240,
         y: 120,
         data: {
-          templateName: "hc_balance_reminder",
+          templateName: "hc_order_balance_collection",
           templateLang: "en",
-          templateParams: ["{full_name}", "{bank_block}", "{amount}"],
+          templateParams: ["{full_name}", "{amount}"],
           message: BALANCE_REMINDER_MSG,
         },
       },
