@@ -288,6 +288,7 @@ export async function ContactPanel({
   const orderRef = values.ref_1;
   const total = Number(values.order_total ?? values.amount ?? NaN);
   const facts: [string, string | undefined][] = [
+    [s.refNo, values.ref_no_1],
     [s.deliveryDate, values.delivery_date_1],
     [s.salesPerson, values.sales_person],
     [s.brand, values.brand_1],
