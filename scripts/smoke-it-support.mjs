@@ -33,6 +33,8 @@ assert(itStatusTone("archived") === "neutral", "an unknown state is neutral, not
 const f = (name, type, size = 1000) => ({ name, type, size });
 let r = itAddFiles([], [f("a.png", "image/png"), f("b.pdf", "application/pdf"), f("c.mp4", "video/mp4"), f("d.mov", "video/quicktime")]);
 assert(r.take.length === 4 && r.skipped.length === 0, "pictures, PDF, MP4 and MOV are accepted");
+r = itAddFiles([], [f("logs.zip", "application/zip"), f("win.ZIP", "application/x-zip-compressed"), f("bare.zip", "")]);
+assert(r.take.length === 3 && r.skipped.length === 0, "a .zip is accepted whatever MIME the browser gives it");
 r = itAddFiles([], [f("x.exe", "application/x-msdownload"), f("y.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document")]);
 assert(r.take.length === 0 && r.skipped.length === 2, "other file types are refused with a reason each");
 r = itAddFiles([], [f("big.png", "image/png", IT_MAX_BYTES + 1), f("ok.png", "image/png", IT_MAX_BYTES)]);
