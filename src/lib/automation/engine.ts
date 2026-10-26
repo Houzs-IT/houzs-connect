@@ -16,7 +16,7 @@ import { asGraph, type FlowGraph, type FlowNode } from "./types";
 import { dueAt } from "./time";
 import { callRestApi, type RestBindings, type RestSecrets } from "./rest";
 import { getCloudflareContext } from "@opennextjs/cloudflare";
-import { interpolate } from "./vars";
+import { cleanParam, interpolate } from "./vars";
 import { attrs } from "@/lib/format";
 import { getOrCreateConversation, sendOutbound } from "@/lib/whatsapp/transport";
 import { generateAgentReply } from "@/lib/ai";
@@ -177,7 +177,11 @@ async function execNode(
       // fill the body's {{1}}, {{2}}, … in order. With buttons (the template's quick
       // replies) the run pauses for the tap and edges branch on the button id, just
       // like ask_buttons; without them it is a one-shot send like send_text.
-      const params = (d.templateParams ?? []).map((p) => interpolate(String(p), varCtx));
+      // cleanParam after interpolate: Meta rejects a body parameter that
+      // contains a newline or tab (132000-class, whole send lost), so a
+      // multi-line field such as {bank_block} must be flattened to one line.
+      // Single-line fields (names, refs, dates) are unchanged by it.
+      const params = (d.templateParams ?? []).map((p) => cleanParam(interpolate(String(p), varCtx)));
       const awaiting = !!(d.buttons && d.buttons.length > 0);
       await sendOutbound(ctx.conversationId, interpolate(d.message ?? "", varCtx), {
         isBot: true,
