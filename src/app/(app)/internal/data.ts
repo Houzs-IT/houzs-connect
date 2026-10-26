@@ -15,6 +15,38 @@ import { SLA_MINUTES } from "@/lib/sla";
 type Row = Record<string, unknown>;
 const rows = async <T,>(q: ReturnType<typeof sql>) => (await getDb().execute(q)) as unknown as T[];
 
+type OrgRow = { id: string; dept: string | null; division: string | null };
+
+/**
+ * Each active member's department name and ERP division, keyed by member id —
+ * for grouping the New-channel member picker. `dept` is null for a member in no
+ * department; `division` is free text synced from the ERP (migration 0022) and
+ * often null. Falls back to department-only if the division column is absent.
+ */
+export async function peopleOrg(companyId: string): Promise<Map<string, { dept: string | null; division: string | null }>> {
+  const build = (r: OrgRow[]) => new Map(r.map((x) => [x.id, { dept: x.dept ?? null, division: x.division ?? null }]));
+  try {
+    return build(
+      await rows<OrgRow>(sql`
+        select m.id, d.name as dept, m.division
+        from connect.member m
+        left join connect.department d on d.id = m.department_id
+        where m.company_id = ${companyId} and m.active = true
+      `)
+    );
+  } catch {
+    // Before migration 0022: no division column, so group by department only.
+    return build(
+      await rows<OrgRow>(sql`
+        select m.id, d.name as dept, null as division
+        from connect.member m
+        left join connect.department d on d.id = m.department_id
+        where m.company_id = ${companyId} and m.active = true
+      `)
+    );
+  }
+}
+
 /** Lower-case, dash-separated channel name: "Customer Service" → "customer-service". */
 export function slug(s: string): string {
   return s.toLowerCase().trim().replace(/[^\p{L}\p{N}]+/gu, "-").replace(/^-+|-+$/g, "").slice(0, 40) || "channel";
