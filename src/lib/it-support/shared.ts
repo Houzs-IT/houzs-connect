@@ -38,7 +38,7 @@ export interface ItDetail {
 
 export const IT_MAX_FILES = 5;
 export const IT_MAX_BYTES = 10 * 1024 * 1024;
-export const IT_ACCEPT = "image/*,video/mp4,video/quicktime,application/pdf";
+export const IT_ACCEPT = "image/*,video/mp4,video/quicktime,application/pdf,.zip";
 /** Request codes the hub hands out, e.g. CONNECT-0001. Anything else never reaches the hub. */
 export const IT_CODE = /^[A-Z0-9]{2,8}-\d{1,8}$/;
 
@@ -65,8 +65,10 @@ export function itStatusTone(s: string): "neutral" | "blue" | "purple" | "orange
   }
 }
 
-const isAllowedType = (type: string) =>
-  type.startsWith("image/") || type === "application/pdf" || type === "video/mp4" || type === "video/quicktime";
+/** A .zip goes by its name: browsers label it application/zip, application/x-zip-compressed or nothing. */
+const isAllowedFile = ({ name, type }: { name: string; type: string }) =>
+  type.startsWith("image/") || type === "application/pdf" || type === "video/mp4" || type === "video/quicktime" ||
+  name.toLowerCase().endsWith(".zip");
 
 /**
  * Files added to an attachment list (picked, dropped or pasted): the new list, and
@@ -81,7 +83,7 @@ export function itAddFiles(
   const skipped: string[] = [];
   let room = IT_MAX_FILES - current.length;
   added.forEach((f, i) => {
-    if (!isAllowedType(f.type)) skipped.push(`${f.name}: only pictures, PDF, MP4 or MOV`);
+    if (!isAllowedFile(f)) skipped.push(`${f.name}: only pictures, PDF, MP4, MOV or ZIP`);
     else if (f.size > IT_MAX_BYTES) skipped.push(`${f.name} is larger than 10 MB`);
     else if (room <= 0) skipped.push(`${f.name}: at most ${IT_MAX_FILES} files`);
     else { take.push(i); room -= 1; }
