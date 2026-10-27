@@ -109,7 +109,7 @@ const en = {
       rejected: "Not going ahead",
     },
     kind: { bug: "Something is not working", development: "Ask for a change" },
-    urgency: { urgent: "Urgent: work has stopped", high: "High", medium: "Medium", low: "Low" },
+    urgency: { high: "High", medium: "Medium", low: "Low" },
     urgencyShort: { urgent: "Urgent", high: "High", medium: "Medium", low: "Low" },
   },
   tab: {
@@ -1739,7 +1739,7 @@ const zh: Dict = {
       rejected: "不处理",
     },
     kind: { bug: "系统有问题", development: "申请修改" },
-    urgency: { urgent: "紧急：工作停摆", high: "高", medium: "中", low: "低" },
+    urgency: { high: "高", medium: "中", low: "低" },
     urgencyShort: { urgent: "紧急", high: "高", medium: "中", low: "低" },
   },
   tab: {
