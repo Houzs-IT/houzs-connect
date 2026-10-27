@@ -12,7 +12,7 @@ export const IT_STATUSES: readonly ItStatus[] = [
   "open", "in_progress", "on_hold", "testing", "waiting_reporter", "resolved", "closed", "rejected",
 ];
 export const IT_KINDS = ["bug", "development"] as const;
-export const IT_URGENCIES = ["urgent", "high", "medium", "low"] as const;
+export const IT_URGENCIES = ["high", "medium", "low"] as const;
 export type ItKind = (typeof IT_KINDS)[number];
 export type ItUrgency = (typeof IT_URGENCIES)[number];
 
