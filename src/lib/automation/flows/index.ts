@@ -7,6 +7,7 @@ import { deliveryLockFlow } from "./deliveryLock";
 import { optInOutFlow } from "./optInOut";
 import { balanceReminderFlow } from "./balance";
 import { repliedCheckFlow } from "./repliedCheck";
+import { serviceArrangementFlow } from "./serviceArrangement";
 import {
   reminder1Flow,
   reminder2Flow,
@@ -39,4 +40,5 @@ export const REBUILD_FLOWS: SeedFlow[] = [
   reminder3Flow,
   driverInfoFlow,
   deliveryCompletedFlow,
+  serviceArrangementFlow,
 ];
