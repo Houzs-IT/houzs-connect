@@ -1,4 +1,4 @@
-import { and, desc, eq, gte } from "drizzle-orm";
+import { and, desc, eq, gte, sql } from "drizzle-orm";
 import { getDb } from "@/db/client";
 import { automation, automationRun } from "@/db/schema";
 import { ensureAutomationRunColumns } from "@/db/ensure-automation-run";
@@ -172,7 +172,15 @@ export async function getAutomationEvents(contactId: string, since: Date): Promi
   const db = getDb();
   await ensureAutomationRunColumns(db).catch(() => {});
   const runs = await db.query.automationRun.findMany({
-    where: and(eq(automationRun.contactId, contactId), gte(automationRun.createdAt, since)),
+    where: and(
+      eq(automationRun.contactId, contactId),
+      gte(automationRun.createdAt, since),
+      // A guard that fires on every inbound (Delivery Lock, Opt In/Out) and
+      // finishes having only routed did nothing anyone can see; its
+      // started/finished pair is noise in the thread (HC-0174). Dropped in SQL
+      // so a chatty customer's guards cannot push real runs past EVENT_RUNS.
+      sql`not (${automationRun.status} = 'completed' and not jsonb_path_exists(coalesce(${automationRun.log}, '[]'::jsonb), '$[*] ? (@.type != "criteria_router")'))`
+    ),
     orderBy: desc(automationRun.createdAt),
     limit: EVENT_RUNS,
   });
