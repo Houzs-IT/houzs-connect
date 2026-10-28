@@ -211,9 +211,9 @@ export async function Thread({
         const buttons = payload?.buttons ?? [];
         // A picture or file: the inbound webhook stores { mediaId, mimeType },
         // an attachment we sent stores { kind: "media", mediaId, fileName }.
-        const media = (m.type === "IMAGE" || m.type === "DOCUMENT") && typeof (payload as { mediaId?: unknown } | null)?.mediaId === "string"
+        const media = (m.type === "IMAGE" || m.type === "DOCUMENT" || m.type === "AUDIO" || m.type === "VIDEO") && typeof (payload as { mediaId?: unknown } | null)?.mediaId === "string"
           ? {
-              kind: m.type as "IMAGE" | "DOCUMENT",
+              kind: m.type as "IMAGE" | "DOCUMENT" | "AUDIO" | "VIDEO",
               fileName: ((payload as { fileName?: unknown }).fileName as string | undefined) ?? null,
             }
           : null;
