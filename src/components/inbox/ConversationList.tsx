@@ -41,7 +41,7 @@ export type ConversationListItem = {
   botActive: boolean;
 };
 
-type Tab = "all" | "dept" | "sla";
+type Tab = "all" | "unread" | "dept" | "sla";
 type Sort = "latest" | "oldest" | "wait";
 type Filters = {
   starred: boolean;
@@ -224,8 +224,12 @@ export function ConversationList({
 
   const overdue = refined.filter((c) => isOverdue(c.waitingSince, now));
   const inDept = refined.filter((c) => c.departmentId === deptPick);
+  // Opening a thread clears its unread count, so keep the open one in the tab
+  // instead of having it vanish from under the cursor on the next refresh.
+  const unread = refined.filter((c) => c.unread > 0 || c.id === activeId);
 
-  let rows = tab === "sla" ? overdue : tab === "dept" ? inDept : refined;
+  let rows =
+    tab === "sla" ? overdue : tab === "dept" ? inDept : tab === "unread" ? unread : refined;
   if (filters.sort === "oldest") {
     rows = [...rows].sort((a, b) => (a.lastAt ?? "").localeCompare(b.lastAt ?? ""));
   } else if (filters.sort === "wait") {
@@ -238,6 +242,7 @@ export function ConversationList({
 
   const tabs: { key: Tab; label: string; count: number; danger?: boolean }[] = [
     { key: "all", label: s.tabAll, count: refined.length },
+    { key: "unread", label: s.tabUnread, count: refined.filter((c) => c.unread > 0).length },
     { key: "dept", label: s.tabDept, count: inDept.length },
     { key: "sla", label: s.tabSla, count: overdue.length, danger: true },
   ];
@@ -302,8 +307,8 @@ export function ConversationList({
         />
       )}
 
-      {/* All · Department · SLA overdue */}
-      <div className="flex items-end gap-4 border-b border-[var(--color-border)] px-3.5 pt-2.5">
+      {/* All · Unread · Dept · Overdue */}
+      <div className="flex items-end gap-3 border-b border-[var(--color-border)] px-3 pt-2.5">
         {tabs.map((tb) => {
           const on = tab === tb.key;
           return (
