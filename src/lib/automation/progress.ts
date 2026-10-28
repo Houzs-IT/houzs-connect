@@ -41,6 +41,14 @@ const EVENT_RUNS = 10;
 /** How many not-yet-reached steps the card previews. */
 const LOOKAHEAD = 5;
 
+/**
+ * A guard that fires on every inbound (Delivery Lock, Opt In/Out) and finishes
+ * having only routed did nothing anyone can see, so neither the thread nor the
+ * card shows it (HC-0174). Filtered in SQL so a chatty customer's guards cannot
+ * push real runs out of the EVENT_RUNS / card windows.
+ */
+const notIdle = sql`not (${automationRun.status} = 'completed' and not jsonb_path_exists(coalesce(${automationRun.log}, '[]'::jsonb), '$[*] ? (@.type != "criteria_router")'))`;
+
 /** First sentence of a message, placeholders dropped, kept short. */
 function gist(text: string): string {
   const plain = text.replace(/\{[^}]*\}/g, "…").replace(/\s+/g, " ").trim();
@@ -136,7 +144,7 @@ export async function getAutomationProgress(contactId: string): Promise<Automati
   const db = getDb();
   await ensureAutomationRunColumns(db).catch(() => {});
   const runs = await db.query.automationRun.findMany({
-    where: eq(automationRun.contactId, contactId),
+    where: and(eq(automationRun.contactId, contactId), notIdle),
     orderBy: desc(automationRun.updatedAt),
     limit: 5,
   });
@@ -175,11 +183,7 @@ export async function getAutomationEvents(contactId: string, since: Date): Promi
     where: and(
       eq(automationRun.contactId, contactId),
       gte(automationRun.createdAt, since),
-      // A guard that fires on every inbound (Delivery Lock, Opt In/Out) and
-      // finishes having only routed did nothing anyone can see; its
-      // started/finished pair is noise in the thread (HC-0174). Dropped in SQL
-      // so a chatty customer's guards cannot push real runs past EVENT_RUNS.
-      sql`not (${automationRun.status} = 'completed' and not jsonb_path_exists(coalesce(${automationRun.log}, '[]'::jsonb), '$[*] ? (@.type != "criteria_router")'))`
+      notIdle
     ),
     orderBy: desc(automationRun.createdAt),
     limit: EVENT_RUNS,
