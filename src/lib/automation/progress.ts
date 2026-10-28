@@ -1,4 +1,4 @@
-import { and, desc, eq, gte } from "drizzle-orm";
+import { and, desc, eq, gte, sql } from "drizzle-orm";
 import { getDb } from "@/db/client";
 import { automation, automationRun } from "@/db/schema";
 import { ensureAutomationRunColumns } from "@/db/ensure-automation-run";
@@ -40,6 +40,14 @@ type LogEntry = { node?: string; type?: string; awaiting?: string; at?: string }
 const EVENT_RUNS = 10;
 /** How many not-yet-reached steps the card previews. */
 const LOOKAHEAD = 5;
+
+/**
+ * A guard that fires on every inbound (Delivery Lock, Opt In/Out) and finishes
+ * having only routed did nothing anyone can see, so neither the thread nor the
+ * card shows it (HC-0174). Filtered in SQL so a chatty customer's guards cannot
+ * push real runs out of the EVENT_RUNS / card windows.
+ */
+const notIdle = sql`not (${automationRun.status} = 'completed' and not jsonb_path_exists(coalesce(${automationRun.log}, '[]'::jsonb), '$[*] ? (@.type != "criteria_router")'))`;
 
 /** First sentence of a message, placeholders dropped, kept short. */
 function gist(text: string): string {
@@ -136,7 +144,7 @@ export async function getAutomationProgress(contactId: string): Promise<Automati
   const db = getDb();
   await ensureAutomationRunColumns(db).catch(() => {});
   const runs = await db.query.automationRun.findMany({
-    where: eq(automationRun.contactId, contactId),
+    where: and(eq(automationRun.contactId, contactId), notIdle),
     orderBy: desc(automationRun.updatedAt),
     limit: 5,
   });
@@ -172,7 +180,11 @@ export async function getAutomationEvents(contactId: string, since: Date): Promi
   const db = getDb();
   await ensureAutomationRunColumns(db).catch(() => {});
   const runs = await db.query.automationRun.findMany({
-    where: and(eq(automationRun.contactId, contactId), gte(automationRun.createdAt, since)),
+    where: and(
+      eq(automationRun.contactId, contactId),
+      gte(automationRun.createdAt, since),
+      notIdle
+    ),
     orderBy: desc(automationRun.createdAt),
     limit: EVENT_RUNS,
   });
