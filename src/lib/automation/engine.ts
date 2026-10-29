@@ -16,9 +16,10 @@ import { asGraph, type FlowGraph, type FlowNode } from "./types";
 import { dueAt } from "./time";
 import { callRestApi, type RestBindings, type RestSecrets } from "./rest";
 import { getCloudflareContext } from "@opennextjs/cloudflare";
-import { cleanParam, interpolate } from "./vars";
+import { applyParams, cleanParam, interpolate } from "./vars";
 import { attrs } from "@/lib/format";
 import { getOrCreateConversation, sendOutbound } from "@/lib/whatsapp/transport";
+import { approvedTemplateBody } from "@/lib/whatsapp/templates";
 import { generateAgentReply } from "@/lib/ai";
 import { enrollContactInDrip, removeContactFromDrip } from "@/lib/drip";
 
@@ -183,7 +184,14 @@ async function execNode(
       // Single-line fields (names, refs, dates) are unchanged by it.
       const params = (d.templateParams ?? []).map((p) => cleanParam(interpolate(String(p), varCtx)));
       const awaiting = !!(d.buttons && d.buttons.length > 0);
-      await sendOutbound(ctx.conversationId, interpolate(d.message ?? "", varCtx), {
+      // The thread shows the approved body with these params, not `message`:
+      // the delivery flows' 2/3/4-order openers all carry the 1-order
+      // `message`, so a 2-order send read as one order in the inbox
+      // (HC-SO-013256 + 013258, 2026-10-29). `message` stays the fallback
+      // for DEMO and for a template Meta's list cannot give us.
+      const approved = d.templateName ? await approvedTemplateBody(d.templateName, d.templateLang ?? "en") : null;
+      const shown = approved ? applyParams(approved, params) : interpolate(d.message ?? "", varCtx);
+      await sendOutbound(ctx.conversationId, shown, {
         isBot: true,
         ...(d.templateName
           ? { template: { name: d.templateName, lang: d.templateLang, params } }

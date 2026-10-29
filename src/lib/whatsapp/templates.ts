@@ -255,6 +255,33 @@ export async function listTemplates(
   return { ok: true, templates: (res.data.data ?? []).map(flatten) };
 }
 
+// Approved bodies by name|language, for showing in the thread what a flow's
+// template send actually said. One list call fills every template and is kept
+// per isolate for a few minutes, so a blast of N customers asks Meta once, not
+// N times. A failed list is kept as empty for the same window: the sends fall
+// back to their stored preview instead of each waiting on Meta again.
+const BODY_TTL_MS = 5 * 60 * 1000;
+let approvedBodies: { at: number; byKey: Map<string, string> } | null = null;
+
+/** The approved body of one template, or null when it cannot be read (not
+ *  connected, Meta refused the list, template not approved). Never throws. */
+export async function approvedTemplateBody(name: string, language: string): Promise<string | null> {
+  if (!approvedBodies || Date.now() - approvedBodies.at > BODY_TTL_MS) {
+    const cfg = templateConfig();
+    if (!cfg) return null;
+    const res = await listTemplates(cfg);
+    approvedBodies = {
+      at: Date.now(),
+      byKey: new Map(
+        res.ok
+          ? res.templates.filter((t) => t.status === "APPROVED" && t.body).map((t) => [`${t.name}|${t.language}`, t.body])
+          : []
+      ),
+    };
+  }
+  return approvedBodies.byKey.get(`${name}|${language}`) ?? null;
+}
+
 /**
  * Submit a template for Meta review. Returns its id and initial status
  * (PENDING for anything with copy Meta has not seen before).
