@@ -12,7 +12,8 @@ import { LOCKED } from "./shared";
  * customer tapping and seeing nothing. The date itself can no longer change —
  * the engine never reopens a completed run — so this only adds the reply.
  *
- * `last_button` is written by handleInboundMessage on every button tap. The two
+ * `last_button` is written by handleInboundMessage on every button tap and
+ * cleared by every other message, so only the tap itself gets the reply. The two
  * routers gate the message, so an ordinary text or a payment slip from a
  * confirmed customer is a no-op. A stale lock across orders is prevented by the
  * ERP sending a fresh button_status on each new-order trigger (go-live

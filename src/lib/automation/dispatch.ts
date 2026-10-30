@@ -361,14 +361,18 @@ export async function handleInboundMessage(
   // Delivery Lock reads it); last_message carries the text LOWERCASED for
   // keyword routing like opt-out (the raw text is on the message row). A late
   // tap/keyword after a flow completes starts no waiting run to carry it.
-  if (input.buttonId || input.text) {
-    const c = await db.query.contact.findFirst({ where: eq(contactTable.id, contactId) });
-    if (c) {
-      const merged = { ...attrs(c.attributes) };
-      if (input.buttonId) merged.last_button = input.buttonId;
-      if (input.text) merged.last_message = input.text.toLowerCase().trim();
-      await db.update(contactTable).set({ attributes: merged }).where(eq(contactTable.id, contactId));
-    }
+  //
+  // last_button is THIS message's tap only, cleared by anything else: left in
+  // place, one late Amend tap made the Delivery Lock re-send the locked message
+  // on every later text, photo or form from that customer (HC-0189,
+  // HC-SO-013107, 2026-10-30).
+  const c = await db.query.contact.findFirst({ where: eq(contactTable.id, contactId) });
+  if (c) {
+    const merged = { ...attrs(c.attributes) };
+    if (input.buttonId) merged.last_button = input.buttonId;
+    else delete merged.last_button;
+    if (input.text) merged.last_message = input.text.toLowerCase().trim();
+    await db.update(contactTable).set({ attributes: merged }).where(eq(contactTable.id, contactId));
   }
   const resumed = await handleCustomerReply(contactId, input);
   if (resumed > 0) return { resumed, started: 0 };
