@@ -16,6 +16,8 @@ import {
 import { IconBolt, IconContacts, IconForm, IconPaperclip, IconSend } from "@/components/icons";
 import { useShell } from "@/components/shell/ShellProvider";
 import { EmojiPicker } from "@/components/inbox/EmojiPicker";
+import { fmt } from "@/lib/i18n/dict";
+import { REPLY_EVENT, type ReplyTarget } from "@/components/inbox/ReplyButton";
 import {
   ATTACHMENT_ACCEPT,
   checkAttachment,
@@ -143,11 +145,24 @@ export function Composer({
   const [contactQuery, setContactQuery] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Set from a message's Reply button. Tagged with its conversation so a quote
+  // picked in one thread never rides along after switching to another.
+  const [replyTarget, setReplyTarget] = useState<ReplyTarget | null>(null);
+  const replying = replyTarget?.conversationId === conversationId ? replyTarget : null;
   const formRef = useRef<HTMLFormElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const textRef = useRef<HTMLTextAreaElement>(null);
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const note = kind === "note";
+  useEffect(() => {
+    const onReply = (e: Event) => {
+      setReplyTarget((e as CustomEvent<ReplyTarget>).detail);
+      setKind("reply");
+      textRef.current?.focus();
+    };
+    window.addEventListener(REPLY_EVENT, onReply);
+    return () => window.removeEventListener(REPLY_EVENT, onReply);
+  }, []);
   const { t } = useShell();
   const s = t.service;
 
@@ -851,6 +866,7 @@ export function Composer({
         action={async (fd) => {
           await sendMessage(fd);
           setDraft("");
+          setReplyTarget(null);
           formRef.current?.reset();
         }}
         // Phone: "+", a pill input and a round send on one line; the tools
@@ -872,6 +888,7 @@ export function Composer({
         </button>
         <input type="hidden" name="conversationId" value={conversationId} />
         <input type="hidden" name="kind" value={kind} />
+        {replying && !note && <input type="hidden" name="replyTo" value={replying.waMessageId} />}
 
         {/* type="button" is load-bearing: inside a form an untyped button
             defaults to submit. */}
@@ -892,6 +909,24 @@ export function Composer({
           ))}
         </div>
 
+        {replying && !note && (
+          <div className="order-first flex basis-full items-start gap-2 md:order-none md:mx-3 md:mt-2">
+            <div className="min-w-0 flex-1 rounded-[8px] border-l-[3px] border-[var(--color-accent)] bg-[var(--color-surface-dim)] px-2.5 py-1.5 text-[12px] leading-[1.45]">
+              <span className="block font-semibold text-[var(--color-accent-ink)]">{fmt(s.replyingTo, { name: replying.name })}</span>
+              <span className="block truncate text-[var(--color-muted)]">{replying.text}</span>
+            </div>
+            <button
+              type="button"
+              aria-label={s.cancelReply}
+              title={s.cancelReply}
+              onClick={() => setReplyTarget(null)}
+              className="grid h-7 w-7 shrink-0 place-items-center rounded-full text-[18px] leading-none text-[var(--color-faint)] hover:bg-[var(--color-surface-dim)] hover:text-[var(--color-ink)]"
+            >
+              ×
+            </button>
+          </div>
+        )}
+
         <textarea
           ref={textRef}
           name="body"
@@ -911,6 +946,10 @@ export function Composer({
           placeholder={note ? s.noteMsg : windowOpen ? (isPhone ? s.msgShort : s.typeMsg) : s.closedMsg}
           className="max-h-40 min-h-[44px] min-w-0 flex-1 resize-none rounded-[22px] border border-[var(--color-border)] bg-[var(--color-surface-2)] px-4 py-[11px] text-[14px] text-[var(--color-ink)] outline-none placeholder:text-[var(--color-faint)] disabled:cursor-not-allowed md:min-h-[42px] md:flex-none md:rounded-none md:border-0 md:bg-transparent md:px-3 md:pb-1 md:pt-2 md:text-[13.5px]"
           onKeyDown={(e) => {
+            if (e.key === "Escape" && replying) {
+              setReplyTarget(null);
+              return;
+            }
             if (e.key === "Enter" && !e.shiftKey) {
               e.preventDefault();
               e.currentTarget.form?.requestSubmit();

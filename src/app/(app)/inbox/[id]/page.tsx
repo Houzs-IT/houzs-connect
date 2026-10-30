@@ -308,7 +308,7 @@ export default async function ConversationPage({
             {orderRef && <span className="ml-auto shrink-0 font-semibold text-[var(--color-brand)]">{orderRef}</span>}
           </div>
         )}
-        <Thread items={items} conversationId={convo.id} />
+        <Thread items={items} conversationId={convo.id} contactName={name} />
         {/* The DEMO simulators are for driving a flow with no real WhatsApp
             attached. On LIVE they were still rendered — a thread showing
             "LIVE · sending via WhatsApp" in the sidebar and a "Send as customer"
