@@ -7,6 +7,7 @@ import { fmt } from "@/lib/i18n/dict";
 import { demoTap } from "@/app/actions";
 import { ChatMedia } from "./ChatMedia";
 import { ThreadScroll } from "./ThreadScroll";
+import { ReplyButton } from "./ReplyButton";
 
 /**
  * Which day a message belongs to, in Malaysian time.
@@ -94,6 +95,8 @@ type Msg = {
   isBot: boolean;
   status: string;
   interactivePayload: unknown;
+  /** Meta's id — what a reply quotes. Null until Meta accepts the send. */
+  waMessageId?: string | null;
   createdAt: Date | string;
   /** Who sent it, for outbound only — a member's name, or "Bot". */
   senderName?: string | null;
@@ -119,14 +122,19 @@ type FlowEvent = {
 
 export type ThreadItem = Msg | Note | FlowEvent;
 
-type Buttons = { kind?: string; buttons?: { id: string; label: string }[] };
+type Buttons = { kind?: string; buttons?: { id: string; label: string }[]; replyTo?: string };
+
+const MEDIA_TYPES = ["IMAGE", "DOCUMENT", "AUDIO", "VIDEO"];
 
 export async function Thread({
   items,
   conversationId,
+  contactName,
 }: {
   items: ThreadItem[];
   conversationId: string;
+  /** Who an inbound quote is from — the header of a quoted customer message. */
+  contactName: string;
 }) {
   // Server component, so this reads the Worker's env directly — no prop drilling
   // and no way for the client to disagree with it.
@@ -140,6 +148,13 @@ export async function Thread({
   // the scroll alone.
   const last = items[items.length - 1];
   const latestKey = `${items.length}:${last ? `${last.kind}-${last.id}` : ""}`;
+
+  const byWaId = new Map<string, Msg>();
+  for (const it of items) if (it.kind === "message" && it.waMessageId) byWaId.set(it.waMessageId, it);
+  // One line of what a message says, for the quote and the composer's reply bar.
+  const preview = (q: Msg) =>
+    (MEDIA_TYPES.includes(q.type) ? mediaCaption(q.body) : q.body)?.trim() ||
+    (q.type === "IMAGE" || q.type === "VIDEO" ? s.mediaPhoto : s.mediaFile);
 
   return (
     <ThreadScroll
@@ -220,10 +235,15 @@ export async function Thread({
         // The body of a media message is its caption plus a placeholder
         // ("[attachment]" in, "[image] name.jpg" out) — show the caption only.
         const text = media ? mediaCaption(m.body) : m.body;
+        // A quote the page did not load (older than the thread window) still
+        // says it is a reply, just without the text.
+        const quotedId = payload?.replyTo;
+        const quoted = quotedId ? byWaId.get(quotedId) : undefined;
+        const replyable = !!m.waMessageId && m.status !== "FAILED";
         return (
           <Fragment key={m.id}>
             {sep}
-            <div className={`flex ${out ? "justify-end" : "justify-start"}`}>
+            <div id={`msg-${m.id}`} className={`group flex items-start gap-1 ${out ? "justify-end" : "justify-start"}`}>
               <div className={`flex max-w-[78%] flex-col md:max-w-[64%] ${out ? "items-end" : "items-start"}`}>
                 <div
                   className={`px-[13px] py-[9px] text-[13.5px] leading-[1.55] ${
@@ -232,6 +252,19 @@ export async function Thread({
                       : "rounded-[14px_14px_14px_4px] bg-[var(--color-in)] text-[var(--color-ink)] shadow-[0_0_0_1px_var(--color-border),0_1px_2px_rgba(0,0,0,0.05)]"
                   }`}
                 >
+                  {quotedId && (
+                    <a
+                      href={quoted ? `#msg-${quoted.id}` : undefined}
+                      className={`mb-1.5 block min-w-[160px] rounded-[8px] border-l-[3px] border-[var(--color-accent)] px-2.5 py-1.5 text-[12px] leading-[1.45] ${
+                        out ? "bg-[color-mix(in_srgb,var(--color-surface)_60%,transparent)]" : "bg-[var(--color-surface-dim)]"
+                      }`}
+                    >
+                      <span className="block font-semibold text-[var(--color-accent-ink)]">
+                        {quoted ? (quoted.direction === "OUT" ? s.you : contactName) : s.quoteMissing}
+                      </span>
+                      {quoted && <span className="line-clamp-2 whitespace-pre-wrap text-[var(--color-muted)]">{preview(quoted)}</span>}
+                    </a>
+                  )}
                   {media && (
                     <div className={text ? "mb-1.5" : ""}>
                       <ChatMedia
@@ -292,6 +325,13 @@ export async function Thread({
                   {out && <DeliveryState status={m.status} />}
                 </div>
               </div>
+              {replyable && (
+                <ReplyButton
+                  label={s.reply}
+                  out={out}
+                  target={{ conversationId, waMessageId: m.waMessageId!, name: out ? s.you : contactName, text: preview(m) }}
+                />
+              )}
             </div>
           </Fragment>
         );

@@ -9,6 +9,7 @@ import {
   contactTag,
   conversation,
   conversationTag,
+  message,
   note,
   payment,
   quickReply,
@@ -52,6 +53,7 @@ export async function sendMessage(formData: FormData) {
   const conversationId = String(formData.get("conversationId") ?? "");
   const body = String(formData.get("body") ?? "").trim();
   const kind = String(formData.get("kind") ?? "reply"); // reply | note
+  const replyTo = String(formData.get("replyTo") ?? "").trim();
   if (!conversationId || !body) return;
 
   const auth = await authorizeConversation(conversationId);
@@ -68,9 +70,18 @@ export async function sendMessage(formData: FormData) {
     // which is also why no delivery status ever came back for one (Meta had
     // never heard of the message). Automations looked fine throughout because
     // they always called sendOutbound.
+    // Only a wamid from this same thread may be quoted; anything else would be
+    // refused by Meta and fail the whole reply.
+    const quoted = replyTo
+      ? await db.query.message.findFirst({
+          where: and(eq(message.conversationId, conversationId), eq(message.waMessageId, replyTo)),
+          columns: { id: true },
+        })
+      : null;
     await sendOutbound(conversationId, body, {
       isBot: false,
       sentByMemberId: me.id,
+      replyTo: quoted ? replyTo : undefined,
     });
     await db
       .update(conversation)

@@ -210,15 +210,24 @@ export async function phoneNumberInfo(): Promise<PhoneNumberInfo | null> {
   };
 }
 
-/** Send a plain text message. Returns the Meta message id (for status reconciliation). */
+/**
+ * Send a plain text message. Returns the Meta message id (for status reconciliation).
+ * `replyTo` is the wamid of the message being answered; the customer's phone
+ * shows it quoted above the reply, as WhatsApp's own swipe-to-reply does.
+ */
 export async function sendText(
   to: string,
   body: string,
   out?: SendOutcome,
-  from?: string
+  from?: string,
+  replyTo?: string
 ): Promise<string | null> {
   if (!isLive()) return null;
-  return post({ to, type: "text", text: { body } }, out, from);
+  return post(
+    { to, type: "text", text: { body }, ...(replyTo ? { context: { message_id: replyTo } } : {}) },
+    out,
+    from
+  );
 }
 
 /** Send interactive reply buttons (max 3, per Cloud API limits). */

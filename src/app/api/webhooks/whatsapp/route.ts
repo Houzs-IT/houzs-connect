@@ -92,6 +92,8 @@ interface WaValue {
     location?: { latitude?: number; longitude?: number; name?: string; address?: string };
     contacts?: Array<{ name?: { formatted_name?: string }; phones?: Array<{ phone?: string; wa_id?: string }> }>;
     reaction?: { message_id?: string; emoji?: string };
+    // Set when the customer swipe-replied to a message: `id` is its wamid.
+    context?: { id?: string };
   }>;
   statuses?: Array<{ id: string; status: string }>;
 }
@@ -300,6 +302,11 @@ export async function POST(req: NextRequest) {
           caption ??
           (isMedia ? "[attachment]" : "");
 
+        // A button tap also carries `context` (the template it was on), so the
+        // quote is kept for typed replies and media only — otherwise every
+        // Confirm / Amend tap would draw the opener above it.
+        const replyTo = !buttonId && !flowFields ? m.context?.id : undefined;
+
         // Flows still get `text` exactly as before: a sticker or a reaction is
         // not an answer to "why do you want to postpone?".
         const inbound = await recordInbound(convo.id, text || describeNonText(m), {
@@ -310,8 +317,10 @@ export async function POST(req: NextRequest) {
             : buttonId
               ? { tapped: buttonId }
               : media?.id
-                ? { mediaId: media.id, mimeType: media.mime_type }
-                : undefined,
+                ? { mediaId: media.id, mimeType: media.mime_type, ...(replyTo ? { replyTo } : {}) }
+                : replyTo
+                  ? { replyTo }
+                  : undefined,
         });
 
         if (isMedia) {

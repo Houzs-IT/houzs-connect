@@ -26,7 +26,7 @@ export async function resendMessage(messageId: string): Promise<{ ok: boolean; i
   if (!row || row.conversation.contact.companyId !== me.companyId) return { ok: false, error: "Not found." };
   if (row.direction !== "OUT" || row.status !== "FAILED") return { ok: false, error: "Only a failed outgoing message can be sent again." };
 
-  const payload = (row.interactivePayload ?? null) as { template?: TemplateSend } | null;
+  const payload = (row.interactivePayload ?? null) as { template?: TemplateSend; replyTo?: string } | null;
   const template = payload?.template;
   if (row.type === "TEMPLATE" && !template) {
     return { ok: false, error: "This template message was sent before Connect kept its details, so it cannot be repeated exactly. Send it again from the conversation." };
@@ -39,6 +39,7 @@ export async function resendMessage(messageId: string): Promise<{ ok: boolean; i
     isBot: false,
     sentByMemberId: me.id,
     ...(template ? { type: "TEMPLATE" as const, template } : {}),
+    replyTo: payload?.replyTo,
   });
   if (!sent) return { ok: false, error: "This customer is blocked, so nothing was sent." };
   revalidatePath("/logs");
