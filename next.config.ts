@@ -1,6 +1,23 @@
 import type { NextConfig } from "next";
 
+// A unique id for THIS build, stamped into the client bundle and served by
+// /api/version, so an open tab can notice a newer build is live and offer a
+// "Refresh now" button (see components/shell/UpdateBanner.tsx) — the Connect
+// twin of the ERP's NewVersionBanner.
+//
+// Source, in order: GITHUB_SHA (set on every CI deploy → one id per deploy, tied
+// to the commit), then a build-time timestamp for a local production build, then
+// "dev" under `next dev` so the version check skips itself entirely. Evaluated
+// once per `next build`, so the client bundle and the /api/version handler of the
+// SAME build always agree — only a new deploy makes them differ.
+const BUILD_ID =
+  process.env.GITHUB_SHA?.slice(0, 12) ||
+  (process.env.NODE_ENV === "development" ? "dev" : Date.now().toString(36));
+
 const nextConfig: NextConfig = {
+  // Inlined into both the client bundle (the id a tab booted with) and the
+  // /api/version handler (the id of the deployed build).
+  env: { NEXT_PUBLIC_BUILD_ID: BUILD_ID },
   // react-flow (@xyflow/react) v12 measures nodes/handles via ResizeObserver; React's
   // dev-only StrictMode double-mount can leave edges unrendered. Disable it so the
   // flow builder measures cleanly. (No effect on production behavior.)

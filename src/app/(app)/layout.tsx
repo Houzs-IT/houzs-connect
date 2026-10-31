@@ -6,6 +6,7 @@ import { MobileTabBar } from "@/components/shell/MobileTabBar";
 import { ShellProvider } from "@/components/shell/ShellProvider";
 import { PresencePing } from "@/components/shell/PresencePing";
 import { NotifyPoller } from "@/components/shell/NotifyPoller";
+import { UpdateBanner } from "@/components/shell/UpdateBanner";
 import { touchPresence } from "@/lib/presence";
 import { getLang, getMenuCollapsed, getPanelCollapsed } from "@/lib/i18n/server";
 import { getDb } from "@/db/client";
@@ -85,6 +86,7 @@ export default async function AppLayout({
     <ShellProvider lang={await getLang()} menuCollapsed={await getMenuCollapsed()} panelCollapsed={await getPanelCollapsed()}>
       <PresencePing />
       <NotifyPoller />
+      <UpdateBanner />
       <div data-shell className="flex h-dvh flex-col overflow-hidden">
         {staging ? (
           <div className="shrink-0 bg-amber-400 px-3 py-0.5 text-center text-xs font-semibold text-amber-950">
