@@ -11,13 +11,23 @@
 // the composer and paste the account line there.
 
 import type { TemplateDraft } from "@/lib/whatsapp/templates";
+import { DEFAULT_BRAND, type Brand } from "@/lib/brand";
 
 export interface StarterTemplate extends TemplateDraft {
   label: string;
   note?: string;
 }
 
-export const STARTER_TEMPLATES: StarterTemplate[] = [
+/**
+ * The delivery follow-up drafts, worded for one company's brand. Submitted to
+ * Meta by submitStarterSet (actions.ts), which resolves the signed-in company's
+ * brand first. Houzs (the default) is byte-identical to the copy already
+ * approved on the Seampify WABA, including *bold* markers and emoji. The brand
+ * is baked in here because a Meta template body cannot carry a runtime variable
+ * for it — see lib/brand.ts.
+ */
+export function starterTemplates(brand: Brand = DEFAULT_BRAND): StarterTemplate[] {
+  return [
   {
     label: "Delivery scheduled (1 order)",
     note: "The workhorse — 125 sends in the last week on Seampify.",
@@ -28,7 +38,7 @@ export const STARTER_TEMPLATES: StarterTemplate[] = [
     // list (which collapses them) — the greeting is its own line.
     body: `Hi {{1}} 👋
 
-Good news! Your order with Houzs has been scheduled for delivery.
+Good news! Your order with ${brand.short} has been scheduled for delivery.
 
 Reference No. : *{{2}}*
 Delivery Date: *{{3}}*
@@ -91,7 +101,7 @@ If you need to change it, just tap the button below — our team will be happy t
     name: "ask_delivery_address",
     language: "en_GB",
     category: "UTILITY",
-    body: `Hi {{1}} 👋 We're getting your Houzs order *{{2}}* ready! 🚚
+    body: `Hi {{1}} 👋 We're getting your ${brand.short} order *{{2}}* ready! 🚚
 
 To help us arrange your delivery schedule and route smoothly, could you please reply to this message with your *full delivery address and postal code*?
 
@@ -103,7 +113,8 @@ Thank you so much! ✨`,
     name: "overdue_order_status_update",
     language: "en_GB",
     category: "UTILITY",
-    body: `Hi *{{1}}* , this is the Customer Service Team from Houzs Century. We sincerely apologize for the delay with your order *{{2}}*. Due to *{{3}}*, your order requires additional time to ensure everything meets our standards. Our team is actively working on your items, and we expect to deliver your order within the next delivery timeframe *{{4}}*. Our logistics team will contact you shortly to confirm the exact date and time. Thank you for your patience and for giving us the opportunity to make this right.`,
+    body: `Hi *{{1}}* , this is the Customer Service Team from ${brand.name}. We sincerely apologize for the delay with your order *{{2}}*. Due to *{{3}}*, your order requires additional time to ensure everything meets our standards. Our team is actively working on your items, and we expect to deliver your order within the next delivery timeframe *{{4}}*. Our logistics team will contact you shortly to confirm the exact date and time. Thank you for your patience and for giving us the opportunity to make this right.`,
     examples: ["Wong", "znt7001", "supplier delay", "end of August"],
   },
-];
+  ];
+}

@@ -21,7 +21,8 @@ import {
 import { saveTemplateBinding } from "@/lib/whatsapp/templateBindings";
 import { uploadForHandle } from "@/lib/whatsapp/profile";
 import { asBindings, type VarBinding } from "@/lib/automation/vars";
-import { STARTER_TEMPLATES } from "./starterTemplates";
+import { brandForCompanyId } from "@/lib/brand-company";
+import { starterTemplates } from "./starterTemplates";
 
 /** Auth gate. Templates steer what every customer receives, so a caller must
  *  be a signed-in member — the same bar settings mutations use. */
@@ -349,10 +350,13 @@ export interface StarterResult {
 
 /** Submit every starter template that is not already on the WABA. */
 export async function submitStarterSet(): Promise<StarterResult[]> {
-  if (!(await requireMember())) return [];
+  const me = await requireMember();
+  if (!me) return [];
+  // Worded for the signed-in company's brand (Houzs by default).
+  const templates = starterTemplates(await brandForCompanyId(me.companyId));
   const cfg = templateConfig();
   if (!cfg) {
-    return STARTER_TEMPLATES.map((t) => ({
+    return templates.map((t) => ({
       name: t.name,
       ok: false,
       error: "WhatsApp is not connected yet (WHATSAPP_WABA_ID / WHATSAPP_TOKEN missing).",
@@ -365,7 +369,7 @@ export async function submitStarterSet(): Promise<StarterResult[]> {
   const have = new Set(existing.ok ? existing.templates.map((t) => t.name) : []);
 
   const out: StarterResult[] = [];
-  for (const t of STARTER_TEMPLATES) {
+  for (const t of templates) {
     if (have.has(t.name)) {
       out.push({ name: t.name, ok: true, status: "ALREADY_EXISTS" });
       continue;

@@ -4,6 +4,7 @@ import { and, asc, desc, eq } from "drizzle-orm";
 import { getDb } from "@/db/client";
 import { contactField, conversation, department, dripCampaign, member, note, payment, tag } from "@/db/schema";
 import { MarkRead } from "@/components/inbox/MarkRead";
+import { EscToClose } from "@/components/inbox/EscToClose";
 import { Thread, type ThreadItem } from "@/components/inbox/Thread";
 import { Composer } from "@/components/inbox/Composer";
 import { ContactPanel, type FirstReply } from "@/components/inbox/ContactPanel";
@@ -204,6 +205,8 @@ export default async function ConversationPage({
     <div className="flex min-w-0 flex-1">
       {/* Opening a conversation clears its unread badge. */}
       <MarkRead conversationId={convo.id} />
+      {/* Esc returns to the list — the keyboard twin of the header's back arrow. */}
+      <EscToClose />
       {/* Center: thread */}
       <div className="flex min-w-0 flex-1 flex-col bg-[var(--color-canvas)]">
         <div className="flex h-[60px] shrink-0 items-center gap-2.5 border-b border-[var(--color-border)] bg-[var(--color-surface)] px-2.5 md:gap-3 md:px-4">

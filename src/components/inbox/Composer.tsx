@@ -430,6 +430,24 @@ export function Composer({
     };
   }, []);
 
+  /**
+   * Esc closes an open tool panel (quick replies, templates, emoji, …). Capture
+   * phase and preventDefault so the press is spent here: the conversation page's
+   * Esc-to-close handler reads defaultPrevented and leaves the thread open. Only
+   * attached while a panel is up, so it never touches an ordinary Esc.
+   */
+  useEffect(() => {
+    if (!panel) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        setPanel(null);
+      }
+    };
+    document.addEventListener("keydown", onKey, true);
+    return () => document.removeEventListener("keydown", onKey, true);
+  }, [panel]);
+
   /** Why the microphone is unavailable right now, or null when it is not. */
   const voiceBlocked = note
     ? "A private note stays inside Connect and is never sent, and there is nowhere here to store audio. Switch to Reply to record a voice note."
