@@ -155,6 +155,10 @@ const en = {
     notifications: "Notifications",
     noNotices: "Nothing new in the last day.",
     notifySettings: "Notification settings",
+    updateReady: "A newer version is ready",
+    updateHint: "refresh to update",
+    updateRefresh: "Refresh now",
+    updateRefreshing: "Refreshing…",
   },
   role: {
     SUPER_ADMIN: "Super Admin",
@@ -1790,6 +1794,10 @@ const zh: Dict = {
     notifications: "通知",
     noNotices: "最近一天没有新通知。",
     notifySettings: "通知设置",
+    updateReady: "有新版本了",
+    updateHint: "刷新即可更新",
+    updateRefresh: "立即刷新",
+    updateRefreshing: "刷新中…",
   },
   role: {
     SUPER_ADMIN: "超级管理员",
