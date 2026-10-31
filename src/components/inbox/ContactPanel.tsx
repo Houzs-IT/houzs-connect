@@ -286,7 +286,30 @@ export async function ContactPanel({
   // ── Order: what the ERP order event wrote onto the contact, plus the
   // payment slips received in chat. Nothing here is fetched from the ERP. ──
   const orderRef = values.ref_1;
-  const total = Number(values.order_total ?? values.amount ?? NaN);
+  const parseRm = (v?: string) => (v ? Number(String(v).replace(/[^\d.]/g, "")) : NaN);
+  // Every order bundled into this delivery, sent by the ERP as `orders_json` — a
+  // JSON array of { so, ref, amount } (amount a plain-decimal RM string). The
+  // panel lists them all when there is more than one; a single order (or an older
+  // event with no list) just shows the primary order block below.
+  let orderList: { so?: string; ref?: string; amount?: string }[] = [];
+  try {
+    const parsed = values.orders_json ? JSON.parse(values.orders_json) : null;
+    if (Array.isArray(parsed)) orderList = parsed as typeof orderList;
+  } catch {
+    /* malformed JSON — fall back to the single primary order */
+  }
+  // The total shown is the ERP's grand total `order_amount`, else the sum of the
+  // per-order list. NOT `order_total` — that is the ERP's ORDER COUNT (1/2/3/4+),
+  // used only to pick the opener template; rendering it as money showed every
+  // order as "RM 1.00". money() shows "—" when none is present.
+  const total = values.order_amount
+    ? parseRm(values.order_amount)
+    : orderList.length
+      ? orderList.reduce((sum, o) => {
+          const n = parseRm(o.amount);
+          return sum + (Number.isFinite(n) ? n : 0);
+        }, 0)
+      : NaN;
   const facts: [string, string | undefined][] = [
     [s.refNo, values.ref_no_1],
     [s.deliveryDate, values.delivery_date_1],
@@ -315,6 +338,29 @@ export async function ContactPanel({
                 </div>
               ))}
           </div>
+          {orderList.length > 1 && (
+            <div className="border-t border-[var(--color-border-subtle)] px-3 py-2.5">
+              <div className="mb-1.5 flex items-center justify-between">
+                <span className={EYEBROW}>{s.orders}</span>
+                <span className="text-[11px] font-medium text-[var(--color-muted)]">
+                  {fmt(s.ordersCount, { n: orderList.length })}
+                </span>
+              </div>
+              <ul className="flex flex-col gap-1.5">
+                {orderList.map((o, i) => (
+                  <li key={`${o.so ?? ""}-${i}`} className="flex items-baseline justify-between gap-2">
+                    <span className="min-w-0 truncate text-[12.5px]">
+                      <span className="font-medium text-[var(--color-brand)]">{o.so || "—"}</span>
+                      {o.ref ? <span className="text-[var(--color-muted)]"> · {o.ref}</span> : null}
+                    </span>
+                    <span className="shrink-0 tabular-nums text-[12.5px] text-[var(--color-ink)]">
+                      {money(parseRm(o.amount))}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
           <div className="flex items-baseline justify-between border-t border-[var(--color-border-subtle)] bg-[var(--color-surface-2)] px-3 py-2.5">
             <span className="text-[12px] text-[var(--color-muted)]">{s.orderTotal}</span>
             <span className="text-[17px] font-semibold tabular-nums text-[var(--color-ink)]">{money(total)}</span>
