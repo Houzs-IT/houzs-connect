@@ -259,10 +259,16 @@ export async function handleReceipt(
 
   const ocr = runOcr(receiptText);
   const a = attrs(convo.contact.attributes);
-  const orderTotal = Number(a.order_total ?? a.amount ?? NaN);
-  // Auto-verify only when OCR read an amount that matches the order total.
-  const verified =
-    ocr.amount != null && Number.isFinite(orderTotal) && Math.abs(ocr.amount - orderTotal) < 0.01;
+  // Auto-verify when OCR read an amount that matches what this customer should
+  // pay — the balance owed (`amount`) or the full order value (`order_amount`),
+  // both RM strings the ERP sends (comma-formatted, so strip separators). NOT
+  // `order_total`: that is the ERP's ORDER COUNT (1 / 2 / 3 / 4+), so matching a
+  // payment against it auto-verified almost nothing and let a RM1 receipt
+  // "match" a single-order delivery.
+  const parseRm = (v?: string) => Number(String(v ?? "").replace(/[^\d.]/g, ""));
+  const targets = [parseRm(a.amount), parseRm(a.order_amount)].filter((n) => Number.isFinite(n) && n > 0);
+  const paid = ocr.amount;
+  const verified = paid != null && targets.some((t) => Math.abs(paid - t) < 0.01);
 
   const [payment] = await db
     .insert(paymentTable)
