@@ -129,7 +129,7 @@ export async function sendTemplateMessage(formData: FormData): Promise<void> {
 
 /** The approved templates an agent may send, for the composer's picker. */
 export async function listSendableTemplates(): Promise<
-  { name: string; language: string; body: string; placeholders: number }[]
+  { name: string; language: string; category: string; body: string; placeholders: number }[]
 > {
   const me = await getCurrentMember();
   if (!me) return [];
@@ -142,6 +142,7 @@ export async function listSendableTemplates(): Promise<
     .map((t) => ({
       name: t.name,
       language: t.language,
+      category: t.category,
       body: t.body,
       placeholders: countPlaceholders(t.body),
     }));
