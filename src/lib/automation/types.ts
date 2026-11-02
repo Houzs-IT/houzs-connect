@@ -61,6 +61,28 @@ export const TRIGGER_EVENT_TO_TYPE: Record<TriggerEvent, string> = {
   TAG_ADDED: "TAG_ADDED",
 };
 
+export function isTriggerEvent(v: unknown): v is TriggerEvent {
+  return typeof v === "string" && Object.hasOwn(TRIGGER_EVENT_TO_TYPE, v);
+}
+
+/**
+ * The builder's Trigger event for a stored automation. Seeded ERP flows carry
+ * their own event label in triggerConfig.event ("service_arrangement",
+ * "balance_due", ...), which is not a builder event: publishing it wrote that
+ * label into triggerType, the WEBHOOK match stopped, and every ERP send came
+ * back `triggered: []` (HC-0201). Read the real trigger from triggerType, and
+ * from the ERP source for a row that publish already broke.
+ */
+export function builderTriggerEvent(
+  triggerType: string | null | undefined,
+  config: { event?: unknown; source?: unknown } | null | undefined
+): TriggerEvent | undefined {
+  if (isTriggerEvent(config?.event)) return config.event;
+  if (isTriggerEvent(triggerType)) return triggerType;
+  if (config?.source === "erp") return "WEBHOOK";
+  return undefined;
+}
+
 export interface TriggerData {
   event?: TriggerEvent;
   callbackId?: string; // ACTION_CALLBACK: the exact Action Callback Id to match

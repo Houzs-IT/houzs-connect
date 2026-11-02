@@ -7,7 +7,7 @@ import {
   dripCampaign,
 } from "@/db/schema";
 import { ensureDripTables } from "@/db/ensure-drip";
-import { asGraph, type TriggerEvent } from "@/lib/automation/types";
+import { asGraph, builderTriggerEvent, type TriggerEvent } from "@/lib/automation/types";
 import { FlowCanvas } from "@/components/automation/FlowCanvas";
 import { getCurrentMember } from "@/lib/current-member";
 import { FlowChecks } from "../FlowChecks";
@@ -151,7 +151,7 @@ export default async function AutomationDetail({
         automationName={automation.name}
         graph={graph}
         initialEnabled={automation.enabled}
-        initialTriggerEvent={triggerConfig?.event}
+        initialTriggerEvent={builderTriggerEvent(automation.triggerType, triggerConfig)}
         initialCallbackId={triggerConfig?.callbackId ?? ""}
         initialKeywords={triggerConfig?.keywords ?? []}
         automations={otherAutomations}
