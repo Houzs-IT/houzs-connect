@@ -44,6 +44,7 @@ interface QuickReply {
 interface Template {
   name: string;
   language: string;
+  category: string;
   body: string;
   placeholders: number;
 }
@@ -53,6 +54,26 @@ interface ContactOption {
   phone: string;
   email: string | null;
 }
+
+// Same tones as the Templates page, so a template reads the same in both places.
+const TEMPLATE_TONE: Record<string, { bar: string; chip: string }> = {
+  UTILITY: {
+    bar: "border-l-[var(--color-pastel-blue-ink)]",
+    chip: "bg-[var(--color-pastel-blue)] text-[var(--color-pastel-blue-ink)]",
+  },
+  MARKETING: {
+    bar: "border-l-[var(--color-pastel-pink-ink)]",
+    chip: "bg-[var(--color-pastel-pink)] text-[var(--color-pastel-pink-ink)]",
+  },
+  AUTHENTICATION: {
+    bar: "border-l-[var(--color-pastel-purple-ink)]",
+    chip: "bg-[var(--color-pastel-purple)] text-[var(--color-pastel-purple-ink)]",
+  },
+};
+const TEMPLATE_TONE_FALLBACK = {
+  bar: "border-l-[var(--color-border)]",
+  chip: "bg-[var(--color-surface-2)] text-[var(--color-muted)]",
+};
 
 /** What the composer will accept, spelled out for the operator up front. */
 const LIMITS_HINT = `JPEG or PNG up to ${formatBytes(
@@ -595,21 +616,34 @@ export function Composer({
             <Empty>No template matches.</Empty>
           )}
 
-          {!chosen &&
-            shownTemplates.map((t) => (
-              <button
-                key={`${t.name}-${t.language}`}
-                type="button"
-                onClick={() => {
-                  setChosen(t);
-                  setParams(Array.from({ length: t.placeholders }, () => ""));
-                }}
-                className="flex w-full flex-col gap-0.5 rounded-lg px-2.5 py-2 text-left hover:bg-[var(--color-surface-2)]"
-              >
-                <span className="font-mono text-[12px] text-[var(--color-ink)]">{t.name}</span>
-                <span className="line-clamp-2 text-[12px] text-[var(--color-muted)]">{t.body}</span>
-              </button>
-            ))}
+          {!chosen && shownTemplates.length > 0 && (
+            <div className="divide-y divide-[var(--color-border)]">
+              {shownTemplates.map((t) => {
+                const tone = TEMPLATE_TONE[t.category] ?? TEMPLATE_TONE_FALLBACK;
+                return (
+                  <button
+                    key={`${t.name}-${t.language}`}
+                    type="button"
+                    onClick={() => {
+                      setChosen(t);
+                      setParams(Array.from({ length: t.placeholders }, () => ""));
+                    }}
+                    className={`flex w-full flex-col gap-0.5 border-l-[3px] px-2.5 py-2 text-left hover:bg-[var(--color-surface-2)] ${tone.bar}`}
+                  >
+                    <span className="flex items-center gap-2">
+                      <span className="font-mono text-[12px] text-[var(--color-ink)]">{t.name}</span>
+                      {t.category && (
+                        <span className={`rounded px-1.5 py-px text-[10px] font-semibold uppercase tracking-wide ${tone.chip}`}>
+                          {t.category.toLowerCase()}
+                        </span>
+                      )}
+                    </span>
+                    <span className="line-clamp-2 text-[12px] text-[var(--color-muted)]">{t.body}</span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
 
           {chosen && (
             <form action={sendTemplateMessage} className="px-1 pb-1">
