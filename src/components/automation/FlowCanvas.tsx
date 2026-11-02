@@ -37,6 +37,7 @@ import {
 import "@xyflow/react/dist/style.css";
 import { createPortal } from "react-dom";
 import {
+  isTriggerEvent,
   type CriteriaRule,
   type FlowGraph,
   type NodeType,
@@ -362,7 +363,8 @@ function toFlow(
   const nodes: Node[] = graph.nodes.map((n, i) => {
     const data: HcData = { nodeType: n.type, ...(n.data ?? {}) };
     if (n.type === "trigger" && seedTrigger) {
-      if (data.event == null) data.event = seedTrigger.event ?? "NEW_INCOMING_MESSAGE";
+      // A published ERP flow saved its seed label ("service_arrangement") here.
+      if (!isTriggerEvent(data.event)) data.event = seedTrigger.event ?? "NEW_INCOMING_MESSAGE";
       if (data.callbackId == null) data.callbackId = seedTrigger.callbackId ?? "";
       if (data.keywords == null) data.keywords = seedTrigger.keywords ?? [];
     }

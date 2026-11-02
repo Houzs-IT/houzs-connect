@@ -14,6 +14,7 @@ import {
 } from "@/db/schema";
 import {
   asGraph,
+  isTriggerEvent,
   TRIGGER_EVENT_TO_TYPE,
   type AutomationVersionSnapshot,
   type FlowGraph,
@@ -141,8 +142,9 @@ export async function saveAutomationGraph(
     graph,
     version: sql`${automation.version} + 1`,
   };
-  if (opts.trigger) {
-    set.triggerType = TRIGGER_EVENT_TO_TYPE[opts.trigger.event] ?? opts.trigger.event;
+  // Anything else is a seed label, never a type dispatch matches (HC-0201).
+  if (opts.trigger && isTriggerEvent(opts.trigger.event)) {
+    set.triggerType = TRIGGER_EVENT_TO_TYPE[opts.trigger.event];
     set.triggerConfig = {
       event: opts.trigger.event,
       callbackId: opts.trigger.callbackId ?? "",
