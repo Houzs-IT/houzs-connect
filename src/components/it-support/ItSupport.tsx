@@ -15,6 +15,7 @@ import {
 } from "@/lib/it-support/shared";
 import { CARD, FIELD, FilePicker, LABEL, PRIMARY, SECONDARY, StatusChip, UrgencyChip, itCall } from "./parts";
 import { pageBeforeItSupport, refreshItUnread } from "./useItSupportShell";
+import { itModuleFor, itModuleOptions } from "@/lib/it-support/module";
 
 /**
  * IT Support: report a problem with Connect to IT, follow it, reply, and confirm
@@ -186,6 +187,8 @@ function NewRequest({ onSent, onCancel }: { onSent: (code: string) => void; onCa
   const [description, setDescription] = useState("");
   const [kind, setKind] = useState<string>("bug");
   const [urgency, setUrgency] = useState<string>("medium");
+  // Picked from the page they came from; they can change it or leave "Not sure".
+  const [module, setModule] = useState<string>(() => itModuleFor(pageBeforeItSupport()));
   const [files, setFiles] = useState<File[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -204,6 +207,7 @@ function NewRequest({ onSent, onCancel }: { onSent: (code: string) => void; onCa
     form.set("occurred_at", new Date().toISOString());
     const page = pageBeforeItSupport();
     if (page) form.set("page_url", page);
+    if (module) form.set("module", module);
     for (const f of files) form.append("files", f, f.name);
     try {
       const r = await itCall<{ code: string }>("/tickets", { method: "POST", body: form });
@@ -238,6 +242,11 @@ function NewRequest({ onSent, onCancel }: { onSent: (code: string) => void; onCa
             aria-label={t.it.fUrgency} options={IT_URGENCIES.map((u) => ({ value: u, label: t.it.urgency[u] }))} />
         </label>
       </div>
+      <label>
+        <span className={LABEL}>{t.it.fModule}</span>
+        <SearchableSelect className={`${FIELD} h-[36px]`} value={module} onChange={(v) => setModule(v)}
+          aria-label={t.it.fModule} options={[{ value: "", label: t.it.moduleNotSure }, ...itModuleOptions(t)]} />
+      </label>
       <div>
         <span className={LABEL}>{t.it.fShots}</span>
         <FilePicker files={files} onChange={setFiles} />
