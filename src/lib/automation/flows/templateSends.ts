@@ -119,16 +119,16 @@ export const deliveryCompletedFlow = templateFlow({
 // confirm/amend conversation is the separate Service Arrangement flow). The ERP
 // fires this by name on create with full_name + ref_1 (the ASSR/case number).
 // Button-less, one-shot: reassure, then wait for a human — no callback. Tags the
-// contact "ASSR" on send so the inbox can filter service-case customers.
+// contact "service" on send so the inbox can filter service-case customers.
 export const serviceCaseReceivedFlow = templateFlow({
   key: "service_case_received",
   name: "Service Case Received",
   description:
-    "After-sales acknowledgement sent when an ASSR (service case) is created: hc_service_case_received, full_name + case ref. Tags the contact ASSR.",
+    "After-sales acknowledgement sent when an ASSR (service case) is created: hc_service_case_received, full_name + case ref. Tags the contact service.",
   event: "service_case_received",
   templateName: "hc_service_case_received",
   params: ["{full_name}", "{ref_1}"],
-  tag: "ASSR",
+  tag: "service",
   message: `Hi {full_name} 👋 This is Houzs Century.
 
 We've received your service request (Service Case *{ref_1}*) and our after-sales team has already started arranging it for you.

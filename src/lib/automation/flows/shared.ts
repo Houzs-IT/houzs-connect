@@ -175,7 +175,7 @@ export function buildTemplateSendGraph(opts: {
   params: string[];
   message: string;
   /** When set, add an add_tag node after the send (before end) that tags the
-   *  contact — e.g. "ASSR" so the inbox can filter service-case customers. */
+   *  contact — e.g. "service" so the inbox can filter service-case customers. */
   tag?: string;
 }): FlowGraph {
   const nodes: FlowNode[] = [
