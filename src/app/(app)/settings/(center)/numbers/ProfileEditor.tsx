@@ -14,7 +14,7 @@
 // on record. The same pattern the inbox composer uses: a hidden input, opened
 // from a real button.
 
-import { useRef, useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import { SearchableSelect } from "@/components/SearchableSelect";
 import type { WabaNumber } from "@/lib/whatsapp/numbers";
 import {
@@ -81,7 +81,14 @@ function fieldList(fields: (keyof ProfileInput)[]): string {
   return `the ${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
 }
 
-export function ProfileEditor({ n }: { n: WabaNumber }) {
+export function ProfileEditor({
+  n,
+  onPhoto,
+}: {
+  n: WabaNumber;
+  /** Tells the number card the photo Meta holds, so its avatar matches this section. */
+  onPhoto?: (url: string | null) => void;
+}) {
   const [open, setOpen] = useState(false);
   const [profile, setProfile] = useState<BusinessProfile | null>(null);
   const [about, setAbout] = useState("");
@@ -107,6 +114,10 @@ export function ProfileEditor({ n }: { n: WabaNumber }) {
   const [pending, start] = useTransition();
   const [doing, setDoing] = useState<Doing | null>(null);
   const busy = pending ? doing : null;
+
+  useEffect(() => {
+    if (profile) onPhoto?.(profile.profilePictureUrl);
+  }, [profile, onPhoto]);
 
   function fill(p: BusinessProfile) {
     setProfile(p);
