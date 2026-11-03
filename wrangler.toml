@@ -77,6 +77,12 @@ WHATSAPP_MODE = "LIVE"
 # IT Support relays to the Houzs IT Hub. The menu stays hidden until the
 # IT_HUB_API_KEY secret (the hub's CONNECT key) is also on the Worker.
 IT_HUB_URL = "https://support.houzscentury.com"
+# Receipt OCR: a customer image becomes a payment to check only when Claude finds
+# a paid amount on it (src/lib/receipt-vision.ts); needs the ANTHROPIC_API_KEY
+# secret on the Worker. Re-enabled 2026-11-03 — paused 2026-10-04 when live calls
+# failed, but that cause (empty-400 through Next's patched fetch) was fixed with
+# rawFetch 2026-10-05, and the key was rotated to the company Anthropic org.
+RECEIPT_AI = "on"
 
 [observability]
 enabled = true
