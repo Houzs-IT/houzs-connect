@@ -106,6 +106,31 @@ async function run(db: DB): Promise<void> {
       PRIMARY KEY ("channel_id", "member_id")
     )
   `);
+  // Message attachments — images and files (migration 0025). Bytes live in the
+  // FILES R2 bucket (r2_key); this row is the metadata the timeline renders and
+  // the serve route authorises. One message may carry several.
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "connect"."internal_attachment" (
+      "id" text PRIMARY KEY NOT NULL,
+      "message_id" text NOT NULL,
+      "channel_id" text NOT NULL,
+      "company_id" text NOT NULL,
+      "kind" text NOT NULL,
+      "r2_key" text NOT NULL,
+      "name" text NOT NULL,
+      "mime" text NOT NULL,
+      "size" integer NOT NULL,
+      "width" integer,
+      "height" integer,
+      "created_at" timestamp with time zone DEFAULT now() NOT NULL
+    )
+  `);
+  await db.execute(
+    sql`CREATE INDEX IF NOT EXISTS "internal_attachment_message_idx" ON "connect"."internal_attachment" ("message_id")`
+  );
+  await db.execute(
+    sql`CREATE INDEX IF NOT EXISTS "internal_attachment_channel_idx" ON "connect"."internal_attachment" ("channel_id", "created_at")`
+  );
 }
 
 export async function ensureInternalTables(db: DB): Promise<void> {
