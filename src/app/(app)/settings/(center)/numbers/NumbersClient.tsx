@@ -661,8 +661,15 @@ function NumberCard({
     >
       <div className="flex flex-wrap items-center gap-3 border-b border-[var(--color-border-subtle)] px-4 py-3.5">
         <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full border border-[var(--color-border)] bg-white">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/logo-hc-mark.png" alt="" className="h-5 w-5 object-contain" />
+          {/* Only Houzs has a logo file; any other company (2990s, The Conts) gets its initial, never Houzs's mark. */}
+          {assignment?.companySlug === "houzs-century" ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src="/logo-hc-mark.png" alt="" className="h-5 w-5 object-contain" />
+          ) : (
+            <span className="text-[15px] font-semibold text-[var(--color-muted)]">
+              {assignment?.companyName.trim().charAt(0).toUpperCase() || "?"}
+            </span>
+          )}
         </span>
         <div className="min-w-0 flex-1 leading-tight">
           <div className="text-[16px] font-semibold tabular-nums text-[var(--color-ink)]">{formatPhone(n.displayPhoneNumber)}</div>
