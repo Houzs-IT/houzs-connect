@@ -332,12 +332,13 @@ async function demoNumbers(): Promise<NumbersView> {
   const [channels, companies] = await Promise.all([
     db.query.channel.findMany({ orderBy: [desc(channel.isDefault), asc(channel.displayName)] }),
     db.query.company.findMany({
-      columns: { id: true, name: true },
+      columns: { id: true, name: true, slug: true },
       where: eq(company.active, true),
       orderBy: asc(company.createdAt),
     }),
   ]);
   const nameOf = new Map(companies.map((c) => [c.id, c.name]));
+  const slugOf = new Map(companies.map((c) => [c.id, c.slug]));
   const numbers = channels.map((ch, i) => ({
     id: ch.phoneNumberId ?? ch.id,
     displayPhoneNumber: ch.phone,
@@ -354,7 +355,7 @@ async function demoNumbers(): Promise<NumbersView> {
   }));
   const assignments: Record<string, NumberAssignment | null> = {};
   channels.forEach((ch, i) => {
-    assignments[numbers[i].id] = { companyId: ch.companyId, companyName: nameOf.get(ch.companyId) ?? "", companySlug: null, legacy: false };
+    assignments[numbers[i].id] = { companyId: ch.companyId, companyName: nameOf.get(ch.companyId) ?? "", companySlug: slugOf.get(ch.companyId) ?? null, legacy: false };
   });
   return { configured: true, permitted: true, numbers, activeId: numbers[0]?.id ?? null, managerUrl: null, assignments, companies };
 }
