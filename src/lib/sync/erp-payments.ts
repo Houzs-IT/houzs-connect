@@ -59,7 +59,7 @@ export type {
   ErpOutcome,
   ResolvedMethod,
 } from "./erp-payments-core";
-export { buildPaymentBody, interpretErpResponse, resolveMethod, normalizeCurrency, ALLOWED_SLIP_MIME, MAX_SLIP_BYTES } from "./erp-payments-core";
+export { buildPaymentBody, interpretErpResponse, resolveMethod, normalizeCurrency, mapBankToErpCode, mapOnlineType, ALLOWED_SLIP_MIME, MAX_SLIP_BYTES } from "./erp-payments-core";
 
 const DEFAULT_ERP_BASE = "https://erp.houzscentury.com";
 const PUSH_PATH = "/api/connect/payments";
