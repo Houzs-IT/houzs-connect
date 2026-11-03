@@ -48,5 +48,30 @@
 
 ---
 
+## OCR 读款单的 API Key(Anthropic)— 轮换 + 移到公司账号
+
+**背景**:读客户付款 slip 的功能(`src/lib/receipt-vision.ts`)靠一把 Anthropic 密钥 `ANTHROPIC_API_KEY`,存在**公司 Cloudflare 账号**的 Worker secret 上(Worker `houzs-connect`,account `hello@houzscentury.com`)。
+当前这把 key 叫 `houzs-connect-receipts-final`,却建在 Anthropic 的 **"Nico's Individual Org"(个人组织)** 下,**2026-11-04 (UTC) 过期**。目标:换一把新的,并让它归在**公司 Anthropic 组织**下统一管计费。
+
+> 要移的是 **Anthropic 那边的组织/计费**,不是 Cloudflare —— Cloudflare 早就是公司账号了(`wrangler.toml` 里 pin 了 account_id)。Anthropic 的 key **不能跨组织"搬"**,只能在目标组织里**新建一把**,再把旧的吊销。
+
+> OCR 目前是**暂停**的:`wrangler.toml` 的 `[vars]` 里没有 `RECEIPT_AI=on`,所以线上没在调它,**这把 key 过期当下不影响任何在跑的东西**。真要开 OCR,除了换 key 还得加 `RECEIPT_AI=on`。
+
+### 你要做的
+1. **确认/建公司组织**:用 `hello@houzscentury.com` 登 https://console.anthropic.com
+   - 已有公司组织(挂着公司付款方式)→ 右上角切到它。
+   - 没有 → 新建一个组织、设好公司信用卡/发票(这步只有你能做,涉及付款)。
+2. **在公司组织里建新 key**:**Settings → API keys → Create key**,起名如 `houzs-connect-receipts`,**复制**(只显示一次)。别贴进聊天。
+3. **把新 key 装到 Worker**(这一行**你自己跑**,key 不经过 Claude):
+   `npx wrangler secret put ANTHROPIC_API_KEY`
+   提示 `Enter a secret value` 时粘贴新 key、回车即可(secret 立即生效,不必重新部署)。
+
+### 验证 + 收尾
+4. **验证**:打开 app **Settings → Integrations → Receipt AI 的 "Test connection"**,逐步探针会显示新 key 是否被接受(只花几个 token)。
+5. **吊销旧 key**:确认新 key 能用后,回 Anthropic 的 **Nico's Individual Org** 把 `houzs-connect-receipts-final` **Revoke/Delete** —— 计费就彻底归到公司组织了。
+6. (可选)**真正开启 OCR**:在 `wrangler.toml` 的 `[vars]` 加 `RECEIPT_AI = "on"` → `pnpm run deploy`(Claude 做)。不想现在开就先放着,换 key 不受影响。
+
+---
+
 ## 一句话
 先做 ① → ②,告诉 Claude;想上线再做 ③。所有 `pnpm`/`wrangler` 命令都是 Claude 跑,你不用碰终端(除了那句 `wrangler login`,或让 Claude 帮你跑你点 Allow)。
