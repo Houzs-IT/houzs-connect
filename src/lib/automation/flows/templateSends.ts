@@ -3,9 +3,9 @@ import { buildTemplateSendGraph } from "./shared";
 
 /**
  * The "send one approved template" WS-A flows (decision B): reminders, driver
- * info, delivery-completed, service-case-received. Each fires by name (trigger
- * WEBHOOK) and sends a single button-less template via the send_template node,
- * then ends.
+ * info, delivery-completed, service-case-received, overdue-order. Each fires by
+ * name (trigger WEBHOOK) and sends a single button-less template via the
+ * send_template node, then ends.
  *
  * Bodies below mirror the APPROVED templates on the Connect Templates page
  * (chat.houzscentury.com/templates) and are the DEMO/inbox preview; the real
@@ -112,6 +112,28 @@ export const deliveryCompletedFlow = templateFlow({
   templateName: "delivery_completed_thanks",
   params: ["{full_name}", "{ref_1}"],
   message: `Hi {full_name}, This is a confirmation that your order {ref_1} was successfully delivered today. Thank you for your understanding and for purchasing our products. We sincerely appreciate your support.`,
+});
+
+// Overdue Order — a one-way heads-up when a Sales Order's delivery will run LATE
+// because of a production delay. The operator sends it by name from the Delivery
+// Planning board's Send Message menu; it apologises and promises the updated
+// schedule later. No new date and no buttons — distinct from Postpone, which
+// commits a proposed date and opens a Confirm / Amend conversation.
+export const overdueOrderFlow = templateFlow({
+  key: "overdue_order",
+  name: "Overdue Order",
+  description:
+    "Production-delay heads-up for a late order (one-way): hc_overdue_order, full_name + order ref. No date, no buttons.",
+  event: "overdue_order",
+  templateName: "hc_overdue_order",
+  params: ["{full_name}", "{ref_1}"],
+  message: `Hi {full_name} 👋 This is Houzs Century, regarding your order *{ref_1}*.
+
+We'd like to let you know that the delivery of your order will take a little longer than scheduled, due to a delay on the production side. We sincerely apologise for the wait.
+
+Our team is working to complete your order as soon as possible, and we'll reach out with the updated delivery schedule shortly. If you have any questions, feel free to reply here anytime.
+
+Thank you for your patience and understanding! 🙏`,
 });
 
 // After-sales (ASSR) acknowledgement — the FIRST message a customer gets when a
