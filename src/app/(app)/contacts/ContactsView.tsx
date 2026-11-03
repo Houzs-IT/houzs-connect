@@ -5,7 +5,8 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { fmt, type Dict } from "@/lib/i18n/dict";
 import { initials, tint } from "@/lib/format";
 import { useShell } from "@/components/shell/ShellProvider";
-import { IconClose, IconDots, IconSearch } from "@/components/icons";
+import { IconClose, IconSearch } from "@/components/icons";
+import { RowMenu } from "@/components/RowMenu";
 import { ColumnsList, DataCount, DataHead, DataMenus, WrapButton, useColumnLayout, useDataTable, type DataColumn, type DataRow } from "@/components/DataTable";
 import { bulkBlockContacts, bulkTagContacts, mergeContacts, setContactBlocked } from "./actions";
 import { DeleteContactButton } from "./DeleteContactButton";
@@ -505,7 +506,7 @@ export function ContactsView({
                     })}
                     {cw.fixed && <td className="p-0" />}
                     <td className="px-2" onClick={(e) => e.stopPropagation()}>
-                      <RowMenu row={r} onMerge={() => setMergeKeep(r)} />
+                      <ContactRowMenu row={r} onMerge={() => setMergeKeep(r)} />
                     </td>
                   </tr>
                 );
@@ -559,23 +560,13 @@ export function ContactsView({
 }
 
 /** Row ⋯ menu: Block / Unblock, Merge…, Delete. */
-function RowMenu({ row, onMerge }: { row: ContactRow; onMerge: () => void }) {
+function ContactRowMenu({ row, onMerge }: { row: ContactRow; onMerge: () => void }) {
   const { t } = useShell();
   const s = t.contacts;
-  const [open, setOpen] = useState(false);
-  const ref = useOutside(open, () => setOpen(false));
   return (
-    <div ref={ref} className="relative">
-      <button
-        type="button"
-        aria-label="Actions"
-        onClick={() => setOpen((v) => !v)}
-        className="grid h-7 w-7 place-items-center rounded-[6px] text-[var(--color-muted)] hover:bg-[var(--color-surface-dim)]"
-      >
-        <IconDots width={15} height={15} />
-      </button>
-      {open && (
-        <div className="absolute right-0 z-30 mt-1 w-44 rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)] py-1 shadow-[var(--shadow-popover)]">
+    <RowMenu label="Actions">
+      {(close) => (
+        <>
           <form action={setContactBlocked}>
             <input type="hidden" name="contactId" value={row.id} />
             <input type="hidden" name="blocked" value={row.blocked ? "0" : "1"} />
@@ -586,7 +577,7 @@ function RowMenu({ row, onMerge }: { row: ContactRow; onMerge: () => void }) {
           <button
             type="button"
             onClick={() => {
-              setOpen(false);
+              close();
               onMerge();
             }}
             className="w-full px-3 py-2 text-left text-[13px] text-[var(--color-ink)] hover:bg-[var(--color-surface-2)]"
@@ -596,9 +587,9 @@ function RowMenu({ row, onMerge }: { row: ContactRow; onMerge: () => void }) {
           <div className="px-1.5 py-1">
             <DeleteContactButton contactId={row.id} name={row.name} />
           </div>
-        </div>
+        </>
       )}
-    </div>
+    </RowMenu>
   );
 }
 

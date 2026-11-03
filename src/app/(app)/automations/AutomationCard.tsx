@@ -4,7 +4,8 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, useTransition, type ReactNode } from "react";
 import { ActionConfirm, ActionDialog } from "@/components/ActionConfirm";
-import { IconBolt, IconDots } from "@/components/icons";
+import { IconBolt } from "@/components/icons";
+import { RowMenu } from "@/components/RowMenu";
 import { fmt } from "@/lib/i18n/dict";
 import { useShell } from "@/components/shell/ShellProvider";
 import { type FlowGap } from "./copy";
@@ -165,7 +166,6 @@ export function AutomationActions({ a }: { a: AutomationCardData }) {
   const [flash, setFlash] = useState<string | null>(null);
   const [draftName, setDraftName] = useState(a.name);
   const [draftNote, setDraftNote] = useState(a.note);
-  const [menu, setMenu] = useState(false);
   const { t } = useShell();
   const L = t.autos;
 
@@ -220,25 +220,16 @@ export function AutomationActions({ a }: { a: AutomationCardData }) {
 
   return (
     <Cell className="relative">
-      <button
-        type="button"
-        aria-label="Actions"
-        onClick={() => setMenu((v) => !v)}
-        className="grid h-7 w-7 place-items-center rounded-[6px] text-[var(--color-muted)] hover:bg-[var(--color-surface-dim)]"
-      >
-        <IconDots width={15} height={15} />
-      </button>
-      {menu && (
-        <>
-          <div data-row-ignore="" className="fixed inset-0 z-20" onClick={() => setMenu(false)} />
-          <div className="absolute right-0 z-30 mt-1 w-44 rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)] py-1 shadow-[var(--shadow-popover)]">
+      <RowMenu label="Actions">
+        {(close) => (
+          <>
             <Link href={`/automations/${a.id}`} className="block px-3 py-2 text-[13px] text-[var(--color-ink)] hover:bg-[var(--color-surface-2)]">
               {L.open}
             </Link>
             {[
-              [L.rename, () => { setMenu(false); openEdit(); }],
-              [L.duplicate, () => { setMenu(false); duplicate(); }],
-              [L.delete, () => { setMenu(false); setMode("delete"); }],
+              [L.rename, () => { close(); openEdit(); }],
+              [L.duplicate, () => { close(); duplicate(); }],
+              [L.delete, () => { close(); setMode("delete"); }],
             ].map(([label, fn]) => (
               <button
                 key={label as string}
@@ -251,9 +242,9 @@ export function AutomationActions({ a }: { a: AutomationCardData }) {
                 {label as string}
               </button>
             ))}
-          </div>
-        </>
-      )}
+          </>
+        )}
+      </RowMenu>
 
       {/* What the last action did: next to the ⋯ button, over the row, until dismissed. */}
       {(error || flash) && mode === "none" && (
