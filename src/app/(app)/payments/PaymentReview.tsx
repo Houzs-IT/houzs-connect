@@ -8,6 +8,7 @@ import { displayName, formatPhone, initials, tint } from "@/lib/format";
 import { fmt } from "@/lib/i18n/dict";
 import { reviewPayment, updatePaymentFields } from "./actions";
 import { money } from "./util";
+import type { ErpSyncState } from "@/lib/sync/erp-payments";
 
 export interface ReviewPayment {
   id: string;
@@ -37,11 +38,13 @@ export interface ReviewPayment {
 export function PaymentReview({
   p,
   dupWith,
+  erpSync,
   nextHref,
   backHref,
 }: {
   p: ReviewPayment;
   dupWith: string | null;
+  erpSync: ErpSyncState | null;
   nextHref: string;
   backHref: string;
 }) {
@@ -264,7 +267,37 @@ export function PaymentReview({
               <span className="text-[11px] font-semibold uppercase tracking-[0.1em] text-[var(--color-muted)]">{L.erpOrder}</span>
               {f.orderRef && <b className="text-[13px] font-semibold text-[var(--color-brand)]">{f.orderRef}</b>}
             </div>
-            <p className="mt-2 text-[12px] text-[var(--color-faint)]">{L.erpOff}</p>
+            {open ? (
+              <p className="mt-2 text-[12px] text-[var(--color-faint)]">{L.erpWillSend}</p>
+            ) : (
+              (() => {
+                // After a confirm the payment is pushed to the ERP; show where it got to.
+                const st = erpSync?.status ?? "PENDING";
+                const ref = erpSync?.soNo || erpSync?.erpPaymentRef || null;
+                const [dot, label, tone] =
+                  st === "SYNCED"
+                    ? ["bg-[var(--color-success)]", L.erpSynced, "text-[var(--color-success)]"]
+                    : st === "BLOCKED"
+                      ? ["bg-[var(--color-danger)]", L.erpBlocked, "text-[var(--color-danger)]"]
+                      : ["bg-[var(--color-pastel-orange-ink)]", L.erpSending, "text-[var(--color-pastel-orange-ink)]"];
+                return (
+                  <div className="mt-2">
+                    <span className={`flex items-center gap-1.5 text-[12px] font-semibold ${tone}`}>
+                      <span className={`h-1.5 w-1.5 rounded-full ${dot}`} />
+                      {label}
+                      {st === "SYNCED" && ref && (
+                        <span className="font-normal text-[var(--color-faint)]">
+                          · {L.erpRef} {ref}
+                        </span>
+                      )}
+                    </span>
+                    {st === "BLOCKED" && erpSync?.reason && (
+                      <p className="mt-1 text-[11.5px] text-[var(--color-faint)]">{erpSync.reason}</p>
+                    )}
+                  </div>
+                );
+              })()
+            )}
           </div>
         </div>
       </div>
