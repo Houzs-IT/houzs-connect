@@ -16,7 +16,7 @@ import { buildDeliveryGraph, SHARED_FORMS } from "./shared";
  * Those last three are ERP-injected on the postpone trigger (go-live checklist).
  */
 
-const OPENING = `Dear {full_name} 👋 Apologies from Houzs Century. We're contacting you about your delivery scheduled for *{client_delivery_date}*.
+const OPENING = `Dear {full_name} 👋 Apologies from {company_signature}. We're contacting you about your delivery scheduled for *{client_delivery_date}*.
 
 We need to postpone it due to *{amend_date_reason_2}*.
 

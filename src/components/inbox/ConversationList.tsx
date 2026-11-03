@@ -7,6 +7,7 @@ import { initials, listTime, previewText, shortDay, tint } from "@/lib/format";
 import { fmt } from "@/lib/i18n/dict";
 import { PersonAvatar } from "@/components/PersonAvatar";
 import { IconClose, IconSearch } from "@/components/icons";
+import { SearchableSelect } from "@/components/SearchableSelect";
 import { useShell } from "@/components/shell/ShellProvider";
 import { SlaTimer, isOverdue } from "./SlaTimer";
 import { fetchConversations } from "@/app/(app)/inbox/actions";
@@ -40,7 +41,7 @@ export type ConversationListItem = {
   botActive: boolean;
 };
 
-type Tab = "all" | "dept" | "sla";
+type Tab = "all" | "unread" | "dept" | "sla";
 type Sort = "latest" | "oldest" | "wait";
 type Filters = {
   starred: boolean;
@@ -223,8 +224,12 @@ export function ConversationList({
 
   const overdue = refined.filter((c) => isOverdue(c.waitingSince, now));
   const inDept = refined.filter((c) => c.departmentId === deptPick);
+  // Opening a thread clears its unread count, so keep the open one in the tab
+  // instead of having it vanish from under the cursor on the next refresh.
+  const unread = refined.filter((c) => c.unread > 0 || c.id === activeId);
 
-  let rows = tab === "sla" ? overdue : tab === "dept" ? inDept : refined;
+  let rows =
+    tab === "sla" ? overdue : tab === "dept" ? inDept : tab === "unread" ? unread : refined;
   if (filters.sort === "oldest") {
     rows = [...rows].sort((a, b) => (a.lastAt ?? "").localeCompare(b.lastAt ?? ""));
   } else if (filters.sort === "wait") {
@@ -237,6 +242,7 @@ export function ConversationList({
 
   const tabs: { key: Tab; label: string; count: number; danger?: boolean }[] = [
     { key: "all", label: s.tabAll, count: refined.length },
+    { key: "unread", label: s.tabUnread, count: refined.filter((c) => c.unread > 0).length },
     { key: "dept", label: s.tabDept, count: inDept.length },
     { key: "sla", label: s.tabSla, count: overdue.length, danger: true },
   ];
@@ -301,8 +307,8 @@ export function ConversationList({
         />
       )}
 
-      {/* All · Department · SLA overdue */}
-      <div className="flex items-end gap-4 border-b border-[var(--color-border)] px-3.5 pt-2.5">
+      {/* All · Unread · Dept · Overdue */}
+      <div className="flex items-end gap-3 border-b border-[var(--color-border)] px-3 pt-2.5">
         {tabs.map((tb) => {
           const on = tab === tb.key;
           return (
@@ -638,11 +644,17 @@ function FilterPopover({
           </div>
 
           <Field label={s.sortBy}>
-            <select className={selectCls} value={value.sort} onChange={(e) => set({ sort: e.target.value as Sort })}>
-              <option value="latest">{s.latest}</option>
-              <option value="oldest">{s.oldest}</option>
-              <option value="wait">{s.longestWait}</option>
-            </select>
+            <SearchableSelect
+              className={selectCls}
+              value={value.sort}
+              onChange={(v) => set({ sort: v as Sort })}
+              aria-label={s.sortBy}
+              options={[
+                { value: "latest", label: s.latest },
+                { value: "oldest", label: s.oldest },
+                { value: "wait", label: s.longestWait },
+              ]}
+            />
           </Field>
 
           {opts.tags.length > 0 && (
@@ -675,30 +687,42 @@ function FilterPopover({
           )}
 
           <Field label={s.fAssigned}>
-            <select className={selectCls} value={value.agentId} onChange={(e) => set({ agentId: e.target.value })}>
-              <option value="">{s.anyone}</option>
-              {opts.agents.map(([id, name]) => (
-                <option key={id} value={id}>{name}</option>
-              ))}
-            </select>
+            <SearchableSelect
+              className={selectCls}
+              value={value.agentId}
+              onChange={(v) => set({ agentId: v })}
+              aria-label={s.fAssigned}
+              options={[
+                { value: "", label: s.anyone },
+                ...opts.agents.map(([id, name]) => ({ value: id, label: name })),
+              ]}
+            />
           </Field>
 
           <Field label={s.fDept}>
-            <select className={selectCls} value={value.deptId} onChange={(e) => set({ deptId: e.target.value })}>
-              <option value="">{s.anyDept}</option>
-              {opts.depts.map(([id, name]) => (
-                <option key={id} value={id}>{name}</option>
-              ))}
-            </select>
+            <SearchableSelect
+              className={selectCls}
+              value={value.deptId}
+              onChange={(v) => set({ deptId: v })}
+              aria-label={s.fDept}
+              options={[
+                { value: "", label: s.anyDept },
+                ...opts.depts.map(([id, name]) => ({ value: id, label: name })),
+              ]}
+            />
           </Field>
 
           <Field label={s.fMsg}>
-            <select className={selectCls} value={value.msgType} onChange={(e) => set({ msgType: e.target.value })}>
-              <option value="">{s.anyMsg}</option>
-              {opts.types.map((ty) => (
-                <option key={ty} value={ty}>{s.msgType[ty] ?? ty}</option>
-              ))}
-            </select>
+            <SearchableSelect
+              className={selectCls}
+              value={value.msgType}
+              onChange={(v) => set({ msgType: v })}
+              aria-label={s.fMsg}
+              options={[
+                { value: "", label: s.anyMsg },
+                ...opts.types.map((ty) => ({ value: ty, label: s.msgType[ty] ?? ty })),
+              ]}
+            />
           </Field>
         </div>
 

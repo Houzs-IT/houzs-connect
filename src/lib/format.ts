@@ -50,7 +50,7 @@ export function clockTime(d?: Date | string | null): string {
 export function mediaCaption(body: string | null | undefined): string {
   return (body ?? "")
     .split("\n")
-    .filter((l) => l.trim() !== "[attachment]" && !/^\[(image|document)\] /.test(l.trim()))
+    .filter((l) => !/^\[(attachment|voice message|video|sticker)\]$/.test(l.trim()) && !/^\[(image|document)\] /.test(l.trim()))
     .join("\n")
     .trim();
 }

@@ -1,10 +1,12 @@
+import { DEFAULT_BRAND, type Brand } from "@/lib/brand";
 import type { RemoteTemplate } from "./templates";
 
 /*
   What the Templates page lists in DEMO mode (no Meta account connected), so
   the page, the variable mapping and the campaign composer can be tried out
   before WhatsApp is connected. Never used once WHATSAPP_MODE=LIVE: the real
-  list comes from Meta then.
+  list comes from Meta then. Worded for the current company's brand (Houzs by
+  default) — see lib/brand.ts.
 */
 const t = (
   name: string,
@@ -29,7 +31,8 @@ const t = (
   ...extra,
 });
 
-export const DEMO_TEMPLATES: RemoteTemplate[] = [
+export function demoTemplates(brand: Brand = DEFAULT_BRAND): RemoteTemplate[] {
+  return [
   t(
     "showroom_promo",
     "en",
@@ -43,8 +46,8 @@ export const DEMO_TEMPLATES: RemoteTemplate[] = [
     "en_GB",
     "UTILITY",
     "APPROVED",
-    "Dear {{1}},\n\nThis is an official notification regarding your recent furniture order with Houzs Century Sdn Bhd.\n\nSales Order Number : {{2}}\nReference Number : {{3}}\nBranding : {{4}}\n\nThank you for your continued support!",
-    { header: "Account Update: Change in Sales PIC", footer: "Houzs Century Management" }
+    `Dear {{1}},\n\nThis is an official notification regarding your recent furniture order with ${brand.legalName}.\n\nSales Order Number : {{2}}\nReference Number : {{3}}\nBranding : {{4}}\n\nThank you for your continued support!`,
+    { header: "Account Update: Change in Sales PIC", footer: `${brand.name} Management` }
   ),
   t(
     "delivery_date_confirm",
@@ -70,4 +73,5 @@ export const DEMO_TEMPLATES: RemoteTemplate[] = [
   t("survey_feedback", "zh_CN", "UTILITY", "REJECTED", "{{1}} 您好，感谢您的购买！请为本次送货打分：{{2}}", {
     rejectedReason: "Variable at the start of the message",
   }),
-];
+  ];
+}

@@ -213,8 +213,12 @@ export function resolveBinding(
  * Meta rejects a parameter containing a newline or a tab, and rejects an empty
  * one outright — both come back as a 132000-class error with the whole send
  * lost, so they are normalised here rather than at the call site.
+ *
+ * Exported so the automation engine's send_template path cleans its params the
+ * same way this (the campaign path) does — a multi-line field like {bank_block}
+ * must arrive as a single line, or Meta refuses the whole template send.
  */
-function cleanParam(raw: string): string {
+export function cleanParam(raw: string): string {
   const clean = raw.replace(/\s+/g, " ").trim();
   return clean === "" ? EMPTY_PARAM : clean;
 }

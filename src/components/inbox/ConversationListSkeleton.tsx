@@ -5,7 +5,7 @@ import { useShell } from "@/components/shell/ShellProvider";
 
 /**
  * Placeholder for `ConversationList` while the inbox layout loads its
- * conversations. Same 320px rail, same search row and All / Department / SLA
+ * conversations. Same 320px rail, same search row and All / Unread / Dept / Overdue
  * tabs (static, so they render for real), same 36px avatar row geometry — the
  * list fills in underneath without moving anything.
  */
@@ -19,8 +19,8 @@ export function ConversationListSkeleton() {
         <Skel className="hidden h-[34px] w-[34px] rounded-[8px] md:block" />
         <Skel className="h-[34px] w-[34px] rounded-[8px]" />
       </div>
-      <div className="flex items-end gap-4 border-b border-[var(--color-border)] px-3.5 pt-2.5">
-        {[s.tabAll, s.tabDept, s.tabSla].map((label, i) => (
+      <div className="flex items-end gap-3 border-b border-[var(--color-border)] px-3 pt-2.5">
+        {[s.tabAll, s.tabUnread, s.tabDept, s.tabSla].map((label, i) => (
           <span
             key={label}
             className={`-mb-px border-b-2 pb-[9px] pt-1.5 text-[12.5px] font-semibold ${

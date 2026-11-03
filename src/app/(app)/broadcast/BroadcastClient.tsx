@@ -13,6 +13,7 @@
 import { useMemo, useState } from "react";
 import { ActionDialog } from "@/components/ActionConfirm";
 import { IconSearch } from "@/components/icons";
+import { SearchableSelect } from "@/components/SearchableSelect";
 import { useShell } from "@/components/shell/ShellProvider";
 import { formatPhone, initials, tint } from "@/lib/format";
 import type { VarBinding } from "@/lib/automation/vars";
@@ -196,18 +197,16 @@ export function BroadcastClient({
                 className={inputCls}
               />
             </div>
-            <select
+            <SearchableSelect
               value={tagFilter}
-              onChange={(e) => setTagFilter(e.target.value)}
+              onChange={(v) => setTagFilter(v)}
+              aria-label={T.allTags}
               className="h-[36px] rounded-[8px] border border-[var(--color-border)] bg-[var(--color-surface)] px-3 text-[13px] text-[var(--color-ink)] outline-none focus:border-[var(--color-accent)]"
-            >
-              <option value="">{T.allTags}</option>
-              {tags.map((t) => (
-                <option key={t} value={t}>
-                  {t}
-                </option>
-              ))}
-            </select>
+              options={[
+                { value: "", label: T.allTags },
+                ...tags.map((t) => ({ value: t, label: t })),
+              ]}
+            />
             <button type="button" className={btn} onClick={toggleAll} disabled={selectableIds.length === 0}>
               {T.selectAll}
             </button>
@@ -295,18 +294,19 @@ export function BroadcastClient({
                 {T.noTpl}
               </p>
             ) : (
-              <select
+              <SearchableSelect
                 value={tplKey}
-                onChange={(e) => setTplKey(e.target.value)}
+                onChange={(v) => setTplKey(v)}
+                aria-label={T.pickTpl}
                 className="h-[36px] w-full rounded-[8px] border border-[var(--color-border)] bg-[var(--color-surface)] px-3 text-[13px] text-[var(--color-ink)] outline-none focus:border-[var(--color-accent)]"
-              >
-                <option value="">{T.pickTpl}</option>
-                {templates.map((t) => (
-                  <option key={`${t.name}::${t.language}`} value={`${t.name}::${t.language}`}>
-                    {t.name} ({t.language})
-                  </option>
-                ))}
-              </select>
+                options={[
+                  { value: "", label: T.pickTpl },
+                  ...templates.map((t) => ({
+                    value: `${t.name}::${t.language}`,
+                    label: `${t.name} (${t.language})`,
+                  })),
+                ]}
+              />
             )}
 
             <div className="mb-1 mt-4 text-[11px] font-semibold uppercase tracking-[0.1em] text-[var(--color-faint)]">

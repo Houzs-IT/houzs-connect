@@ -37,6 +37,7 @@ import {
 import "@xyflow/react/dist/style.css";
 import { createPortal } from "react-dom";
 import {
+  isTriggerEvent,
   type CriteriaRule,
   type FlowGraph,
   type NodeType,
@@ -60,6 +61,7 @@ import {
   type NodeProbe,
 } from "@/app/(app)/automations/copy";
 import { ActionConfirm } from "@/components/ActionConfirm";
+import { SearchableSelect } from "@/components/SearchableSelect";
 import type { RunStats } from "@/lib/automation/run-stats";
 
 /** The "Run data" layer: on/off and the last-7-days counts per node. */
@@ -361,7 +363,8 @@ function toFlow(
   const nodes: Node[] = graph.nodes.map((n, i) => {
     const data: HcData = { nodeType: n.type, ...(n.data ?? {}) };
     if (n.type === "trigger" && seedTrigger) {
-      if (data.event == null) data.event = seedTrigger.event ?? "NEW_INCOMING_MESSAGE";
+      // A published ERP flow saved its seed label ("service_arrangement") here.
+      if (!isTriggerEvent(data.event)) data.event = seedTrigger.event ?? "NEW_INCOMING_MESSAGE";
       if (data.callbackId == null) data.callbackId = seedTrigger.callbackId ?? "";
       if (data.keywords == null) data.keywords = seedTrigger.keywords ?? [];
     }
@@ -1240,17 +1243,13 @@ function Inspector({
     return (
       <>
         <Field label="Event">
-          <select
+          <SearchableSelect
             value={d.event ?? "NEW_INCOMING_MESSAGE"}
-            onChange={(e) => patch({ event: e.target.value as TriggerEvent })}
+            onChange={(v) => patch({ event: v as TriggerEvent })}
             className={inputCls}
-          >
-            {TRIGGER_EVENTS.map((e) => (
-              <option key={e.value} value={e.value}>
-                {e.label}
-              </option>
-            ))}
-          </select>
+            aria-label="Event"
+            options={TRIGGER_EVENTS.map((e) => ({ value: e.value, label: e.label }))}
+          />
         </Field>
         {d.event === "ACTION_CALLBACK" && (
           <Field label="Action Callback Id Matches">
@@ -1379,21 +1378,17 @@ function Inspector({
                 placeholder="Field (attribute key / full_name / phone)"
                 className={`${inputCls} mb-1`}
               />
-              <select
+              <SearchableSelect
                 value={r.op}
-                onChange={(e) => {
+                onChange={(v) => {
                   const next = rules.slice();
-                  next[i] = { ...r, op: e.target.value as CriteriaRule["op"] };
+                  next[i] = { ...r, op: v as CriteriaRule["op"] };
                   patch({ rules: next });
                 }}
                 className={`${inputCls} mb-1`}
-              >
-                {OPERATORS.map((o) => (
-                  <option key={o.value} value={o.value}>
-                    {o.label}
-                  </option>
-                ))}
-              </select>
+                aria-label="Operator"
+                options={OPERATORS.map((o) => ({ value: o.value, label: o.label }))}
+              />
               {r.op !== "set" && r.op !== "unset" && (
                 <input
                   value={r.value ?? ""}
@@ -1451,21 +1446,19 @@ function Inspector({
   if (t === "jump_to_automation") {
     return (
       <Field label="Target automation">
-        <select
+        <SearchableSelect
           value={d.targetAutomationId ?? ""}
-          onChange={(e) => {
-            const opt = automations.find((a) => a.id === e.target.value);
-            patch({ targetAutomationId: e.target.value, targetAutomationName: opt?.name });
+          onChange={(v) => {
+            const opt = automations.find((a) => a.id === v);
+            patch({ targetAutomationId: v, targetAutomationName: opt?.name });
           }}
           className={inputCls}
-        >
-          <option value="">Select…</option>
-          {automations.map((a) => (
-            <option key={a.id} value={a.id}>
-              {a.name}
-            </option>
-          ))}
-        </select>
+          aria-label="Target automation"
+          options={[
+            { value: "", label: "Select…" },
+            ...automations.map((a) => ({ value: a.id, label: a.name })),
+          ]}
+        />
       </Field>
     );
   }
@@ -1473,21 +1466,19 @@ function Inspector({
   if (t === "add_to_drip" || t === "remove_from_drip") {
     return (
       <Field label="Drip campaign">
-        <select
+        <SearchableSelect
           value={d.campaignId ?? ""}
-          onChange={(e) => {
-            const opt = campaigns.find((c) => c.id === e.target.value);
-            patch({ campaignId: e.target.value, campaignName: opt?.name });
+          onChange={(v) => {
+            const opt = campaigns.find((c) => c.id === v);
+            patch({ campaignId: v, campaignName: opt?.name });
           }}
           className={inputCls}
-        >
-          <option value="">Select…</option>
-          {campaigns.map((c) => (
-            <option key={c.id} value={c.id}>
-              {c.name}
-            </option>
-          ))}
-        </select>
+          aria-label="Drip campaign"
+          options={[
+            { value: "", label: "Select…" },
+            ...campaigns.map((c) => ({ value: c.id, label: c.name })),
+          ]}
+        />
       </Field>
     );
   }
@@ -1541,15 +1532,17 @@ function Inspector({
           />
         </Field>
         <Field label="Unit">
-          <select
+          <SearchableSelect
             value={d.unit ?? "minutes"}
-            onChange={(e) => patch({ unit: e.target.value })}
+            onChange={(v) => patch({ unit: v })}
             className={inputCls}
-          >
-            <option value="minutes">minutes</option>
-            <option value="hours">hours</option>
-            <option value="days">days</option>
-          </select>
+            aria-label="Unit"
+            options={[
+              { value: "minutes", label: "minutes" },
+              { value: "hours", label: "hours" },
+              { value: "days", label: "days" },
+            ]}
+          />
         </Field>
         <Note>
           The run pauses here and there is no scheduler to wake it up yet, so
@@ -1613,12 +1606,18 @@ function Inspector({
   if (t === "set_status") {
     return (
       <Field label="Status">
-        <select value={d.status ?? "OPEN"} onChange={(e) => patch({ status: e.target.value })} className={inputCls}>
-          <option value="OPEN">OPEN</option>
-          <option value="PENDING">PENDING</option>
-          <option value="QUEUE">QUEUE</option>
-          <option value="CLOSED">CLOSED</option>
-        </select>
+        <SearchableSelect
+          value={d.status ?? "OPEN"}
+          onChange={(v) => patch({ status: v })}
+          className={inputCls}
+          aria-label="Status"
+          options={[
+            { value: "OPEN", label: "OPEN" },
+            { value: "PENDING", label: "PENDING" },
+            { value: "QUEUE", label: "QUEUE" },
+            { value: "CLOSED", label: "CLOSED" },
+          ]}
+        />
       </Field>
     );
   }

@@ -2,28 +2,28 @@
 //
 // A session is one member row, and a member row is one company, so "switching
 // company" means signing in as the same person's row in another company. Login
-// always lands in the first company; this is how anyone reaches a second one.
+// lands in one of them (lib/company-brand.ts); this is how anyone reaches another.
 //
 // Two ways to be allowed in:
 //   1. An active member row in that company. The ERP org sync creates these per
 //      ERP company grant, so this respects exactly what the ERP decided.
-//   2. Owner or admin, for a company that exists ONLY in Connect (no ERP id —
+//   2. Super Admin, for a company that exists ONLY in Connect (no ERP id —
 //      Hookka is the first). The ERP sync cannot grant a company the ERP does not
-//      have, so without this nobody could ever open that company's inbox.
-// An owner is deliberately NOT let into an ERP company the ERP has not granted:
+//      have, so without this nobody could ever open that company's inbox. Anyone
+//      else needs a Super Admin's tick on the Team page.
+// A Super Admin is deliberately NOT let into an ERP company the ERP has not granted:
 // that grant is the ERP's call, not Connect's.
 
 import { and, asc, eq } from "drizzle-orm";
 import type { DB } from "@/db/client";
 import { bypassReadCache } from "@/db/fresh";
 import { company, member } from "@/db/schema";
-import { isAdminRole } from "@/lib/permissions";
 
 export interface CompanyChoice {
   id: string;
   name: string;
   current: boolean;
-  /** No ERP counterpart — an owner/admin gets a member row on first entry. */
+  /** No ERP counterpart — a Super Admin gets a member row on first entry. */
   connectOnly: boolean;
   /** The ERP company code (HOUZS, 2990), shown beside the name; null for Connect-only. */
   code: string | null;
@@ -35,8 +35,8 @@ interface Who {
   role: string;
 }
 
-export function isOwnerOrAdmin(role: string): boolean {
-  return isAdminRole(role);
+export function isSuperAdmin(role: string): boolean {
+  return role === "SUPER_ADMIN";
 }
 
 export async function companyChoices(db: DB, me: Who): Promise<CompanyChoice[]> {
@@ -58,7 +58,7 @@ export async function companyChoices(db: DB, me: Who): Promise<CompanyChoice[]> 
       (c) =>
         c.id === me.companyId ||
         memberOf.has(c.id) ||
-        (isOwnerOrAdmin(me.role) && c.erpCompanyId == null)
+        (isSuperAdmin(me.role) && c.erpCompanyId == null)
     )
     .map((c) => ({
       id: c.id,

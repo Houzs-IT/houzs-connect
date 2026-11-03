@@ -1,5 +1,6 @@
 // SUPER_ADMIN, role_permission and access_request (0013), and access_removed
-// and role_override (0021, lib/team-access.ts), self-applied at runtime.
+// and role_override (0021, lib/team-access.ts), and module_access
+// (lib/full-access.ts), self-applied at runtime.
 //
 // Same reason as the other ensure* modules: deploys land before
 // `pnpm db:migrate`. Migration 0013 is the record; these are its statements,
@@ -20,6 +21,9 @@ async function run(db: DB): Promise<void> {
   // The ERP division on a member (0022), read raw by the Team page.
   await db.execute(sql.raw("ALTER TABLE \"connect\".\"member\" ADD COLUMN IF NOT EXISTS \"division\" text"));
   await db.execute(sql.raw("CREATE TABLE IF NOT EXISTS \"connect\".\"role_override\" (\n  \"email\" text PRIMARY KEY NOT NULL,\n  \"role\" text NOT NULL,\n  \"set_by_member_id\" text,\n  \"set_at\" timestamp with time zone DEFAULT now() NOT NULL\n)"));
+  // Which modules each person opens in each company, set on Settings → Access
+  // (lib/full-access.ts). Only the ticks that differ from the role are stored.
+  await db.execute(sql.raw("CREATE TABLE IF NOT EXISTS \"connect\".\"module_access\" (\n  \"company_id\" text NOT NULL,\n  \"email\" text NOT NULL,\n  \"module\" text NOT NULL,\n  \"allowed\" boolean NOT NULL,\n  \"set_by_member_id\" text,\n  \"set_at\" timestamp with time zone DEFAULT now() NOT NULL,\n  PRIMARY KEY (\"company_id\", \"email\", \"module\")\n)"));
 }
 
 export async function ensureAccessTables(db: DB): Promise<void> {

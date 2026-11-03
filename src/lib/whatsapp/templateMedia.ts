@@ -151,6 +151,8 @@ export async function headerForSend(
   const component =
     row.format === "DOCUMENT"
       ? { type: "header", parameters: [{ type: "document", document: { id: mediaId, filename: row.fileName } }] }
-      : { type: "header", parameters: [{ type: "image", image: { id: mediaId } }] };
+      : row.format === "VIDEO"
+        ? { type: "header", parameters: [{ type: "video", video: { id: mediaId } }] }
+        : { type: "header", parameters: [{ type: "image", image: { id: mediaId } }] };
   return { ok: true, component };
 }

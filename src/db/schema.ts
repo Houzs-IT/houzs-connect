@@ -442,6 +442,10 @@ export const automationRun = connect.table(
     cursorNodeId: text("cursor_node_id"),
     context: jsonb("context"),
     log: jsonb("log"),
+    // When a run paused on a Delay node is due to resume. Null for every other
+    // wait (button/text/form) and for running/finished runs. The scheduler sweeps
+    // `status='waiting' AND resume_at <= now()` and continues from the delay node.
+    resumeAt: timestamp("resume_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true })
       .notNull()
@@ -451,6 +455,7 @@ export const automationRun = connect.table(
   (t) => ({
     automationIdx: index("automation_run_automation_idx").on(t.automationId),
     contactIdx: index("automation_run_contact_idx").on(t.contactId),
+    resumeIdx: index("automation_run_resume_idx").on(t.resumeAt),
   })
 );
 
@@ -510,6 +515,69 @@ export const campaign = connect.table(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({ companyIdx: index("campaign_company_idx").on(t.companyId) })
+);
+
+// ─────────────────────────── Drip campaigns ───────────────────────────
+// Seampify's Drip Campaign: a named, ordered sequence of template messages, each
+// sent a configured delay after the previous. A contact is enrolled by the
+// automation add_to_drip node or from the inbox; the cron scheduler
+// (src/lib/drip.ts advanceDueDripEnrollments) sends each due step and advances.
+
+export const dripCampaign = connect.table(
+  "drip_campaign",
+  {
+    id: id(),
+    companyId: text("company_id").notNull(),
+    // The number steps send from (getOrCreateConversation). Like campaign.channelId.
+    channelId: text("channel_id").notNull(),
+    name: text("name").notNull(),
+    // draft = editable, not enrolling; live = contacts may be enrolled.
+    status: text("status").notNull().default("draft"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({ companyIdx: index("drip_campaign_company_idx").on(t.companyId) })
+);
+
+export const dripStep = connect.table(
+  "drip_step",
+  {
+    id: id(),
+    dripId: text("drip_id").notNull(),
+    position: integer("position").notNull().default(0),
+    // The wait BEFORE this step, measured from the previous step (minutes/hours/days).
+    afterUnit: text("after_unit").notNull().default("days"),
+    afterAmount: integer("after_amount").notNull().default(0),
+    // An approved template, as campaigns use — the only thing Meta delivers to a
+    // contact outside the 24h window. templateBody is the approved body at author
+    // time, kept so a send resolves {{n}} without a Meta round trip.
+    templateName: text("template_name"),
+    templateLang: text("template_lang"),
+    templateBody: text("template_body"),
+    removeAfterReplied: boolean("remove_after_replied").notNull().default(false),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({ dripIdx: index("drip_step_drip_idx").on(t.dripId) })
+);
+
+export const dripEnrollment = connect.table(
+  "drip_enrollment",
+  {
+    id: id(),
+    dripId: text("drip_id").notNull(),
+    contactId: text("contact_id").notNull(),
+    // Index of the NEXT step to send (0-based).
+    currentStep: integer("current_step").notNull().default(0),
+    // active = running; completed = all steps sent; removed = replied-out / un-enrolled.
+    status: text("status").notNull().default("active"),
+    // When the current step is due. The scheduler's sweep key.
+    nextRunAt: timestamp("next_run_at", { withTimezone: true }),
+    enrolledAt: timestamp("enrolled_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    dripIdx: index("drip_enrollment_drip_idx").on(t.dripId),
+    dueIdx: index("drip_enrollment_due_idx").on(t.status, t.nextRunAt),
+    contactIdx: index("drip_enrollment_contact_idx").on(t.contactId),
+  })
 );
 
 // ─────────────────────────── Internal chat ───────────────────────────

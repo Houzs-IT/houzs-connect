@@ -16,6 +16,8 @@ import {
 import { IconBolt, IconContacts, IconForm, IconPaperclip, IconSend } from "@/components/icons";
 import { useShell } from "@/components/shell/ShellProvider";
 import { EmojiPicker } from "@/components/inbox/EmojiPicker";
+import { fmt } from "@/lib/i18n/dict";
+import { REPLY_EVENT, type ReplyTarget } from "@/components/inbox/ReplyButton";
 import {
   ATTACHMENT_ACCEPT,
   checkAttachment,
@@ -42,6 +44,7 @@ interface QuickReply {
 interface Template {
   name: string;
   language: string;
+  category: string;
   body: string;
   placeholders: number;
 }
@@ -51,6 +54,26 @@ interface ContactOption {
   phone: string;
   email: string | null;
 }
+
+// Same tones as the Templates page, so a template reads the same in both places.
+const TEMPLATE_TONE: Record<string, { bar: string; chip: string }> = {
+  UTILITY: {
+    bar: "border-l-[var(--color-pastel-blue-ink)]",
+    chip: "bg-[var(--color-pastel-blue)] text-[var(--color-pastel-blue-ink)]",
+  },
+  MARKETING: {
+    bar: "border-l-[var(--color-pastel-pink-ink)]",
+    chip: "bg-[var(--color-pastel-pink)] text-[var(--color-pastel-pink-ink)]",
+  },
+  AUTHENTICATION: {
+    bar: "border-l-[var(--color-pastel-purple-ink)]",
+    chip: "bg-[var(--color-pastel-purple)] text-[var(--color-pastel-purple-ink)]",
+  },
+};
+const TEMPLATE_TONE_FALLBACK = {
+  bar: "border-l-[var(--color-border)]",
+  chip: "bg-[var(--color-surface-2)] text-[var(--color-muted)]",
+};
 
 /** What the composer will accept, spelled out for the operator up front. */
 const LIMITS_HINT = `JPEG or PNG up to ${formatBytes(
@@ -127,6 +150,10 @@ export function Composer({
   >(null);
   const [quickReplies, setQuickReplies] = useState<QuickReply[]>([]);
   const [templates, setTemplates] = useState<Template[]>([]);
+  // In-panel search over the quick-reply and template pickers — both lists run
+  // long once a company has many shortcuts or approved templates.
+  const [quickQuery, setQuickQuery] = useState("");
+  const [templateQuery, setTemplateQuery] = useState("");
   const [loading, setLoading] = useState(false);
   const [chosen, setChosen] = useState<Template | null>(null);
   const [params, setParams] = useState<string[]>([]);
@@ -139,11 +166,24 @@ export function Composer({
   const [contactQuery, setContactQuery] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Set from a message's Reply button. Tagged with its conversation so a quote
+  // picked in one thread never rides along after switching to another.
+  const [replyTarget, setReplyTarget] = useState<ReplyTarget | null>(null);
+  const replying = replyTarget?.conversationId === conversationId ? replyTarget : null;
   const formRef = useRef<HTMLFormElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const textRef = useRef<HTMLTextAreaElement>(null);
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const note = kind === "note";
+  useEffect(() => {
+    const onReply = (e: Event) => {
+      setReplyTarget((e as CustomEvent<ReplyTarget>).detail);
+      setKind("reply");
+      textRef.current?.focus();
+    };
+    window.addEventListener(REPLY_EVENT, onReply);
+    return () => window.removeEventListener(REPLY_EVENT, onReply);
+  }, []);
   const { t } = useShell();
   const s = t.service;
 
@@ -169,6 +209,7 @@ export function Composer({
 
   async function openQuick() {
     setPanel("quick");
+    setQuickQuery("");
     if (quickReplies.length === 0) {
       setLoading(true);
       setQuickReplies(await listQuickReplies());
@@ -178,6 +219,7 @@ export function Composer({
 
   async function openTemplates() {
     setPanel("template");
+    setTemplateQuery("");
     if (templates.length === 0) {
       setLoading(true);
       setTemplates(await listSendableTemplates());
@@ -409,6 +451,24 @@ export function Composer({
     };
   }, []);
 
+  /**
+   * Esc closes an open tool panel (quick replies, templates, emoji, …). Capture
+   * phase and preventDefault so the press is spent here: the conversation page's
+   * Esc-to-close handler reads defaultPrevented and leaves the thread open. Only
+   * attached while a panel is up, so it never touches an ordinary Esc.
+   */
+  useEffect(() => {
+    if (!panel) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        setPanel(null);
+      }
+    };
+    document.addEventListener("keydown", onKey, true);
+    return () => document.removeEventListener("keydown", onKey, true);
+  }, [panel]);
+
   /** Why the microphone is unavailable right now, or null when it is not. */
   const voiceBlocked = note
     ? "A private note stays inside Connect and is never sent, and there is nowhere here to store audio. Switch to Reply to record a voice note."
@@ -476,16 +536,40 @@ export function Composer({
     setPanel(null);
   }
 
+  const tQuery = templateQuery.trim().toLowerCase();
+  const shownTemplates = tQuery
+    ? templates.filter(
+        (tpl) => tpl.name.toLowerCase().includes(tQuery) || tpl.body.toLowerCase().includes(tQuery)
+      )
+    : templates;
+  const qQuery = quickQuery.trim().toLowerCase();
+  const shownQuickReplies = qQuery
+    ? quickReplies.filter(
+        (qr) => qr.shortcut.toLowerCase().includes(qQuery) || qr.body.toLowerCase().includes(qQuery)
+      )
+    : quickReplies;
+
   return (
     <div className="relative shrink-0 border-t border-[var(--color-border)] bg-[var(--color-surface)] px-3 pb-3.5 pt-2.5 md:px-4">
       {/* ── Quick replies ── */}
       {panel === "quick" && (
         <Panel title="Quick replies" onClose={() => setPanel(null)}>
+          {!loading && quickReplies.length > 0 && (
+            <input
+              value={quickQuery}
+              onChange={(e) => setQuickQuery(e.target.value)}
+              placeholder="Search quick replies…"
+              className="mb-1.5 w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] px-2.5 py-1.5 text-[12.5px] outline-none focus:border-[var(--color-accent)]"
+            />
+          )}
           {loading && <Empty>Loading…</Empty>}
           {!loading && quickReplies.length === 0 && (
             <Empty>No quick replies yet — add them in Settings.</Empty>
           )}
-          {quickReplies.map((q) => (
+          {!loading && quickReplies.length > 0 && shownQuickReplies.length === 0 && (
+            <Empty>No quick reply matches.</Empty>
+          )}
+          {shownQuickReplies.map((q) => (
             <button
               key={q.shortcut}
               type="button"
@@ -513,6 +597,14 @@ export function Composer({
             setChosen(null);
           }}
         >
+          {!loading && !chosen && templates.length > 0 && (
+            <input
+              value={templateQuery}
+              onChange={(e) => setTemplateQuery(e.target.value)}
+              placeholder="Search templates…"
+              className="mb-1.5 w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] px-2.5 py-1.5 text-[12.5px] outline-none focus:border-[var(--color-accent)]"
+            />
+          )}
           {loading && <Empty>Loading approved templates…</Empty>}
           {!loading && !chosen && templates.length === 0 && (
             <Empty>
@@ -520,22 +612,38 @@ export function Composer({
               about 24 hours.
             </Empty>
           )}
+          {!loading && !chosen && templates.length > 0 && shownTemplates.length === 0 && (
+            <Empty>No template matches.</Empty>
+          )}
 
-          {!chosen &&
-            templates.map((t) => (
-              <button
-                key={`${t.name}-${t.language}`}
-                type="button"
-                onClick={() => {
-                  setChosen(t);
-                  setParams(Array.from({ length: t.placeholders }, () => ""));
-                }}
-                className="flex w-full flex-col gap-0.5 rounded-lg px-2.5 py-2 text-left hover:bg-[var(--color-surface-2)]"
-              >
-                <span className="font-mono text-[12px] text-[var(--color-ink)]">{t.name}</span>
-                <span className="line-clamp-2 text-[12px] text-[var(--color-muted)]">{t.body}</span>
-              </button>
-            ))}
+          {!chosen && shownTemplates.length > 0 && (
+            <div className="divide-y divide-[var(--color-border)]">
+              {shownTemplates.map((t) => {
+                const tone = TEMPLATE_TONE[t.category] ?? TEMPLATE_TONE_FALLBACK;
+                return (
+                  <button
+                    key={`${t.name}-${t.language}`}
+                    type="button"
+                    onClick={() => {
+                      setChosen(t);
+                      setParams(Array.from({ length: t.placeholders }, () => ""));
+                    }}
+                    className={`flex w-full flex-col gap-0.5 border-l-[3px] px-2.5 py-2 text-left hover:bg-[var(--color-surface-2)] ${tone.bar}`}
+                  >
+                    <span className="flex items-center gap-2">
+                      <span className="font-mono text-[12px] text-[var(--color-ink)]">{t.name}</span>
+                      {t.category && (
+                        <span className={`rounded px-1.5 py-px text-[10px] font-semibold uppercase tracking-wide ${tone.chip}`}>
+                          {t.category.toLowerCase()}
+                        </span>
+                      )}
+                    </span>
+                    <span className="line-clamp-2 text-[12px] text-[var(--color-muted)]">{t.body}</span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
 
           {chosen && (
             <form action={sendTemplateMessage} className="px-1 pb-1">
@@ -810,6 +918,7 @@ export function Composer({
         action={async (fd) => {
           await sendMessage(fd);
           setDraft("");
+          setReplyTarget(null);
           formRef.current?.reset();
         }}
         // Phone: "+", a pill input and a round send on one line; the tools
@@ -831,6 +940,7 @@ export function Composer({
         </button>
         <input type="hidden" name="conversationId" value={conversationId} />
         <input type="hidden" name="kind" value={kind} />
+        {replying && !note && <input type="hidden" name="replyTo" value={replying.waMessageId} />}
 
         {/* type="button" is load-bearing: inside a form an untyped button
             defaults to submit. */}
@@ -851,6 +961,24 @@ export function Composer({
           ))}
         </div>
 
+        {replying && !note && (
+          <div className="order-first flex basis-full items-start gap-2 md:order-none md:mx-3 md:mt-2">
+            <div className="min-w-0 flex-1 rounded-[8px] border-l-[3px] border-[var(--color-accent)] bg-[var(--color-surface-dim)] px-2.5 py-1.5 text-[12px] leading-[1.45]">
+              <span className="block font-semibold text-[var(--color-accent-ink)]">{fmt(s.replyingTo, { name: replying.name })}</span>
+              <span className="block truncate text-[var(--color-muted)]">{replying.text}</span>
+            </div>
+            <button
+              type="button"
+              aria-label={s.cancelReply}
+              title={s.cancelReply}
+              onClick={() => setReplyTarget(null)}
+              className="grid h-7 w-7 shrink-0 place-items-center rounded-full text-[18px] leading-none text-[var(--color-faint)] hover:bg-[var(--color-surface-dim)] hover:text-[var(--color-ink)]"
+            >
+              ×
+            </button>
+          </div>
+        )}
+
         <textarea
           ref={textRef}
           name="body"
@@ -870,6 +998,10 @@ export function Composer({
           placeholder={note ? s.noteMsg : windowOpen ? (isPhone ? s.msgShort : s.typeMsg) : s.closedMsg}
           className="max-h-40 min-h-[44px] min-w-0 flex-1 resize-none rounded-[22px] border border-[var(--color-border)] bg-[var(--color-surface-2)] px-4 py-[11px] text-[14px] text-[var(--color-ink)] outline-none placeholder:text-[var(--color-faint)] disabled:cursor-not-allowed md:min-h-[42px] md:flex-none md:rounded-none md:border-0 md:bg-transparent md:px-3 md:pb-1 md:pt-2 md:text-[13.5px]"
           onKeyDown={(e) => {
+            if (e.key === "Escape" && replying) {
+              setReplyTarget(null);
+              return;
+            }
             if (e.key === "Enter" && !e.shiftKey) {
               e.preventDefault();
               e.currentTarget.form?.requestSubmit();

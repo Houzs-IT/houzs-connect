@@ -78,6 +78,12 @@ interface OutboundOptions {
    */
   payload?: Record<string, unknown>;
   /**
+   * Meta's id of the message this text answers (HC-0183). Kept on the row as
+   * `interactivePayload.replyTo` so the inbox can draw the quote too. Plain
+   * text only — templates, buttons and flows go out unquoted.
+   */
+  replyTo?: string;
+  /**
    * Send an interactive WhatsApp Flow (a Meta form) instead of text / buttons.
    * `flowId` must be a PUBLISHED Meta Flow id; `flowToken` correlates the
    * customer's submission back to the waiting automation run (we pass the run id).
@@ -131,6 +137,7 @@ export async function sendOutbound(
   if (blocked) return null;
   const interactive = !!(opts.buttons && opts.buttons.length > 0);
   const flowSend = !!opts.flow;
+  const replyTo = !interactive && !flowSend && !opts.template ? opts.replyTo : undefined;
   const [msg] = await db
     .insert(message)
     .values({
@@ -147,7 +154,9 @@ export async function sendOutbound(
         ? { kind: "flow", cta: opts.flow!.cta, flowToken: opts.flow!.flowToken }
         : interactive
           ? { kind: "buttons", buttons: opts.buttons }
-          : (opts.payload ?? (opts.template ? { kind: "template", template: opts.template } : null)),
+          : replyTo
+            ? { ...opts.payload, replyTo }
+            : (opts.payload ?? (opts.template ? { kind: "template", template: opts.template } : null)),
     })
     .returning();
   await db
@@ -203,7 +212,7 @@ export async function sendOutbound(
           ? await sendFlow(convo.contact.phone, body, opts.flow, outcome, from)
           : interactive
             ? await sendButtons(convo.contact.phone, body, opts.buttons ?? [], outcome, from)
-            : await sendText(convo.contact.phone, body, outcome, from);
+            : await sendText(convo.contact.phone, body, outcome, from, replyTo);
       // No id back means Meta refused it (bad template, closed window, bad
       // number). The row must say so — a message that reads SENT in the inbox
       // while the customer got nothing is worse than no message at all.
@@ -221,6 +230,7 @@ export async function sendOutbound(
                   kind: "send_error",
                   reason: outcome.error ?? "Meta refused the message and gave no reason.",
                   ...(opts.template ? { template: opts.template } : {}),
+                  ...(replyTo ? { replyTo } : {}),
                 },
               }
         )

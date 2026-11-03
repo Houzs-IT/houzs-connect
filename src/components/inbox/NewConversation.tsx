@@ -8,6 +8,7 @@ import { startConversation } from "@/app/(app)/inbox/conversation-actions";
 import { fmt } from "@/lib/i18n/dict";
 import { useShell } from "@/components/shell/ShellProvider";
 import { IconClose, IconSearch } from "@/components/icons";
+import { SearchableSelect } from "@/components/SearchableSelect";
 
 type Contact = { id: string; name: string | null; phone: string };
 type Template = { name: string; language: string; body: string; placeholders: number };
@@ -171,22 +172,23 @@ export function NewConversation() {
                 {templates != null && templates.length === 0 ? (
                   <p className="text-[12.5px] text-[var(--color-faint)]">{s.noTemplates}</p>
                 ) : (
-                  <select
+                  <SearchableSelect
                     value={tpl ? `${tpl.name}|${tpl.language}` : ""}
-                    onChange={(e) => {
-                      const next = templates?.find((x) => `${x.name}|${x.language}` === e.target.value) ?? null;
+                    onChange={(v) => {
+                      const next = templates?.find((x) => `${x.name}|${x.language}` === v) ?? null;
                       setTpl(next);
                       setParams(Array.from({ length: next?.placeholders ?? 0 }, () => ""));
                     }}
+                    aria-label={s.pickTemplate}
                     className={FIELD}
-                  >
-                    <option value="">—</option>
-                    {(templates ?? []).map((x) => (
-                      <option key={`${x.name}|${x.language}`} value={`${x.name}|${x.language}`}>
-                        {x.name} · {x.language}
-                      </option>
-                    ))}
-                  </select>
+                    options={[
+                      { value: "", label: "—" },
+                      ...(templates ?? []).map((x) => ({
+                        value: `${x.name}|${x.language}`,
+                        label: `${x.name} · ${x.language}`,
+                      })),
+                    ]}
+                  />
                 )}
                 {tpl && (
                   <>

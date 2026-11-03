@@ -3,7 +3,6 @@ import {
   IconCampaign,
   IconContacts,
   IconDashboard,
-  IconForm,
   IconInbox,
   IconInternal,
   IconLifeBuoy,
@@ -39,10 +38,15 @@ export const NAV: NavItem[] = [
   { key: "automations", href: "/automations", Icon: IconAutomation },
   { key: "campaigns", href: "/campaigns", Icon: IconCampaign },
   { key: "broadcast", href: "/broadcast", Icon: IconSend },
-  { key: "templates", href: "/templates", match: ["/templates", "/forms"], Icon: IconForm },
+  { key: "drip", href: "/drip-campaigns", Icon: IconCampaign },
   { key: "payments", href: "/payments", Icon: IconPayments },
   { key: "logs", href: "/logs", Icon: IconLogs },
 ];
+
+/** The rail's modules this person may open (lib/full-access.ts myModules). */
+export function navFor(modules: readonly string[]): NavItem[] {
+  return NAV.filter((n) => modules.includes(n.key));
+}
 
 /**
  * IT Support: report a problem with Connect to IT. At the foot of the rail above

@@ -16,6 +16,7 @@
 // button; busy buttons change their label rather than showing a spinner.
 
 import { useState } from "react";
+import { SearchableSelect } from "@/components/SearchableSelect";
 import {
   isBound,
   positionalSlots,
@@ -175,34 +176,22 @@ export function VariableRows({
 
             <div className="flex items-center gap-2">
               <span className="flex-none text-[11px] text-[var(--color-faint)]">filled with</span>
-              <select
+              <SearchableSelect
+                aria-label="filled with"
                 value={encodeBinding(b)}
-                onChange={(e) => replaceSlot(n, decodeBinding(n, e.target.value, b))}
+                onChange={(v) => replaceSlot(n, decodeBinding(n, v, b))}
                 className="min-w-0 flex-1 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-1 text-[12px] outline-none focus:border-[var(--color-accent)]"
-              >
-                <option value="">— choose a source —</option>
-                <optgroup label="Every contact has these">
-                  {fields
+                options={[
+                  { value: "", label: "— choose a source —" },
+                  ...fields
                     .filter((f) => f.builtin)
-                    .map((f) => (
-                      <option key={f.key} value={`builtin:${f.key}`}>
-                        {f.name}
-                      </option>
-                    ))}
-                </optgroup>
-                <optgroup label="Contact fields">
-                  {fields
+                    .map((f) => ({ value: `builtin:${f.key}`, label: f.name })),
+                  ...fields
                     .filter((f) => !f.builtin)
-                    .map((f) => (
-                      <option key={f.key} value={`field:${f.key}`}>
-                        {f.name} ({f.key})
-                      </option>
-                    ))}
-                </optgroup>
-                <optgroup label="Not from the contact">
-                  <option value="literal">Fixed text — same for everyone</option>
-                </optgroup>
-              </select>
+                    .map((f) => ({ value: `field:${f.key}`, label: `${f.name} (${f.key})` })),
+                  { value: "literal", label: "Fixed text — same for everyone" },
+                ]}
+              />
             </div>
 
             {b?.source === "literal" && (

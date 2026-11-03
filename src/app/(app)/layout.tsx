@@ -1,17 +1,20 @@
 import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { redirect } from "next/navigation";
-import { and, gt, ne } from "drizzle-orm";
+import { and, eq, gt, ne } from "drizzle-orm";
 import { Sidebar } from "@/components/Sidebar";
 import { MobileTabBar } from "@/components/shell/MobileTabBar";
 import { ShellProvider } from "@/components/shell/ShellProvider";
 import { PresencePing } from "@/components/shell/PresencePing";
 import { NotifyPoller } from "@/components/shell/NotifyPoller";
+import { UpdateBanner } from "@/components/shell/UpdateBanner";
 import { touchPresence } from "@/lib/presence";
 import { getLang, getMenuCollapsed, getPanelCollapsed } from "@/lib/i18n/server";
 import { getDb } from "@/db/client";
 import { ensureContactColumns } from "@/db/ensure";
 import { ensureChannelColumns } from "@/db/ensure-channel";
-import { conversation } from "@/db/schema";
+import { company, conversation } from "@/db/schema";
+import { brandForCompany, themeCss } from "@/lib/company-brand";
+import { myModules } from "@/lib/full-access";
 import { getCurrentMember } from "@/lib/current-member";
 import { getMyPhotoSrc } from "@/lib/member-photo";
 import { bypassReadCache } from "@/db/fresh";
@@ -77,6 +80,14 @@ export default async function AppLayout({
   // or missing hub never holds up a page.
   const itSupport = itSupportConnected();
 
+  // The company being worked in decides the logo and colours (lib/company-brand.ts),
+  // so switching company in the top bar switches the theme with it.
+  const here = await db.query.company.findFirst({ columns: { name: true }, where: eq(company.id, me.companyId) });
+  const brand = brandForCompany(here?.name);
+  const theme = themeCss(brand.key);
+  // The modules this person opens here: their role, with any Settings → Access ticks (lib/full-access.ts).
+  const modules = await myModules();
+
   // Shell: 64px rail · [module secondary menu] · page column, with the phone
   // tab bar underneath below `md`. Module layouts render their SecondaryMenu
   // as the first child of the row; every page renders its own column
@@ -85,6 +96,9 @@ export default async function AppLayout({
     <ShellProvider lang={await getLang()} menuCollapsed={await getMenuCollapsed()} panelCollapsed={await getPanelCollapsed()}>
       <PresencePing />
       <NotifyPoller />
+      <UpdateBanner />
+      {/* On :root, so dialogs and menus rendered outside the shell take the colours too. */}
+      {theme ? <style>{theme}</style> : null}
       <div data-shell className="flex h-dvh flex-col overflow-hidden">
         {staging ? (
           <div className="shrink-0 bg-amber-400 px-3 py-0.5 text-center text-xs font-semibold text-amber-950">
@@ -92,10 +106,10 @@ export default async function AppLayout({
           </div>
         ) : null}
         <div className="flex min-h-0 flex-1">
-          <Sidebar unread={unread} internalUnread={internalUnread} live={live} itSupport={itSupport} me={{ name: me.name, photo: await getMyPhotoSrc() }} />
+          <Sidebar unread={unread} internalUnread={internalUnread} live={live} itSupport={itSupport} logo={brand.mark} modules={modules} me={{ name: me.name, photo: await getMyPhotoSrc() }} />
           <div className="flex min-w-0 flex-1">{children}</div>
         </div>
-        <MobileTabBar unread={unread} internalUnread={internalUnread} itSupport={itSupport} />
+        <MobileTabBar unread={unread} internalUnread={internalUnread} itSupport={itSupport} modules={modules} />
       </div>
     </ShellProvider>
   );

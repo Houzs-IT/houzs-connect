@@ -5,7 +5,7 @@ import { usePathname } from "next/navigation";
 import { initials, tint } from "@/lib/format";
 import { PersonAvatar } from "./PersonAvatar";
 import { useShell } from "./shell/ShellProvider";
-import { IT_SUPPORT_NAV, NAV, SETTINGS_NAV, isActive, type NavItem } from "./shell/nav";
+import { IT_SUPPORT_NAV, SETTINGS_NAV, isActive, navFor, type NavItem } from "./shell/nav";
 import { useItUnread, useRememberPage } from "./it-support/useItSupportShell";
 
 /**
@@ -64,6 +64,8 @@ export function Sidebar({
   live,
   me,
   itSupport,
+  logo,
+  modules,
 }: {
   unread?: number;
   /** IT Support is connected on this Worker: show its tile and unread count. */
@@ -72,6 +74,10 @@ export function Sidebar({
   internalUnread?: number;
   live?: boolean;
   me: { name: string; photo?: string | null };
+  /** The rail logo (lib/company-brand.ts). */
+  logo: string;
+  /** The modules this person may open (lib/full-access.ts myModules). */
+  modules: readonly string[];
 }) {
   const path = usePathname();
   const { t } = useShell();
@@ -102,11 +108,11 @@ export function Sidebar({
         className="mb-3.5 grid h-9 w-9 place-items-center rounded-[8px] bg-white shadow-[var(--shadow-logo)]"
       >
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src="/logo-hc-mark.png" alt="" className="h-[22px] w-[22px] object-contain" />
+        <img src={logo} alt="" className="h-[22px] w-[22px] object-contain" />
       </Link>
 
       <nav className="flex flex-col items-center gap-1">
-        {NAV.map((item) => tile(item, item.key === "inbox" ? unread : item.key === "internal" ? internalUnread : undefined))}
+        {navFor(modules).map((item) => tile(item, item.key === "inbox" ? unread : item.key === "internal" ? internalUnread : undefined))}
       </nav>
 
       <div className="mt-auto flex flex-col items-center gap-2.5">

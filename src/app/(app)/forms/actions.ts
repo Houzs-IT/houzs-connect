@@ -49,8 +49,8 @@ export async function createForm(formData: FormData) {
     .values({ companyId: me.companyId, name, status: "draft", fields })
     .returning();
 
-  revalidatePath("/forms");
-  if (row) redirect(`/forms?f=${row.id}`);
+  revalidatePath("/settings/forms");
+  if (row) redirect(`/settings/forms?f=${row.id}`);
 }
 
 /** Rename a form and replace its questions. */
@@ -69,8 +69,8 @@ export async function updateForm(
     .set({ name: clean, fields: normaliseFields(fields) })
     .where(eq(formTable.id, formId));
 
-  revalidatePath("/forms");
-  revalidatePath(`/forms/${formId}`);
+  revalidatePath("/settings/forms");
+  revalidatePath(`/settings/forms/${formId}`);
   return { ok: true as const };
 }
 
@@ -100,7 +100,7 @@ export async function setFormStatus(formId: string, published: boolean) {
       // that draft instead of asking Meta for a second flow of the same name.
       if (res.flowId && res.flowId !== auth.form.metaFlowId) {
         await auth.db.update(formTable).set({ metaFlowId: res.flowId }).where(eq(formTable.id, formId));
-        revalidatePath(`/forms/${formId}`);
+        revalidatePath(`/settings/forms/${formId}`);
       }
       return { ok: false as const, error: res.error };
     }
@@ -115,8 +115,8 @@ export async function setFormStatus(formId: string, published: boolean) {
       .where(eq(formTable.id, formId));
   }
 
-  revalidatePath("/forms");
-  revalidatePath(`/forms/${formId}`);
+  revalidatePath("/settings/forms");
+  revalidatePath(`/settings/forms/${formId}`);
   return { ok: true as const, published };
 }
 
@@ -135,7 +135,7 @@ export async function duplicateForm(formId: string) {
     })
     .returning();
   if (!row) return { ok: false as const, error: "could not copy" };
-  revalidatePath("/forms");
+  revalidatePath("/settings/forms");
   return { ok: true as const, id: row.id };
 }
 
@@ -151,7 +151,7 @@ export async function deleteForm(formId: string) {
     .delete(formResponseTable)
     .where(eq(formResponseTable.formId, formId));
   await auth.db.delete(formTable).where(eq(formTable.id, formId));
-  revalidatePath("/forms");
+  revalidatePath("/settings/forms");
   return { ok: true as const };
 }
 

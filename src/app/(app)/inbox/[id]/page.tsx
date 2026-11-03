@@ -2,8 +2,9 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { and, asc, desc, eq } from "drizzle-orm";
 import { getDb } from "@/db/client";
-import { contactField, conversation, department, member, note, payment, tag } from "@/db/schema";
+import { contactField, conversation, department, dripCampaign, member, note, payment, tag } from "@/db/schema";
 import { MarkRead } from "@/components/inbox/MarkRead";
+import { EscToClose } from "@/components/inbox/EscToClose";
 import { Thread, type ThreadItem } from "@/components/inbox/Thread";
 import { Composer } from "@/components/inbox/Composer";
 import { ContactPanel, type FirstReply } from "@/components/inbox/ContactPanel";
@@ -16,6 +17,7 @@ import { getCurrentMember } from "@/lib/current-member";
 import { photoSrcs } from "@/lib/member-photo";
 import { PersonAvatar } from "@/components/PersonAvatar";
 import { ensureConversationMemberTable } from "@/db/ensure-conversation-member";
+import { ensureDripTables } from "@/db/ensure-drip";
 import { isLive } from "@/lib/whatsapp/cloud-api";
 import { attrs, displayName, initials, stamp, tint, waIdentifier } from "@/lib/format";
 import { bypassReadCache } from "@/db/fresh";
@@ -69,6 +71,16 @@ export default async function ConversationPage({
   // not protect this route — without the company check any signed-in member
   // could read another tenant's thread, phone number and order attributes.
   if (!convo || convo.contact.companyId !== me.companyId) notFound();
+
+  // Live drips the agent can enrol this contact into, for the conversation menu.
+  await ensureDripTables(db).catch(() => {});
+  const liveDrips = await db.query.dripCampaign
+    .findMany({
+      where: and(eq(dripCampaign.companyId, me.companyId), eq(dripCampaign.status, "live")),
+      columns: { id: true, name: true },
+      orderBy: asc(dripCampaign.name),
+    })
+    .catch(() => [] as { id: string; name: string }[]);
 
   // Newest-first off the index, oldest-first on screen.
   const messages = convo.messages.slice().reverse();
@@ -193,6 +205,8 @@ export default async function ConversationPage({
     <div className="flex min-w-0 flex-1">
       {/* Opening a conversation clears its unread badge. */}
       <MarkRead conversationId={convo.id} />
+      {/* Esc returns to the list — the keyboard twin of the header's back arrow. */}
+      <EscToClose />
       {/* Center: thread */}
       <div className="flex min-w-0 flex-1 flex-col bg-[var(--color-canvas)]">
         <div className="flex h-[60px] shrink-0 items-center gap-2.5 border-b border-[var(--color-border)] bg-[var(--color-surface)] px-2.5 md:gap-3 md:px-4">
@@ -278,7 +292,7 @@ export default async function ConversationPage({
             <PanelToggle />
             {/* The panel (and its menu) is hidden below xl or when put away; keep the actions. */}
             <MenuWithoutPanel>
-              <ConversationMenu conversationId={convo.id} />
+              <ConversationMenu conversationId={convo.id} drips={liveDrips} />
             </MenuWithoutPanel>
           </div>
         </div>
@@ -297,7 +311,7 @@ export default async function ConversationPage({
             {orderRef && <span className="ml-auto shrink-0 font-semibold text-[var(--color-brand)]">{orderRef}</span>}
           </div>
         )}
-        <Thread items={items} conversationId={convo.id} />
+        <Thread items={items} conversationId={convo.id} contactName={name} />
         {/* The DEMO simulators are for driving a flow with no real WhatsApp
             attached. On LIVE they were still rendered — a thread showing
             "LIVE · sending via WhatsApp" in the sidebar and a "Send as customer"

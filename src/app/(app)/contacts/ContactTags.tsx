@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { useShell } from "@/components/shell/ShellProvider";
+import { SearchableSelect } from "@/components/SearchableSelect";
 import { fmt } from "@/lib/i18n/dict";
 import { setContactTag } from "./tag-actions";
 
@@ -45,19 +46,17 @@ export function ContactTags({ contactId, tags, all }: { contactId: string; tags:
           </span>
         ))}
         {addable.length > 0 && (
-          <select
+          <SearchableSelect
             value=""
             disabled={pending}
-            onChange={(e) => e.target.value && set(e.target.value, true)}
+            onChange={(v) => v && set(v, true)}
+            aria-label={s.tagAddTo}
             className="h-[24px] rounded-[5px] border border-dashed border-[var(--color-border-strong)] bg-transparent px-1.5 text-[11.5px] text-[var(--color-muted)] outline-none hover:border-[var(--color-accent)]"
-          >
-            <option value="">{s.tagAddTo}</option>
-            {addable.map((tg) => (
-              <option key={tg.id} value={tg.id}>
-                {tg.name}
-              </option>
-            ))}
-          </select>
+            options={[
+              { value: "", label: s.tagAddTo },
+              ...addable.map((tg) => ({ value: tg.id, label: tg.name })),
+            ]}
+          />
         )}
       </div>
       {error && <p className="mt-1 text-[11.5px] text-[var(--color-danger)]">{error}</p>}

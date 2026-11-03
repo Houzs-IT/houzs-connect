@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { SearchableSelect } from "@/components/SearchableSelect";
 import { importContactsChunk, previewImportPhones } from "./actions";
 import {
   buildRows,
@@ -364,22 +365,19 @@ export function ImportContactsButton({
                       </span>
                       <span className="text-[var(--color-faint)]">→</span>
                       <div className="w-[160px] shrink-0">
-                        <select
+                        <SearchableSelect
                           value={mapping[i] ?? TARGET_IGNORE}
                           aria-label={`Import the column ${h} as`}
-                          onChange={(e) => onMap(i, e.target.value)}
+                          onChange={(v) => onMap(i, v)}
                           className={selectCls}
-                        >
-                          <option value={TARGET_IGNORE}>Ignore</option>
-                          <option value={TARGET_NAME}>Name</option>
-                          <option value={TARGET_PHONE}>Phone</option>
-                          <option value={TARGET_EMAIL}>Email</option>
-                          {fields.map((f) => (
-                            <option key={f.key} value={f.key}>
-                              {f.name}
-                            </option>
-                          ))}
-                        </select>
+                          options={[
+                            { value: TARGET_IGNORE, label: "Ignore" },
+                            { value: TARGET_NAME, label: "Name" },
+                            { value: TARGET_PHONE, label: "Phone" },
+                            { value: TARGET_EMAIL, label: "Email" },
+                            ...fields.map((f) => ({ value: f.key, label: f.name })),
+                          ]}
+                        />
                       </div>
                     </div>
                   ))}

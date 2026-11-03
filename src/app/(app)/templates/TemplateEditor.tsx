@@ -7,6 +7,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useRef, useState, useSyncExternalStore, useTransition } from "react";
+import { SearchableSelect } from "@/components/SearchableSelect";
 import { useShell } from "@/components/shell/ShellProvider";
 import { isBound, positionalSlots, resolveBinding, type VarBinding } from "@/lib/automation/vars";
 import { fmt } from "@/lib/i18n/dict";
@@ -202,10 +203,10 @@ export function TemplateEditor({
 
   const patchCard = (uid: number, p: Partial<Card>) => setCards((cs) => cs.map((c) => (c.uid === uid ? { ...c, ...p } : c)));
 
-  /** Pick the header: none, text, or an image / PDF (which drops any chosen file of the other kind). */
+  /** Pick the header: none, text, or an image / PDF / video (which drops any chosen file of the other kind). */
   function pickHeader(next: "none" | "text" | HeaderMediaFormat) {
     setHeaderOn(next === "text");
-    const media = next === "IMAGE" || next === "DOCUMENT" ? next : null;
+    const media = next === "IMAGE" || next === "DOCUMENT" || next === "VIDEO" ? next : null;
     if (media !== headerMedia) chooseHeaderFile(null);
     setHeaderMedia(media);
   }
@@ -276,7 +277,7 @@ export function TemplateEditor({
         setNote({ ok: true, text: fmt(L.submitted, { name: nameClean, status: res.status ?? "PENDING" }) });
       }
       if (!existing) writeDraft(null);
-      router.push("/templates");
+      router.push("/settings/templates");
       router.refresh();
     });
   }
@@ -308,7 +309,7 @@ export function TemplateEditor({
     <div className="flex min-w-0 flex-1 flex-col bg-[var(--color-canvas)]">
       <header className="flex h-14 shrink-0 items-center gap-3 border-b border-[var(--color-border)] bg-[var(--color-surface)] px-4">
         <Link
-          href="/templates"
+          href="/settings/templates"
           aria-label={L.back}
           className="grid h-8 w-8 shrink-0 place-items-center rounded-[8px] border border-[var(--color-border)] text-[var(--color-muted)] hover:bg-[var(--color-surface-2)] hover:text-[var(--color-ink)]"
         >
@@ -375,20 +376,28 @@ export function TemplateEditor({
               </div>
               <div>
                 <span className={label}>{L.category}</span>
-                <select value={category} disabled={editing} onChange={(e) => setCategory(e.target.value as TemplateCategory)} className={input}>
-                  <option value="UTILITY">{L.utility}</option>
-                  <option value="MARKETING">{L.marketing}</option>
-                </select>
+                <SearchableSelect
+                  aria-label={L.category}
+                  value={category}
+                  disabled={editing}
+                  onChange={(v) => setCategory(v as TemplateCategory)}
+                  className={input}
+                  options={[
+                    { value: "UTILITY", label: L.utility },
+                    { value: "MARKETING", label: L.marketing },
+                  ]}
+                />
               </div>
               <div>
                 <span className={label}>{L.language}</span>
-                <select value={language} disabled={editing} onChange={(e) => setLanguage(e.target.value)} className={input}>
-                  {LANGS.map(([v, l]) => (
-                    <option key={v} value={v}>
-                      {l}
-                    </option>
-                  ))}
-                </select>
+                <SearchableSelect
+                  aria-label={L.language}
+                  value={language}
+                  disabled={editing}
+                  onChange={(v) => setLanguage(v)}
+                  className={input}
+                  options={LANGS.map(([v, l]) => ({ value: v, label: l }))}
+                />
               </div>
             </div>
             <p className="-mt-2 text-[11.5px] text-[var(--color-faint)]">
@@ -440,6 +449,7 @@ export function TemplateEditor({
                   // A media header cannot be carried through an edit (templates.ts), so only a new template offers one.
                   [L.hImage, headerMedia === "IMAGE", () => pickHeader("IMAGE"), !editing],
                   [L.hDocument, headerMedia === "DOCUMENT", () => pickHeader("DOCUMENT"), !editing],
+                  [L.hVideo, headerMedia === "VIDEO", () => pickHeader("VIDEO"), !editing],
                 ] as [string, boolean, () => void, boolean][]).map(([l, on, fn, ok]) => (
                   <button
                     key={l}
@@ -470,13 +480,15 @@ export function TemplateEditor({
                         <img src={headerPreview} alt="" className="h-full w-full object-cover" />
                       ) : headerMedia === "DOCUMENT" ? (
                         "PDF"
+                      ) : headerMedia === "VIDEO" ? (
+                        "MP4"
                       ) : (
                         "IMG"
                       )}
                     </span>
                     <span className="min-w-0 flex-1">
                       <span className="block truncate text-[13px] font-semibold text-[var(--color-ink)]">{headerFile?.name ?? L.hChoose}</span>
-                      <span className="block text-[11.5px] text-[var(--color-faint)]">{headerMedia === "IMAGE" ? L.hFileImage : L.hFileDoc}</span>
+                      <span className="block text-[11.5px] text-[var(--color-faint)]">{headerMedia === "IMAGE" ? L.hFileImage : headerMedia === "VIDEO" ? L.hFileVideo : L.hFileDoc}</span>
                     </span>
                     <span className="shrink-0 text-[12.5px] font-semibold text-[var(--color-accent)]">{headerFile ? L.hReplace : L.hChoose}</span>
                     <input
@@ -642,9 +654,12 @@ export function TemplateEditor({
               <div className="flex flex-col gap-2">
                 {buttons.map((b, i) => (
                   <div key={i} className="flex items-center gap-2">
-                    <select disabled className={`${input} w-[130px] shrink-0`}>
-                      <option>{L.quickReply}</option>
-                    </select>
+                    <SearchableSelect
+                      disabled
+                      defaultValue={L.quickReply}
+                      className={`${input} w-[130px] shrink-0`}
+                      options={[{ value: L.quickReply, label: L.quickReply }]}
+                    />
                     <input
                       value={b}
                       maxLength={LIMITS.button}
@@ -716,17 +731,13 @@ export function TemplateEditor({
               {samples.length > 0 && (
                 <label className="flex items-center gap-1 text-[12px] text-[var(--color-faint)]">
                   {L.asL}
-                  <select
-                    value={sampleIdx}
-                    onChange={(e) => setSampleIdx(Number(e.target.value))}
+                  <SearchableSelect
+                    aria-label={L.asL}
+                    value={String(sampleIdx)}
+                    onChange={(v) => setSampleIdx(Number(v))}
                     className="bg-transparent text-[12px] font-semibold text-[var(--color-ink)] outline-none"
-                  >
-                    {samples.map((s, i) => (
-                      <option key={`${s.phone}-${i}`} value={i}>
-                        {s.label}
-                      </option>
-                    ))}
-                  </select>
+                    options={samples.map((s, i) => ({ value: String(i), label: s.label }))}
+                  />
                 </label>
               )}
             </div>

@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { ActionConfirm } from "@/components/ActionConfirm";
 import { IconDots } from "@/components/icons";
+import { SearchableSelect } from "@/components/SearchableSelect";
 import { useShell } from "@/components/shell/ShellProvider";
 import { fmt } from "@/lib/i18n/dict";
 import { deleteForm, duplicateForm, setFormStatus, updateForm } from "./actions";
@@ -177,7 +178,7 @@ export function FormBuilder({
                     setMenu(null);
                     start(async () => {
                       const res = await duplicateForm(id);
-                      if (res.ok && "id" in res) router.push(`/forms?f=${res.id}`);
+                      if (res.ok && "id" in res) router.push(`/settings/forms?f=${res.id}`);
                     });
                   }}
                 >
@@ -288,13 +289,12 @@ export function FormBuilder({
                   {expanded && (
                     <div className="grid gap-2 border-t border-[var(--color-border-subtle)] px-3 py-3 md:grid-cols-[1.6fr_1fr_1fr]">
                       <input autoFocus value={r.label} placeholder={L.askPh} onChange={(e) => patch(r.uid, { label: e.target.value })} className={input} />
-                      <select value={r.type} onChange={(e) => patch(r.uid, { type: e.target.value as FieldType })} className={input}>
-                        {FIELD_TYPES.map((ft) => (
-                          <option key={ft.value} value={ft.value}>
-                            {ft.label}
-                          </option>
-                        ))}
-                      </select>
+                      <SearchableSelect
+                        value={r.type}
+                        onChange={(v) => patch(r.uid, { type: v as FieldType })}
+                        className={input}
+                        options={FIELD_TYPES.map((ft) => ({ value: ft.value, label: ft.label }))}
+                      />
                       <input value={r.key} placeholder={L.keyPh} onChange={(e) => patch(r.uid, { key: e.target.value })} className={input} />
                     </div>
                   )}
@@ -349,7 +349,7 @@ export function FormBuilder({
           start(async () => {
             await deleteForm(id);
             setConfirm(false);
-            router.push("/forms");
+            router.push("/settings/forms");
             router.refresh();
           })
         }

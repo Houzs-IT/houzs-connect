@@ -51,8 +51,8 @@ export interface TemplateRowData {
   mediaHeader: boolean;
   /** TEXT, IMAGE, DOCUMENT, VIDEO…; null when the template has no header. */
   headerFormat: string | null;
-  /** The file Connect attaches when sending an image / PDF header template; the list page fills it. */
-  headerFile?: { url: string; fileName: string; format: "IMAGE" | "DOCUMENT" } | null;
+  /** The file Connect attaches when sending an image / PDF / video header template; the list page fills it. */
+  headerFile?: { url: string; fileName: string; format: "IMAGE" | "DOCUMENT" | "VIDEO" } | null;
   rejectedReason?: string | null;
   /** Saved mapping for this exact (name, language). Empty when never mapped. */
   bindings: VarBinding[];

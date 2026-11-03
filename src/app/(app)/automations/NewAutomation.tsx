@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { createAutomation } from "./actions";
 import { useShell } from "@/components/shell/ShellProvider";
+import { SearchableSelect } from "@/components/SearchableSelect";
 import { IconClose } from "@/components/icons";
 
 const FIELD =
@@ -59,13 +60,13 @@ export function NewAutomation({
               </label>
               <label className="flex flex-col gap-1 text-[12px] font-semibold text-[var(--color-ink)]">
                 {L.colWhen}
-                <select name="triggerType" defaultValue="NEW_INCOMING_MESSAGE" className={FIELD}>
-                  {triggers.map((x) => (
-                    <option key={x.value} value={x.value}>
-                      {x.label}
-                    </option>
-                  ))}
-                </select>
+                <SearchableSelect
+                  name="triggerType"
+                  defaultValue="NEW_INCOMING_MESSAGE"
+                  className={FIELD}
+                  aria-label={L.colWhen}
+                  options={triggers.map((x) => ({ value: x.value, label: x.label }))}
+                />
               </label>
               <ul className="flex flex-col gap-1">
                 {triggers.map((x) => (

@@ -17,7 +17,7 @@ import { ERP_CALLBACK_HEADERS } from "./shared";
 const CONFIRM_BTN = "Confirmed postage details";
 const AMEND_BTN = "Amend postage details";
 
-const OPENING = `Hi 👋 Before we arrange delivery for your Houzs order, please confirm your postage details:
+const OPENING = `Hi 👋 Before we arrange delivery for your {company_signature} order, please confirm your postage details:
 
 👤 Name: *{full_name}*
 📞 Phone: *{customer_phone}*

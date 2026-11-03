@@ -13,7 +13,6 @@
 // the contract in src/lib/whatsapp/templateBindings.ts: resolveSendBindings →
 // templateBindingGaps → resolveSendParams, per that file's own instructions.
 
-import { tagCampaignMessages } from "@/lib/campaign-messages";
 import { revalidatePath } from "next/cache";
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { getDb } from "@/db/client";
@@ -21,7 +20,6 @@ import {
   campaign as campaignTable,
   channel as channelTable,
   contact as contactTable,
-  message as messageTable,
   tag as tagTable,
 } from "@/db/schema";
 import { getCurrentMember } from "@/lib/current-member";
@@ -33,14 +31,11 @@ import type { SampleContact } from "@/app/(app)/templates/types";
 import {
   bindingKey,
   loadTemplateBindings,
-  resolveSendBindings,
 } from "@/lib/whatsapp/templateBindings";
 import {
   applyParams,
   resolveSendParams,
-  templateBindingGaps,
   type VarBinding,
-  type VarContext,
 } from "@/lib/automation/vars";
 import { resolveAudience, type ContactRow } from "./audience";
 import {
@@ -53,7 +48,6 @@ import {
   type AudienceSpec,
   type CampaignInput,
   type CampaignSpec,
-  type CampaignStats,
   type CampaignTemplate,
   type PrepareResult,
   type SaveResult,
@@ -63,37 +57,20 @@ import {
   type TestSendResult,
 } from "./spec";
 import { can } from "@/lib/permissions";
-
-/** Statuses a campaign may still be edited, scheduled or sent from. */
-const EDITABLE = ["draft", "scheduled"];
-
-// Recipients sent per request. A whole broadcast in one request runs the Worker
-// out of its CPU/subrequest budget partway through (a 50-recipient send stalled
-// at ~32 on 2026-09-21), leaving the campaign stuck "sending" and the rest
-// unsent. So sendCampaignNow does one chunk and returns how many remain; the
-// caller loops. Kept well under where the single-request send died.
-const SEND_CHUNK = 20;
+import {
+  EDITABLE,
+  readyBindings,
+  varContext,
+  sendCampaignChunk,
+  type Db,
+  type Ready,
+} from "./send";
 
 /** Auth + company scope for every mutation below. Null when not signed in. */
 async function ctx() {
   const me = await getCurrentMember();
   if (!me || !(await can(me, "campaigns"))) return null;
   return { db: getDb(), companyId: me.companyId, memberId: me.id, role: me.role };
-}
-
-type Db = ReturnType<typeof getDb>;
-
-/** A contact row as the variable resolver wants it. */
-function varContext(c: ContactRow): VarContext {
-  return {
-    full_name: c.name,
-    phone: c.phone,
-    email: c.email,
-    source: c.source,
-    sourceId: c.sourceId,
-    sourceUrl: c.sourceUrl,
-    attributes: c.attributes,
-  };
 }
 
 /**
@@ -369,42 +346,6 @@ export async function unscheduleCampaign(formData: FormData): Promise<void> {
   revalidatePath("/campaigns");
 }
 
-// ── Bindings, per the templateBindings.ts contract ─────────────────────────
-
-interface Ready {
-  ok: true;
-  language: string;
-  bindings: VarBinding[];
-}
-
-/**
- * Steps 1 and 2 of the send contract: merge the template's saved mapping with
- * this campaign's override, then refuse outright if any {{n}} is still unmapped.
- *
- * Refusing is the point. An unmapped slot does not fail loudly at Meta — it
- * sends, and the customer reads "Reference No. : -". A whole broadcast of that
- * is far worse than a campaign that would not start.
- */
-async function readyBindings(
-  companyId: string,
-  spec: CampaignSpec
-): Promise<Ready | { ok: false; error: string }> {
-  const resolution = await resolveSendBindings(
-    companyId,
-    spec.templateName,
-    spec.templateLang,
-    spec.bindings
-  );
-  const gaps = templateBindingGaps(spec.templateBody, resolution.bindings);
-  if (gaps.length > 0) {
-    return {
-      ok: false,
-      error: `${gaps.map((n) => `{{${n}}}`).join(", ")} ${gaps.length === 1 ? "has" : "have"} nothing to fill ${gaps.length === 1 ? "it" : "them"}. Map ${gaps.length === 1 ? "it" : "them"} in step 4, or every recipient reads a dash there.`,
-    };
-  }
-  return { ok: true, language: resolution.language, bindings: resolution.bindings };
-}
-
 // ── Step 5: test send ──────────────────────────────────────────────────────
 
 /**
@@ -580,22 +521,6 @@ export async function prepareSavedSend(campaignId: string): Promise<PrepareResul
 
 // ── The send ───────────────────────────────────────────────────────────────
 
-/** inArray has a parameter ceiling; the failure sweep runs in slices. */
-const ID_CHUNK = 500;
-
-async function countFailed(db: Db, ids: string[]): Promise<number> {
-  let failed = 0;
-  for (let i = 0; i < ids.length; i += ID_CHUNK) {
-    const slice = ids.slice(i, i + ID_CHUNK);
-    const rows = await db
-      .select({ id: messageTable.id })
-      .from(messageTable)
-      .where(and(inArray(messageTable.id, slice), eq(messageTable.status, "FAILED")));
-    failed += rows.length;
-  }
-  return failed;
-}
-
 /**
  * Send a saved campaign for real.
  *
@@ -626,112 +551,11 @@ export async function sendCampaignNow(input: {
   if (input.confirm !== "SEND") {
     return { ok: false, error: "This send was not confirmed." };
   }
-
-  const row = await c.db.query.campaign.findFirst({
-    where: and(eq(campaignTable.id, input.campaignId), eq(campaignTable.companyId, c.companyId)),
-  });
-  if (!row) return { ok: false, error: "Campaign not found." };
-
-  if (row.requiresApproval && !row.approvedByMemberId) {
-    return { ok: false, error: "This campaign is waiting for a manager to approve it." };
-  }
-
-  const spec = unpackSpec(row.audience);
-  if (!spec) {
-    return {
-      ok: false,
-      error:
-        "This campaign was created before the composer stored its message, so there is nothing to send. Build it again.",
-    };
-  }
-  const blocker = sendBlocker(spec);
-  if (blocker) return { ok: false, error: blocker };
-  const ready = await readyBindings(c.companyId, spec);
-  if (!ready.ok) return { ok: false, error: ready.error };
-
-  const resolved = await resolveAudience(c.db, c.companyId, spec.audience);
-  if (resolved.recipients.length === 0) {
-    return { ok: false, error: "Nobody in this audience can be messaged." };
-  }
-
-  // Claim it. A draft/scheduled campaign starts sending; one already "sending" is
-  // THIS send resuming its next chunk. Anything else (completed/failed) is
-  // refused. The atomic status set means two operators cannot both start the same
-  // fresh campaign, and progress carried in stats.doneIds means a resume never
-  // re-sends what an earlier chunk already did.
-  const prevStats = (row.stats ?? null) as CampaignStats | null;
-  const [claimed] = await c.db
-    .update(campaignTable)
-    .set({ status: "sending" })
-    .where(
-      and(
-        eq(campaignTable.id, row.id),
-        eq(campaignTable.companyId, c.companyId),
-        inArray(campaignTable.status, [...EDITABLE, "sending"])
-      )
-    )
-    .returning();
-  if (!claimed) {
-    return { ok: false, error: "This campaign has already been sent — duplicate it to send again." };
-  }
-
-  // Who is left, tracked by contact id so re-resolving the audience in a
-  // different order across chunks never re-sends or skips anyone.
-  const done = new Set(prevStats?.doneIds ?? []);
-  const pending = resolved.recipients.filter((p) => !done.has(p.id));
-  const batch = pending.slice(0, SEND_CHUNK);
-
-  const startedAt = prevStats?.startedAt ?? new Date().toISOString();
-  const msgIds: string[] = [];
-  for (const person of batch) {
-    const { params } = resolveSendParams(spec.templateBody, varContext(person), ready.bindings);
-    const convo = await getOrCreateConversation(row.channelId, person.id);
-    // The body recorded on the message row is the RESOLVED template text, so the
-    // inbox and System Logs show what the customer actually read rather than a
-    // row of {{1}} placeholders.
-    const msg = await sendOutbound(convo.id, applyParams(spec.templateBody, params), {
-      isBot: true,
-      type: "TEMPLATE",
-      template: { name: spec.templateName, lang: ready.language, params },
-    });
-    if (msg) msgIds.push(msg.id);
-    // Mark ATTEMPTED (a refusal included) so a bad number is not retried next chunk.
-    done.add(person.id);
-  }
-
-  // Per-message campaign link, for read / replied stats (lib/campaign-messages.ts).
-  await tagCampaignMessages(row.id, msgIds);
-
-  // `sendOutbound` marks a row FAILED when Meta gives back no message id, so
-  // "sent" here means Meta accepted it — not merely that a row was written.
-  const failedThis = await countFailed(c.db, msgIds);
-  const sentThis = msgIds.length - failedThis;
-  const sent = (prevStats?.sent ?? 0) + sentThis;
-  const failed = (prevStats?.failed ?? 0) + failedThis;
-  const remaining = pending.length - batch.length;
-
-  const stats: CampaignStats = {
-    total: resolved.matched,
-    sent,
-    startedAt,
-    ...(remaining > 0 ? {} : { finishedAt: new Date().toISOString() }),
-    ...(failed > 0 ? { failed } : {}),
-    ...(resolved.blocked > 0 ? { skippedBlocked: resolved.blocked } : {}),
-    ...(resolved.optedOut > 0 ? { skippedOptedOut: resolved.optedOut } : {}),
-    doneIds: [...done],
-  };
-
-  await c.db
-    .update(campaignTable)
-    .set({
-      status: remaining > 0 ? "sending" : sent === 0 ? "failed" : "completed",
-      stats,
-    })
-    .where(eq(campaignTable.id, row.id));
-
-  revalidatePath("/campaigns");
-  revalidatePath("/inbox");
-  return { ok: true, sent, failed, recipients: resolved.recipients.length, remaining };
+  // The send itself — spec re-read, sendBlocker/readyBindings, the atomic
+  // draft/scheduled→sending claim, the chunk loop and stats — lives in ./send so
+  // the cron scheduler (which has no session) sends due scheduled campaigns with
+  // the exact same logic.
+  return sendCampaignChunk(c.db, c.companyId, input.campaignId);
 }
 
 // ── Broadcast page (a campaign to hand-picked contacts) ────────────────────

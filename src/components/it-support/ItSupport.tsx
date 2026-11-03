@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useShell } from "../shell/ShellProvider";
 import { IconLifeBuoy, IconPaperclip } from "../icons";
 import { DataTable, type DataColumn, type DataRow } from "../DataTable";
+import { SearchableSelect } from "@/components/SearchableSelect";
 import { stamp } from "@/lib/format";
 import { agoLabel } from "@/lib/i18n/ago";
 import { fmt } from "@/lib/i18n/dict";
@@ -228,15 +229,13 @@ function NewRequest({ onSent, onCancel }: { onSent: (code: string) => void; onCa
       <div className="grid gap-4 sm:grid-cols-2">
         <label>
           <span className={LABEL}>{t.it.fKind}</span>
-          <select className={`${FIELD} h-[36px]`} value={kind} onChange={(e) => setKind(e.target.value)}>
-            {IT_KINDS.map((k) => <option key={k} value={k}>{t.it.kind[k]}</option>)}
-          </select>
+          <SearchableSelect className={`${FIELD} h-[36px]`} value={kind} onChange={(v) => setKind(v)}
+            aria-label={t.it.fKind} options={IT_KINDS.map((k) => ({ value: k, label: t.it.kind[k] }))} />
         </label>
         <label>
           <span className={LABEL}>{t.it.fUrgency}</span>
-          <select className={`${FIELD} h-[36px]`} value={urgency} onChange={(e) => setUrgency(e.target.value)}>
-            {IT_URGENCIES.map((u) => <option key={u} value={u}>{t.it.urgency[u]}</option>)}
-          </select>
+          <SearchableSelect className={`${FIELD} h-[36px]`} value={urgency} onChange={(v) => setUrgency(v)}
+            aria-label={t.it.fUrgency} options={IT_URGENCIES.map((u) => ({ value: u, label: t.it.urgency[u] }))} />
         </label>
       </div>
       <div>

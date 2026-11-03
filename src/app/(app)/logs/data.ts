@@ -109,7 +109,14 @@ export async function statusTimeline(waMessageId: string, createdAt: Date): Prom
         coalesce(s->'errors'->0->'error_data'->>'details', s->'errors'->0->>'message') as detail
       from connect.webhook_event w,
         jsonb_path_query(w.payload, '$.entry[*].changes[*].value.statuses[*]') s
-      where w.source = 'whatsapp' and w.event_type like 'status%'
+      -- NOT filtered by event_type. The whatsapp webhook route stamps its OUTCOME
+      -- onto event_type (handled:status-only, handled:N-message(s), …), overwriting
+      -- the "status" label this once looked for — so event_type like 'status%'
+      -- matched zero rows and every Meta failure reason silently went missing from
+      -- System Logs. The status is found by the payload instead: jsonb_path_query
+      -- yields a row only for a webhook that actually carries a statuses[] array,
+      -- and the id + source match pins it down. No label rewrite can break that.
+      where w.source = 'whatsapp'
         and w.created_at >= ${createdAt.toISOString()}::timestamptz
         and w.created_at < ${new Date(createdAt.getTime() + 7 * 86_400_000).toISOString()}::timestamptz
         and s->>'id' = ${waMessageId}

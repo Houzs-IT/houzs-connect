@@ -1,6 +1,6 @@
 import { getDb } from "@/db/client";
 import { getCurrentMember } from "@/lib/current-member";
-import { companyChoices, isOwnerOrAdmin } from "@/lib/companies";
+import { companyChoices, isSuperAdmin } from "@/lib/companies";
 import { getDict } from "@/lib/i18n/server";
 import { getMyPhotoSrc } from "@/lib/member-photo";
 import type { Dict } from "@/lib/i18n/dict";
@@ -40,7 +40,7 @@ export async function PageChrome({
         center={center}
         current={{ ...me, photo: await getMyPhotoSrc() }}
         companies={await companyChoices(getDb(), me)}
-        canCreateCompany={isOwnerOrAdmin(me.role)}
+        canCreateCompany={isSuperAdmin(me.role)}
       />
       <main className="scroll-thin min-h-0 flex-1 overflow-y-auto">
         {children}

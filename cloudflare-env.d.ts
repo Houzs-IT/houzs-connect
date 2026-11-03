@@ -57,4 +57,23 @@ interface CloudflareEnv {
   // unset => IT Support is off: no menu entry, and /it-support says so.
   IT_HUB_URL?: string;
   IT_HUB_API_KEY?: string;
+
+  // "1" once chat.hookka.com, chat.theconts.com and chat.2990shome.com answer:
+  // switching company then moves to that company's own address
+  // (lib/company-brand.ts companyOrigin). Unset, everyone stays on this address.
+  COMPANY_DOMAINS_LIVE?: string;
+
+  // Signing in with a Hookka or Conts account (src/lib/erp-logins.ts): each ERP's
+  // origin (a [vars] entry) and Connect's key for its /api/connect/verify-login
+  // (`wrangler secret put HOOKKA_LOGIN_KEY`, the ERP's CONNECT_LOGIN_KEY). Either
+  // unset => that ERP's accounts cannot sign in; Houzs ERP accounts still can.
+  HOOKKA_LOGIN_URL?: string;
+  HOOKKA_LOGIN_KEY?: string;
+  CONTS_LOGIN_URL?: string;
+  CONTS_LOGIN_KEY?: string;
+
+  // Guards POST /api/cron: the dedicated cron worker (cron-worker/) sends this as
+  // `x-cron-key` every 2 min. Unset => the route refuses every call (503), so the
+  // scheduler is off until the secret is set on BOTH this Worker and the cron one.
+  CRON_SECRET?: string;
 }

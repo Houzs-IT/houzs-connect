@@ -8,8 +8,10 @@ import { createChannel, openDm } from "./actions";
 import { AccessChoice } from "./ChannelMenu";
 import { Avatar } from "./parts";
 
+type Person = { id: string; name: string; online: boolean; photo: string | null; dept: string | null; division: string | null };
+
 /** The pencil in the Internal menu: start a DM with a colleague, or make a channel. */
-export function NewChat({ people }: { people: { id: string; name: string; online: boolean; photo: string | null }[] }) {
+export function NewChat({ people }: { people: Person[] }) {
   const router = useRouter();
   const { t } = useShell();
   const L = t.internal;
@@ -29,6 +31,71 @@ export function NewChat({ people }: { people: { id: string; name: string; online
     router.push(`/internal/${res.id}`);
     router.refresh();
   };
+
+  const toggle = (id: string) =>
+    setPicked((s) => {
+      const n = new Set(s);
+      if (n.has(id)) n.delete(id);
+      else n.add(id);
+      return n;
+    });
+  const setMany = (ids: string[], on: boolean) =>
+    setPicked((s) => {
+      const n = new Set(s);
+      for (const id of ids) {
+        if (on) n.add(id);
+        else n.delete(id);
+      }
+      return n;
+    });
+  const countIn = (ids: string[]) => ids.reduce((k, id) => k + (picked.has(id) ? 1 : 0), 0);
+
+  // The member picker, grouped by department and then by ERP division, so a
+  // whole team can be ticked at once. Members with no division sit directly
+  // under their department; members with no department fall in a last bucket.
+  const byName = (a: Person, b: Person) => a.name.localeCompare(b.name);
+  const visible = people.filter((p) => p.name.toLowerCase().includes(filter.trim().toLowerCase()));
+  const depts = new Map<string | null, { direct: Person[]; divisions: Map<string, Person[]> }>();
+  for (const p of visible) {
+    let g = depts.get(p.dept);
+    if (!g) depts.set(p.dept, (g = { direct: [], divisions: new Map() }));
+    if (p.division) g.divisions.set(p.division, [...(g.divisions.get(p.division) ?? []), p]);
+    else g.direct.push(p);
+  }
+  const deptKeys = [...depts.keys()].sort((a, b) => (a === null ? 1 : b === null ? -1 : a.localeCompare(b)));
+
+  const groupHeader = (label: string, ids: string[], sub: boolean) => {
+    const sel = countIn(ids);
+    return (
+      <label className={`flex cursor-pointer items-center gap-2 bg-[var(--color-surface-2)] py-1 pr-2 ${sub ? "pl-6" : "pl-2"}`}>
+        <input
+          type="checkbox"
+          aria-label={L.selectAll}
+          title={L.selectAll}
+          checked={ids.length > 0 && sel === ids.length}
+          ref={(el) => {
+            if (el) el.indeterminate = sel > 0 && sel < ids.length;
+          }}
+          onChange={(e) => setMany(ids, e.target.checked)}
+          className="accent-[var(--color-accent)]"
+        />
+        <span className={`truncate font-semibold uppercase tracking-[0.06em] text-[var(--color-muted)] ${sub ? "text-[10.5px]" : "text-[11px]"}`}>
+          {label}
+        </span>
+        <span className="ml-auto shrink-0 text-[10.5px] tabular-nums text-[var(--color-faint)]">
+          {sel}/{ids.length}
+        </span>
+      </label>
+    );
+  };
+  const personRow = (p: Person, deep: boolean) => (
+    <label key={p.id} className={`flex cursor-pointer items-center gap-2.5 py-1.5 pr-2 hover:bg-[var(--color-surface-2)] ${deep ? "pl-9" : "pl-5"}`}>
+      <input type="checkbox" checked={picked.has(p.id)} onChange={() => toggle(p.id)} className="accent-[var(--color-accent)]" />
+      <Avatar name={p.name} photo={p.photo} size={22} />
+      <span className="min-w-0 flex-1 truncate text-[13px] text-[var(--color-ink)]">{p.name}</span>
+      {p.online && <span className="h-2 w-2 shrink-0 rounded-full bg-[var(--color-success)]" title={L.online} />}
+    </label>
+  );
 
   return (
     <>
@@ -108,28 +175,28 @@ export function NewChat({ people }: { people: { id: string; name: string; online
                 placeholder={L.searchPeople}
                 className="mb-1.5 h-[32px] w-full rounded-[8px] border border-[var(--color-border)] px-2.5 text-[13px] outline-none focus:border-[var(--color-accent)]"
               />
-              <div className="max-h-44 overflow-y-auto rounded-[8px] border border-[var(--color-border-subtle)]">
-                {people
-                  .filter((p) => p.name.toLowerCase().includes(filter.trim().toLowerCase()))
-                  .map((p) => (
-                    <label key={p.id} className="flex cursor-pointer items-center gap-2.5 px-2 py-1.5 hover:bg-[var(--color-surface-2)]">
-                      <input
-                        type="checkbox"
-                        checked={picked.has(p.id)}
-                        onChange={() =>
-                          setPicked((s) => {
-                            const n = new Set(s);
-                            if (n.has(p.id)) n.delete(p.id);
-                            else n.add(p.id);
-                            return n;
-                          })
-                        }
-                        className="accent-[var(--color-accent)]"
-                      />
-                      <Avatar name={p.name} photo={p.photo} size={22} />
-                      <span className="truncate text-[13px] text-[var(--color-ink)]">{p.name}</span>
-                    </label>
-                  ))}
+              <div className="max-h-56 overflow-y-auto rounded-[8px] border border-[var(--color-border-subtle)]">
+                {deptKeys.map((dk) => {
+                  const g = depts.get(dk)!;
+                  const direct = [...g.direct].sort(byName);
+                  const divNames = [...g.divisions.keys()].sort((a, b) => a.localeCompare(b));
+                  const allIds = [...direct, ...divNames.flatMap((d) => g.divisions.get(d)!)].map((p) => p.id);
+                  return (
+                    <div key={dk ?? "__none"}>
+                      {groupHeader(dk ?? L.noDepartment, allIds, false)}
+                      {direct.map((p) => personRow(p, false))}
+                      {divNames.map((dn) => {
+                        const mem = [...g.divisions.get(dn)!].sort(byName);
+                        return (
+                          <div key={dn}>
+                            {groupHeader(dn, mem.map((p) => p.id), true)}
+                            {mem.map((p) => personRow(p, true))}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  );
+                })}
               </div>
             </div>
             <div className="flex justify-end gap-2">

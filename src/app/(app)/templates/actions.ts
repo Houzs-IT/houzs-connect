@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { getDb } from "@/db/client";
 import { getCurrentMember } from "@/lib/current-member";
-import { headerFileProblem, isHeaderMediaFormat } from "@/lib/template-media-limits";
+import { headerFileProblem, isHeaderMediaFormat, type HeaderMediaFormat } from "@/lib/template-media-limits";
 import { saveTemplateMedia } from "@/lib/whatsapp/templateMedia";
 import {
   createTemplate,
@@ -21,12 +21,18 @@ import {
 import { saveTemplateBinding } from "@/lib/whatsapp/templateBindings";
 import { uploadForHandle } from "@/lib/whatsapp/profile";
 import { asBindings, type VarBinding } from "@/lib/automation/vars";
-import { STARTER_TEMPLATES } from "./starterTemplates";
+import { brandForCompanyId } from "@/lib/brand-company";
+import { starterTemplates } from "./starterTemplates";
 
 /** Auth gate. Templates steer what every customer receives, so a caller must
  *  be a signed-in member — the same bar settings mutations use. */
 async function requireMember() {
   return await getCurrentMember();
+}
+
+/** A fallback name for a header file the browser handed over unnamed. */
+function defaultHeaderName(format: HeaderMediaFormat): string {
+  return format === "IMAGE" ? "header.jpg" : format === "VIDEO" ? "header.mp4" : "header.pdf";
 }
 
 export interface TemplateListResult {
@@ -63,7 +69,7 @@ export async function submitTemplate(draft: TemplateDraft): Promise<SubmitResult
     };
   }
   const res = await createTemplate(cfg, draft);
-  revalidatePath("/templates");
+  revalidatePath("/settings/templates");
   return res.ok ? { ok: true, id: res.id, status: res.status } : { ok: false, error: res.error };
 }
 
@@ -82,8 +88,8 @@ export interface ComposerPayload {
   kind?: "standard" | "call_permission" | "carousel";
   /** Carousel cards without their images (for Copy as cURL). */
   cards?: { body: string; buttons: string[] }[];
-  /** An image / PDF header; the file itself goes through submitMediaHeaderTemplate. */
-  headerFormat?: "IMAGE" | "DOCUMENT";
+  /** An image / PDF / video header; the file itself goes through submitMediaHeaderTemplate. */
+  headerFormat?: "IMAGE" | "DOCUMENT" | "VIDEO";
 }
 
 /** The draft a standard / call-permission composer payload describes. */
@@ -155,7 +161,7 @@ export async function submitMediaHeaderTemplate(fd: FormData): Promise<SubmitRes
   if (problem) return { ok: false, error: problem };
 
   const bytes = await file.arrayBuffer();
-  const fileName = file.name || (format === "IMAGE" ? "header.jpg" : "header.pdf");
+  const fileName = file.name || defaultHeaderName(format);
   const up = await uploadForHandle(cfg, bytes, file.type, fileName);
   if (!up.ok) return { ok: false, error: `Header file: ${up.error}` };
 
@@ -204,7 +210,7 @@ export async function setTemplateHeaderFile(fd: FormData): Promise<{ ok: boolean
       language,
       format,
       mimeType: file.type,
-      fileName: file.name || (format === "IMAGE" ? "header.jpg" : "header.pdf"),
+      fileName: file.name || defaultHeaderName(format),
       bytes: await file.arrayBuffer(),
       by: me.id,
     });
@@ -212,7 +218,7 @@ export async function setTemplateHeaderFile(fd: FormData): Promise<{ ok: boolean
     console.warn("[templates] header file not saved:", e);
     return { ok: false, error: "The file could not be saved. Try again." };
   }
-  revalidatePath("/templates");
+  revalidatePath("/settings/templates");
   return { ok: true };
 }
 
@@ -262,7 +268,7 @@ export async function saveBindingAction(
   if (!me) return { ok: false, error: "Not signed in." };
   if (!templateName || !language) return { ok: false, error: "Missing template name or language." };
   await saveTemplateBinding(me.companyId, templateName, language, asBindings(bindings));
-  revalidatePath("/templates");
+  revalidatePath("/settings/templates");
   return { ok: true };
 }
 
@@ -321,7 +327,7 @@ export async function editTemplateAction(
     payload.language,
     asBindings(payload.bindings)
   );
-  revalidatePath("/templates");
+  revalidatePath("/settings/templates");
   return { ok: true };
 }
 
@@ -332,7 +338,7 @@ export async function removeTemplate(formData: FormData): Promise<void> {
   const name = String(formData.get("name") ?? "").trim();
   if (!name) return;
   await deleteTemplate(cfg, name);
-  revalidatePath("/templates");
+  revalidatePath("/settings/templates");
 }
 
 export interface StarterResult {
@@ -344,10 +350,13 @@ export interface StarterResult {
 
 /** Submit every starter template that is not already on the WABA. */
 export async function submitStarterSet(): Promise<StarterResult[]> {
-  if (!(await requireMember())) return [];
+  const me = await requireMember();
+  if (!me) return [];
+  // Worded for the signed-in company's brand (Houzs by default).
+  const templates = starterTemplates(await brandForCompanyId(me.companyId));
   const cfg = templateConfig();
   if (!cfg) {
-    return STARTER_TEMPLATES.map((t) => ({
+    return templates.map((t) => ({
       name: t.name,
       ok: false,
       error: "WhatsApp is not connected yet (WHATSAPP_WABA_ID / WHATSAPP_TOKEN missing).",
@@ -360,7 +369,7 @@ export async function submitStarterSet(): Promise<StarterResult[]> {
   const have = new Set(existing.ok ? existing.templates.map((t) => t.name) : []);
 
   const out: StarterResult[] = [];
-  for (const t of STARTER_TEMPLATES) {
+  for (const t of templates) {
     if (have.has(t.name)) {
       out.push({ name: t.name, ok: true, status: "ALREADY_EXISTS" });
       continue;
@@ -372,7 +381,7 @@ export async function submitStarterSet(): Promise<StarterResult[]> {
         : { name: t.name, ok: false, error: res.error }
     );
   }
-  revalidatePath("/templates");
+  revalidatePath("/settings/templates");
   return out;
 }
 
@@ -386,7 +395,7 @@ export async function submitStarterSet(): Promise<StarterResult[]> {
  * only way to learn about it is to look again.
  */
 export async function syncTemplates(): Promise<void> {
-  revalidatePath("/templates");
+  revalidatePath("/settings/templates");
 }
 
 /**

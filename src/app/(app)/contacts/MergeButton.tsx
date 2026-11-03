@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { SearchableSelect } from "@/components/SearchableSelect";
 import { mergeContacts } from "./actions";
 
 export interface MergeOption {
@@ -74,18 +75,16 @@ export function MergeButton({
           <label className="text-[11px] font-medium uppercase tracking-wide text-[var(--color-faint)]">
             Duplicate to fold in
           </label>
-          <select
+          <SearchableSelect
             value={pick}
-            onChange={(e) => setPick(e.target.value)}
+            onChange={(v) => setPick(v)}
+            aria-label="Duplicate to fold in"
             className="mt-1.5 w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] px-2.5 py-2 text-[13px] text-[var(--color-ink)] outline-none focus:border-[var(--color-accent)]"
-          >
-            <option value="">Choose a contact…</option>
-            {options.map((o) => (
-              <option key={o.id} value={o.id}>
-                {o.label}
-              </option>
-            ))}
-          </select>
+            options={[
+              { value: "", label: "Choose a contact…" },
+              ...options.map((o) => ({ value: o.id, label: o.label })),
+            ]}
+          />
           {error && (
             <p className="mt-2 text-[12px] text-[var(--color-danger)]">{error}</p>
           )}

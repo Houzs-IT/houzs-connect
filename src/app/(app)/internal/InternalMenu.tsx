@@ -4,9 +4,10 @@ import { getDict } from "@/lib/i18n/server";
 import { isAdminRole } from "@/lib/permissions";
 import { photoSrcs } from "@/lib/member-photo";
 import { companyPresence } from "@/lib/presence";
-import { ensureInternal, sidebar } from "./data";
+import { ensureInternal, peopleOrg, sidebar } from "./data";
 import { NavLink } from "./NavLink";
 import { NewChat } from "./NewChat";
+import { PeopleList } from "./PeopleList";
 import { Avatar } from "./parts";
 
 /** Requests to join waiting for me to approve. */
@@ -44,12 +45,23 @@ export async function InternalMenu({ mobile = false }: { mobile?: boolean }) {
   const t = await getDict();
   const L = t.internal;
   await ensureInternal(me.companyId, me.id);
-  const [side, people] = await Promise.all([sidebar(me.companyId, me.id, isAdminRole(me.role)), companyPresence(me.companyId)]);
+  const [side, people, org] = await Promise.all([
+    sidebar(me.companyId, me.id, isAdminRole(me.role)),
+    companyPresence(me.companyId),
+    peopleOrg(me.companyId),
+  ]);
   const online = new Map(people.map((p) => [p.id, p.online]));
   const photos = await photoSrcs([...people.map((p) => p.id), ...side.dms.map((d) => d.otherId)]);
   const others = people
     .filter((p) => p.id !== me.id)
-    .map((p) => ({ id: p.id, name: p.name, online: p.online, photo: photos.get(p.id) ?? null }));
+    .map((p) => ({
+      id: p.id,
+      name: p.name,
+      online: p.online,
+      photo: photos.get(p.id) ?? null,
+      dept: org.get(p.id)?.dept ?? null,
+      division: org.get(p.id)?.division ?? null,
+    }));
 
   // "Houzs Century_Azza" -> "Azza", "Peter Lim" -> "Peter".
   const short = (n: string) => (n.split("_").pop() ?? n).split(" ")[0];
@@ -111,6 +123,7 @@ export async function InternalMenu({ mobile = false }: { mobile?: boolean }) {
               d.unread
             )
           )}
+          <PeopleList people={others} mobile />
           {side.discussions.length > 0 && head(L.discussions)}
           {side.discussions.map((d) =>
             row(
@@ -175,6 +188,8 @@ export async function InternalMenu({ mobile = false }: { mobile?: boolean }) {
             <Badge n={d.unread} />
           </NavLink>
         ))}
+
+        <PeopleList people={others} />
 
         {side.discussions.length > 0 && (
           <>

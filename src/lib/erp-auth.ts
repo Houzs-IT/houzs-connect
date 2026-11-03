@@ -97,3 +97,28 @@ export function roleFromErp(erpRole: string | null | undefined): "OWNER" | "ADMI
 }
 
 export const SESSION_COOKIE = "hc_session";
+
+// ── Moving a session to another company's address (CONNECT-0003) ──
+// Each company has its own address (chat.hookka.com …) and a cookie belongs to
+// one address, so switching company carries the session over with a pass that
+// lives one minute: "h.<memberId>.<expiryMs>.<hmac>". Four parts, so it can
+// never pass verifySession; it is accepted only by /api/session/handoff.
+const HANDOFF_TTL_MS = 60 * 1000;
+
+export async function signHandoff(memberId: string, secret: string): Promise<string> {
+  const payload = `h.${memberId}.${Date.now() + HANDOFF_TTL_MS}`;
+  return `${payload}.${await hmac(secret, payload)}`;
+}
+
+export async function verifyHandoff(token: string, secret: string): Promise<string | null> {
+  const parts = token.split(".");
+  if (parts.length !== 4 || parts[0] !== "h") return null;
+  const [, memberId, expStr, sig] = parts;
+  const expected = await hmac(secret, `h.${memberId}.${expStr}`);
+  if (sig.length !== expected.length) return null;
+  let diff = 0;
+  for (let i = 0; i < sig.length; i++) diff |= sig.charCodeAt(i) ^ expected.charCodeAt(i);
+  if (diff !== 0) return null;
+  if (!Number.isFinite(Number(expStr)) || Number(expStr) < Date.now()) return null;
+  return memberId;
+}

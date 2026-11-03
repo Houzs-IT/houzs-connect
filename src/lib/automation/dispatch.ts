@@ -12,6 +12,8 @@ import {
   webhookEvent,
 } from "@/db/schema";
 import { attrs } from "@/lib/format";
+import { ensureAutomationRunColumns } from "@/db/ensure-automation-run";
+import { removeRepliedEnrollments } from "@/lib/drip";
 import { startRun, resumeRun, supersedeRuns } from "./engine";
 import { getOrCreateConversation } from "@/lib/whatsapp/transport";
 import { runOcr } from "@/lib/ocr";
@@ -257,10 +259,16 @@ export async function handleReceipt(
 
   const ocr = runOcr(receiptText);
   const a = attrs(convo.contact.attributes);
-  const orderTotal = Number(a.order_total ?? a.amount ?? NaN);
-  // Auto-verify only when OCR read an amount that matches the order total.
-  const verified =
-    ocr.amount != null && Number.isFinite(orderTotal) && Math.abs(ocr.amount - orderTotal) < 0.01;
+  // Auto-verify when OCR read an amount that matches what this customer should
+  // pay — the balance owed (`amount`) or the full order value (`order_amount`),
+  // both RM strings the ERP sends (comma-formatted, so strip separators). NOT
+  // `order_total`: that is the ERP's ORDER COUNT (1 / 2 / 3 / 4+), so matching a
+  // payment against it auto-verified almost nothing and let a RM1 receipt
+  // "match" a single-order delivery.
+  const parseRm = (v?: string) => Number(String(v ?? "").replace(/[^\d.]/g, ""));
+  const targets = [parseRm(a.amount), parseRm(a.order_amount)].filter((n) => Number.isFinite(n) && n > 0);
+  const paid = ocr.amount;
+  const verified = paid != null && targets.some((t) => Math.abs(paid - t) < 0.01);
 
   const [payment] = await db
     .insert(paymentTable)
@@ -303,6 +311,7 @@ export async function handleCustomerReply(
   input: { buttonId?: string; text?: string; flow?: { fields: Record<string, string> } }
 ) {
   const db = getDb();
+  await ensureAutomationRunColumns(db);
   const waiting = await db.query.automationRun.findMany({
     where: and(
       eq(automationRunTable.contactId, contactId),
@@ -349,19 +358,27 @@ export async function handleInboundMessage(
   input: { buttonId?: string; text?: string; flow?: { fields: Record<string, string> } }
 ) {
   const db = getDb();
+  await ensureAutomationRunColumns(db);
+  // A reply drops the contact from any drip whose last-sent step is marked
+  // remove-after-replied. Best-effort: a reply must never fail on this.
+  await removeRepliedEnrollments(db, contactId).catch(() => {});
   // Persist what the customer just sent so a NEW_INCOMING_MESSAGE guard can
   // branch on it — resumeRun stores neither. last_button carries a tap (the
   // Delivery Lock reads it); last_message carries the text LOWERCASED for
   // keyword routing like opt-out (the raw text is on the message row). A late
   // tap/keyword after a flow completes starts no waiting run to carry it.
-  if (input.buttonId || input.text) {
-    const c = await db.query.contact.findFirst({ where: eq(contactTable.id, contactId) });
-    if (c) {
-      const merged = { ...attrs(c.attributes) };
-      if (input.buttonId) merged.last_button = input.buttonId;
-      if (input.text) merged.last_message = input.text.toLowerCase().trim();
-      await db.update(contactTable).set({ attributes: merged }).where(eq(contactTable.id, contactId));
-    }
+  //
+  // last_button is THIS message's tap only, cleared by anything else: left in
+  // place, one late Amend tap made the Delivery Lock re-send the locked message
+  // on every later text, photo or form from that customer (HC-0189,
+  // HC-SO-013107, 2026-10-30).
+  const c = await db.query.contact.findFirst({ where: eq(contactTable.id, contactId) });
+  if (c) {
+    const merged = { ...attrs(c.attributes) };
+    if (input.buttonId) merged.last_button = input.buttonId;
+    else delete merged.last_button;
+    if (input.text) merged.last_message = input.text.toLowerCase().trim();
+    await db.update(contactTable).set({ attributes: merged }).where(eq(contactTable.id, contactId));
   }
   const resumed = await handleCustomerReply(contactId, input);
   if (resumed > 0) return { resumed, started: 0 };

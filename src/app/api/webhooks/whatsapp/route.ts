@@ -15,6 +15,7 @@ import { handleInboundMessage } from "@/lib/automation/dispatch";
 import { loadRoutingTable, pickInboundChannel } from "@/lib/whatsapp/channels";
 import { maybeAutoReply } from "@/lib/auto-reply/run";
 import { mustRefuse, signatureState, type SignatureState } from "@/lib/whatsapp/signature";
+import { MEDIA_TYPE, describeNonText } from "@/lib/whatsapp/inbound-text";
 
 /**
  * Whether signature enforcement has armed (see mustRefuse): some delivery in the
@@ -85,6 +86,14 @@ interface WaValue {
     // Amend taps on a delivery/amend opener (the only way those first messages can
     // be sent business-initiated) are dropped and the run never resumes.
     button?: { payload?: string; text?: string };
+    audio?: { id?: string; mime_type?: string; voice?: boolean };
+    video?: { id?: string; mime_type?: string; caption?: string };
+    sticker?: { id?: string; mime_type?: string; animated?: boolean };
+    location?: { latitude?: number; longitude?: number; name?: string; address?: string };
+    contacts?: Array<{ name?: { formatted_name?: string }; phones?: Array<{ phone?: string; wa_id?: string }> }>;
+    reaction?: { message_id?: string; emoji?: string };
+    // Set when the customer swipe-replied to a message: `id` is its wamid.
+    context?: { id?: string };
   }>;
   statuses?: Array<{ id: string; status: string }>;
 }
@@ -280,27 +289,38 @@ export async function POST(req: NextRequest) {
               }
             })()
           : null;
-        const media = m.image ?? m.document;
+        const media = m.image ?? m.document ?? m.video ?? m.audio ?? m.sticker;
+        const caption = m.image?.caption ?? m.document?.caption ?? m.video?.caption;
         const isMedia = m.type === "image" || m.type === "document";
+        const mediaType = MEDIA_TYPE[m.type];
         const text =
           m.text?.body ??
           m.interactive?.button_reply?.title ??
           m.interactive?.list_reply?.title ??
           m.button?.text ??
           (flowFields ? "[form submitted]" : null) ??
-          media?.caption ??
+          caption ??
           (isMedia ? "[attachment]" : "");
 
-        const inbound = await recordInbound(convo.id, text, {
+        // A button tap also carries `context` (the template it was on), so the
+        // quote is kept for typed replies and media only — otherwise every
+        // Confirm / Amend tap would draw the opener above it.
+        const replyTo = !buttonId && !flowFields ? m.context?.id : undefined;
+
+        // Flows still get `text` exactly as before: a sticker or a reaction is
+        // not an answer to "why do you want to postpone?".
+        const inbound = await recordInbound(convo.id, text || describeNonText(m), {
           waMessageId: m.id ?? null,
-          type: isMedia ? (m.type === "document" ? "DOCUMENT" : "IMAGE") : buttonId || flowFields ? "INTERACTIVE" : "TEXT",
+          type: mediaType ?? (buttonId || flowFields ? "INTERACTIVE" : "TEXT"),
           interactivePayload: flowFields
             ? { kind: "flow_reply", fields: flowFields }
             : buttonId
               ? { tapped: buttonId }
               : media?.id
-                ? { mediaId: media.id, mimeType: media.mime_type }
-                : undefined,
+                ? { mediaId: media.id, mimeType: media.mime_type, ...(replyTo ? { replyTo } : {}) }
+                : replyTo
+                  ? { replyTo }
+                  : undefined,
         });
 
         if (isMedia) {
@@ -312,7 +332,7 @@ export async function POST(req: NextRequest) {
             conversationId: convo.id,
             orderRef: (attrs(contact.attributes).ref_1 as string) ?? null,
             mediaId: media?.id ?? null,
-            caption: media?.caption ?? null,
+            caption: caption ?? null,
           });
         }
 

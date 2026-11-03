@@ -9,6 +9,7 @@ import { IconClose, IconDots, IconSearch } from "@/components/icons";
 import { ColumnsList, DataCount, DataHead, DataMenus, WrapButton, useColumnLayout, useDataTable, type DataColumn, type DataRow } from "@/components/DataTable";
 import { bulkBlockContacts, bulkTagContacts, mergeContacts, setContactBlocked } from "./actions";
 import { DeleteContactButton } from "./DeleteContactButton";
+import { SearchableSelect } from "@/components/SearchableSelect";
 
 export type ContactRow = {
   id: string;
@@ -106,29 +107,23 @@ function FilterSelect({
   const on = !!value;
   const shown = on ? `${label}: ${options.find((o) => o.value === value)?.label ?? value}` : label;
   return (
-    <label
-      className={`relative flex h-[34px] shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border pl-3 pr-2.5 text-[12.5px] font-medium ${
+    <SearchableSelect
+      aria-label={label}
+      value={value}
+      onChange={onChange}
+      options={[{ value: "", label: anyLabel }, ...options]}
+      className={`relative flex h-[34px] shrink-0 cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-full border pl-3 pr-2.5 text-[12.5px] font-medium ${
         on
           ? "border-[var(--color-accent)] bg-[var(--color-accent-soft)] text-[var(--color-accent-ink)]"
           : "border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--color-ink)] hover:bg-[var(--color-surface-2)]"
       }`}
-    >
-      {shown}
-      <span className="text-[9px] text-[var(--color-faint)]">▾</span>
-      <select
-        aria-label={label}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        className="absolute inset-0 cursor-pointer opacity-0"
-      >
-        <option value="">{anyLabel}</option>
-        {options.map((o) => (
-          <option key={o.value} value={o.value}>
-            {o.label}
-          </option>
-        ))}
-      </select>
-    </label>
+      triggerContent={
+        <>
+          {shown}
+          <span className="text-[9px] text-[var(--color-faint)]">▾</span>
+        </>
+      }
+    />
   );
 }
 

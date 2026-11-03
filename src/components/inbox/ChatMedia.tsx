@@ -4,7 +4,8 @@ import { useState } from "react";
 
 /**
  * A picture or file inside a chat bubble. Images show inline (click opens the
- * full size in a new tab); other files show as a named file to open. Meta only
+ * full size in a new tab), voice notes and videos get a player; other files
+ * show as a named file to open. Meta only
  * keeps media for a limited time, so a picture that no longer loads says so
  * instead of showing a broken image.
  */
@@ -16,12 +17,23 @@ export function ChatMedia({
   openLabel,
 }: {
   src: string;
-  kind: "IMAGE" | "DOCUMENT";
+  kind: "IMAGE" | "DOCUMENT" | "AUDIO" | "VIDEO";
   fileName: string | null;
   goneLabel: string;
   openLabel: string;
 }) {
   const [gone, setGone] = useState(false);
+  // A voice note is Ogg Opus, which older Safari cannot play: fall back to the
+  // file link rather than claiming the file is gone.
+  const [cannotPlay, setCannotPlay] = useState(false);
+
+  if (kind === "AUDIO" && !cannotPlay) {
+    return <audio controls preload="metadata" src={src} onError={() => setCannotPlay(true)} className="max-w-full" />;
+  }
+
+  if (kind === "VIDEO" && !cannotPlay) {
+    return <video controls preload="metadata" src={src} onError={() => setCannotPlay(true)} className="max-h-72 max-w-full rounded-[10px]" />;
+  }
 
   if (kind === "IMAGE" && !gone) {
     return (

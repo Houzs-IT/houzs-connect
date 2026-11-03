@@ -8,6 +8,7 @@
 import { useEffect, useRef, useState } from "react";
 import { assignConversation, setConversationStatus } from "@/app/actions";
 import { useShell } from "@/components/shell/ShellProvider";
+import { SearchableSelect } from "@/components/SearchableSelect";
 
 type Named = { id: string; name: string };
 
@@ -18,10 +19,6 @@ export const secondaryBtn =
   "flex h-[34px] items-center whitespace-nowrap rounded-[8px] border border-[var(--color-border)] bg-[var(--color-surface)] px-3.5 text-[13px] font-semibold text-[var(--color-ink)] transition-colors hover:border-[var(--color-border-strong)] hover:bg-[var(--color-surface-2)]";
 export const primaryBtn =
   "flex h-[34px] items-center whitespace-nowrap rounded-[8px] bg-[var(--color-accent)] px-3.5 text-[13px] font-semibold text-white shadow-[var(--shadow-primary)] transition-colors hover:bg-[var(--color-accent-hi)]";
-
-function submitOnChange(e: React.ChangeEvent<HTMLSelectElement>) {
-  e.currentTarget.form?.requestSubmit();
-}
 
 export function AssignButton({
   conversationId,
@@ -65,22 +62,32 @@ export function AssignButton({
           <form action={assignConversation} className="flex flex-col gap-1.5">
             <input type="hidden" name="conversationId" value={conversationId} />
             <label className="text-[12px] font-semibold text-[var(--color-ink)]">{s.agent}</label>
-            <select name="assignedAgentId" defaultValue={agentId ?? ""} onChange={submitOnChange} className={selectCls}>
-              <option value="">{s.unassignedOpt}</option>
-              {members.map((m) => (
-                <option key={m.id} value={m.id}>{m.name}</option>
-              ))}
-            </select>
+            <SearchableSelect
+              name="assignedAgentId"
+              defaultValue={agentId ?? ""}
+              submitOnChange
+              aria-label={s.agent}
+              className={selectCls}
+              options={[
+                { value: "", label: s.unassignedOpt },
+                ...members.map((m) => ({ value: m.id, label: m.name })),
+              ]}
+            />
           </form>
           <form action={assignConversation} className="flex flex-col gap-1.5">
             <input type="hidden" name="conversationId" value={conversationId} />
             <label className="text-[12px] font-semibold text-[var(--color-ink)]">{s.department}</label>
-            <select name="assignedDepartmentId" defaultValue={departmentId ?? ""} onChange={submitOnChange} className={selectCls}>
-              <option value="">{s.none}</option>
-              {departments.map((d) => (
-                <option key={d.id} value={d.id}>{d.name}</option>
-              ))}
-            </select>
+            <SearchableSelect
+              name="assignedDepartmentId"
+              defaultValue={departmentId ?? ""}
+              submitOnChange
+              aria-label={s.department}
+              className={selectCls}
+              options={[
+                { value: "", label: s.none },
+                ...departments.map((d) => ({ value: d.id, label: d.name })),
+              ]}
+            />
           </form>
         </div>
       )}

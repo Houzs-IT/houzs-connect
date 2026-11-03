@@ -5,6 +5,7 @@ import { useSearchParams } from "next/navigation";
 import { useRef, useState } from "react";
 import { ColumnsButton, DataCount, DataHead, DataMenus, DataSearch, WrapButton, useColumnLayout, useDataTable, type DataColumn, type DataRow } from "@/components/DataTable";
 import { IconClose } from "@/components/icons";
+import { SearchableSelect } from "@/components/SearchableSelect";
 import { useShell } from "@/components/shell/ShellProvider";
 import { formatPhone, initials, tint } from "@/lib/format";
 
@@ -266,20 +267,16 @@ export function MessagesTab({
 
       <div className="mt-auto flex items-center gap-2 px-4 py-3 text-[12px] text-[var(--color-muted)]">
         {L.show}
-        <select
-          value={size}
-          onChange={(e) => {
-            setSize(Number(e.target.value));
+        <SearchableSelect
+          value={String(size)}
+          onChange={(v) => {
+            setSize(Number(v));
             setPage(0);
           }}
+          aria-label={L.show}
           className="h-[30px] rounded-[8px] border border-[var(--color-border)] bg-[var(--color-surface)] px-2 text-[12.5px] text-[var(--color-ink)]"
-        >
-          {PAGE_SIZES.map((n) => (
-            <option key={n} value={n}>
-              {n}
-            </option>
-          ))}
-        </select>
+          options={PAGE_SIZES.map((n) => ({ value: String(n), label: String(n) }))}
+        />
         <div className="ml-auto flex items-center gap-1">
           <PageBtn disabled={cur === 0} onClick={() => setPage(cur - 1)}>
             ←

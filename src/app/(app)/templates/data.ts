@@ -5,7 +5,10 @@ import { contact as contactTable, contactField, form } from "@/db/schema";
 import { attrs } from "@/lib/format";
 import { BUILT_IN_FIELDS, templateBindingGaps } from "@/lib/automation/vars";
 import { isLive } from "@/lib/whatsapp/cloud-api";
-import { DEMO_TEMPLATES } from "@/lib/whatsapp/demo-templates";
+import { getCurrentMember } from "@/lib/current-member";
+import { brandForCompanyId } from "@/lib/brand-company";
+import { DEFAULT_BRAND } from "@/lib/brand";
+import { demoTemplates } from "@/lib/whatsapp/demo-templates";
 import { listTemplates, templateConfig, type RemoteTemplate } from "@/lib/whatsapp/templates";
 import { bindingKey, loadTemplateBindings, type StoredBinding } from "@/lib/whatsapp/templateBindings";
 import type { FieldOption, SampleContact } from "./types";
@@ -21,8 +24,14 @@ export type TemplateList = { configured: boolean; templates: RemoteTemplate[]; e
 export const loadTemplateList = cache(async (): Promise<TemplateList> => {
   const cfg = templateConfig();
   // DEMO mode shows sample templates so the page can be tried before Meta is
-  // connected; a LIVE install without Meta settings still says so.
-  if (!cfg) return isLive() ? { configured: false, templates: [] } : { configured: true, templates: DEMO_TEMPLATES };
+  // connected; a LIVE install without Meta settings still says so. The samples
+  // are worded for the current company's brand (Houzs by default).
+  if (!cfg) {
+    if (isLive()) return { configured: false, templates: [] };
+    const me = await getCurrentMember();
+    const brand = me ? await brandForCompanyId(me.companyId) : DEFAULT_BRAND;
+    return { configured: true, templates: demoTemplates(brand) };
+  }
   const res = await listTemplates(cfg);
   if (!res.ok) return { configured: true, templates: [], error: res.error };
   return { configured: true, templates: res.templates };
