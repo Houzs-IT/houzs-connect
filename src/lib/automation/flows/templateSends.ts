@@ -122,10 +122,10 @@ export const deliveryCompletedFlow = templateFlow({
 //
 // Template `overdue_order_status_update` has FOUR positional params:
 //   {{1}} full_name, {{2}} order ref, {{3}} amend reason — the ERP injects
-//   `amend_reason` (the DP "amend reason" column) on the trigger — and {{4}} a
+//   `amend_date_reason` (the DP "amend reason" column) on the trigger — and {{4}} a
 //   FIXED timeframe string. The template keeps the {{4}} slot, so the send must
 //   still supply it; it is a literal here ("in next 2 weeks"), not a token. If
-//   the amend reason is not injected, {{3}} sends the literal "{amend_reason}".
+//   the amend reason is not injected, {{3}} sends the literal "{amend_date_reason}".
 export const overdueOrderFlow = templateFlow({
   key: "overdue_order",
   name: "Overdue Order",
@@ -133,11 +133,11 @@ export const overdueOrderFlow = templateFlow({
     "Production-delay heads-up for a late order (one-way): overdue_order_status_update, full_name + order ref + amend reason; {{4}} fixed 'in next 2 weeks'. No buttons.",
   event: "overdue_order",
   templateName: "overdue_order_status_update",
-  params: ["{full_name}", "{ref_1}", "{amend_reason}", "in next 2 weeks"],
+  params: ["{full_name}", "{ref_1}", "{amend_date_reason}", "in next 2 weeks"],
   message: `Hi {full_name}, this is the Customer Service Team from Houzs Century.
 
 We sincerely apologize for the delay with your order *{ref_1}*.
-Due to *{amend_reason}*, your order requires additional time to ensure everything meets our standards. Our team is actively working on your items, and we expect to deliver your order within the next delivery timeframe *in next 2 weeks*. Our logistics team will contact you shortly to confirm the exact date and time. Thank you for your patience and for giving us the opportunity to make this right.
+Due to *{amend_date_reason}*, your order requires additional time to ensure everything meets our standards. Our team is actively working on your items, and we expect to deliver your order within the next delivery timeframe *in next 2 weeks*. Our logistics team will contact you shortly to confirm the exact date and time. Thank you for your patience and for giving us the opportunity to make this right.
 
 Thank you for your patience and understanding! 🙏`,
 });
