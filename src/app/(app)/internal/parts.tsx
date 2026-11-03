@@ -2,6 +2,7 @@ import Link from "next/link";
 import { PersonAvatar } from "@/components/PersonAvatar";
 import { initials, tint } from "@/lib/format";
 import { fmt, type Dict } from "@/lib/i18n/dict";
+import { Attachments } from "./Attachments";
 import type { Card, ChatMessage } from "./data";
 
 /*
@@ -141,6 +142,9 @@ export function MessageRow({
             {hhmm(m.createdAt)}
           </span>
         </div>
+        {m.attachments.length > 0 && (
+          <Attachments items={m.attachments} labels={{ download: L.download, image: L.imageAlt, preview: L.preview, noPreview: L.noPreview }} />
+        )}
         {m.body && <RichBody body={m.body} names={names} />}
         {m.systemAction && (
           <div className="mt-1.5 inline-flex items-center gap-1.5 rounded-[8px] bg-[var(--color-success-soft)] px-2.5 py-1.5 text-[12.5px] font-semibold text-[var(--color-success)]">

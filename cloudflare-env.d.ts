@@ -62,4 +62,29 @@ interface CloudflareEnv {
   // `x-cron-key` every 2 min. Unset => the route refuses every call (503), so the
   // scheduler is off until the secret is set on BOTH this Worker and the cron one.
   CRON_SECRET?: string;
+
+  // R2 bucket for Internal staff-chat attachments (images + files). prod ->
+  // houzs-connect-files, staging -> houzs-connect-files-staging, and a local
+  // (miniflare) bucket under `next dev`. See src/app/(app)/internal/media and
+  // the postAttachmentMessage action. Structural type only, to keep this file
+  // free of @cloudflare/workers-types.
+  FILES?: R2BucketLike;
+}
+
+interface R2ObjectLike {
+  readonly size: number;
+  readonly httpMetadata?: { contentType?: string };
+}
+interface R2ObjectBodyLike extends R2ObjectLike {
+  readonly body: ReadableStream;
+  arrayBuffer(): Promise<ArrayBuffer>;
+}
+interface R2BucketLike {
+  get(key: string): Promise<R2ObjectBodyLike | null>;
+  put(
+    key: string,
+    value: ArrayBuffer | ArrayBufferView | ReadableStream | string,
+    options?: { httpMetadata?: { contentType?: string }; customMetadata?: Record<string, string> }
+  ): Promise<R2ObjectLike>;
+  delete(key: string | string[]): Promise<void>;
 }

@@ -68,6 +68,15 @@ binding = "ASSETS"
 binding = "ERP"
 service = "autocount-sync-api"
 
+# Internal staff chat attachments (images + files) live here. The bucket was
+# created with `wrangler r2 bucket create houzs-connect-files`; the binding name
+# is what the code uses (getCloudflareContext().env.FILES), independent of the
+# bucket name, so staging can point the same FILES binding at its own bucket.
+# Under `next dev` this is a local (miniflare) R2 — no remote bucket needed.
+[[r2_buckets]]
+binding = "FILES"
+bucket_name = "houzs-connect-files"
+
 [vars]
 # LIVE since 2026-08-15: the Meta app, WABA and number are set up and the four
 # WHATSAPP_* secrets are on the Worker, so sends go out over the Cloud API for
@@ -146,3 +155,11 @@ enabled = true
 binding = "HYPERDRIVE"
 id = "2d7e54e6366a4190985cd2bfb4a6759c"
 localConnectionString = "postgresql://postgres:postgres@localhost:5432/postgres"
+
+# Staging's own attachments bucket (bindings are not inherited from the top
+# level). Same FILES binding name, separate bucket, so staging uploads never
+# touch production files. Created with
+# `wrangler r2 bucket create houzs-connect-files-staging`.
+[[env.staging.r2_buckets]]
+binding = "FILES"
+bucket_name = "houzs-connect-files-staging"
