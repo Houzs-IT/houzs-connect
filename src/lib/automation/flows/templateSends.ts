@@ -3,8 +3,9 @@ import { buildTemplateSendGraph } from "./shared";
 
 /**
  * The "send one approved template" WS-A flows (decision B): reminders, driver
- * info, delivery-completed. Each fires by name (trigger WEBHOOK) and sends a
- * single button-less template via the send_template node, then ends.
+ * info, delivery-completed, service-case-received. Each fires by name (trigger
+ * WEBHOOK) and sends a single button-less template via the send_template node,
+ * then ends.
  *
  * Bodies below mirror the APPROVED templates on the Connect Templates page
  * (chat.houzscentury.com/templates) and are the DEMO/inbox preview; the real
@@ -23,6 +24,8 @@ function templateFlow(opts: {
   templateName: string;
   params: string[];
   message: string;
+  /** Optional contact tag applied after the send (add_tag node). */
+  tag?: string;
 }): SeedFlow {
   return {
     key: opts.key,
@@ -32,7 +35,12 @@ function templateFlow(opts: {
     triggerConfig: { source: "erp", event: opts.event },
     forms: [],
     build: () =>
-      buildTemplateSendGraph({ templateName: opts.templateName, params: opts.params, message: opts.message }),
+      buildTemplateSendGraph({
+        templateName: opts.templateName,
+        params: opts.params,
+        message: opts.message,
+        tag: opts.tag,
+      }),
   };
 }
 
@@ -104,4 +112,28 @@ export const deliveryCompletedFlow = templateFlow({
   templateName: "delivery_completed_thanks",
   params: ["{full_name}", "{ref_1}"],
   message: `Hi {full_name}, This is a confirmation that your order {ref_1} was successfully delivered today. Thank you for your understanding and for purchasing our products. We sincerely appreciate your support.`,
+});
+
+// After-sales (ASSR) acknowledgement — the FIRST message a customer gets when a
+// Service Case is created in the ERP, before any date is arranged (that later
+// confirm/amend conversation is the separate Service Arrangement flow). The ERP
+// fires this by name on create with full_name + ref_1 (the ASSR/case number).
+// Button-less, one-shot: reassure, then wait for a human — no callback. Tags the
+// contact "service" on send so the inbox can filter service-case customers.
+export const serviceCaseReceivedFlow = templateFlow({
+  key: "service_case_received",
+  name: "Service Case Received",
+  description:
+    "After-sales acknowledgement sent when an ASSR (service case) is created: hc_service_case_received, full_name + case ref. Tags the contact service.",
+  event: "service_case_received",
+  templateName: "hc_service_case_received",
+  params: ["{full_name}", "{ref_1}"],
+  tag: "service",
+  message: `Hi {full_name} 👋 This is Houzs Century.
+
+We've received your service request (Service Case *{ref_1}*) and our after-sales team has already started arranging it for you.
+
+We'll keep you posted and reach out as soon as there's an update. If there's anything more you'd like to add, just reply here anytime.
+
+Thank you for your patience! 🙏`,
 });
