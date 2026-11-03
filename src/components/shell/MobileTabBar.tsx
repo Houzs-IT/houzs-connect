@@ -7,6 +7,7 @@ import { logout } from "@/app/login/actions";
 import {
   IconAutomation,
   IconClose,
+  IconContacts,
   IconDashboard,
   IconInbox,
   IconInternal,
@@ -22,8 +23,9 @@ type Tab = { href: string; label: string; Icon: NavItem["Icon"]; match: string[]
 
 /** Modules reached through "More" rather than a tab of their own. */
 const MORE_KEYS = ["contacts", "campaigns", "drip", "payments", "logs"] as const;
-const moreItems = (itSupport: boolean): NavItem[] => [
-  ...NAV.filter((n) => (MORE_KEYS as readonly string[]).includes(n.key)),
+const moreItems = (itSupport: boolean, modules: readonly string[], tabs: readonly string[]): NavItem[] => [
+  // Only the modules this person may open, and none already on a tab.
+  ...NAV.filter((n) => (MORE_KEYS as readonly string[]).includes(n.key) && modules.includes(n.key) && !tabs.includes(n.href)),
   ...(itSupport ? [IT_SUPPORT_NAV] : []),
   SETTINGS_NAV,
 ];
@@ -63,13 +65,23 @@ function TabCell({
  * Hidden inside an open conversation (`/inbox/<id>`): the thread carries its own
  * back control and needs the height for the composer.
  */
-export function MobileTabBar({ unread, internalUnread, itSupport }: { unread?: number; internalUnread?: number; itSupport?: boolean }) {
+export function MobileTabBar({
+  unread,
+  internalUnread,
+  itSupport,
+  modules,
+}: {
+  unread?: number;
+  internalUnread?: number;
+  itSupport?: boolean;
+  /** The modules this person may open (lib/full-access.ts myModules). */
+  modules: readonly string[];
+}) {
   const path = usePathname();
   const params = useSearchParams();
   const { t } = useShell();
   const [open, setOpen] = useState(false);
   const itUnread = useItUnread(Boolean(itSupport));
-  const MORE = moreItems(Boolean(itSupport));
 
   useEffect(() => {
     if (!open) return;
@@ -83,12 +95,20 @@ export function MobileTabBar({ unread, internalUnread, itSupport }: { unread?: n
   if (/^\/(inbox|internal)\/[^/]+/.test(path) && !path.startsWith("/internal/search")) return null;
   if (path === "/payments" && params.get("p")) return null;
 
-  const tabs: Tab[] = [
-    { href: "/inbox", label: t.tab.inbox, Icon: IconInbox, match: ["/inbox"], badge: unread },
-    { href: "/internal", label: t.tab.internal, Icon: IconInternal, match: ["/internal"], badge: internalUnread },
-    { href: "/dashboard", label: t.tab.home, Icon: IconDashboard, match: ["/dashboard"] },
-    { href: "/automations", label: t.tab.flows, Icon: IconAutomation, match: ["/automations"] },
-  ];
+  // Four tabs from the modules this person has, in this order; the rest go under More.
+  const tabs: Tab[] = (
+    [
+      ["inbox", { href: "/inbox", label: t.tab.inbox, Icon: IconInbox, match: ["/inbox"], badge: unread }],
+      ["internal", { href: "/internal", label: t.tab.internal, Icon: IconInternal, match: ["/internal"], badge: internalUnread }],
+      ["dashboard", { href: "/dashboard", label: t.tab.home, Icon: IconDashboard, match: ["/dashboard"] }],
+      ["automations", { href: "/automations", label: t.tab.flows, Icon: IconAutomation, match: ["/automations"] }],
+      ["contacts", { href: "/contacts", label: t.nav.contacts, Icon: IconContacts, match: ["/contacts"] }],
+    ] as [string, Tab][]
+  )
+    .filter(([k]) => modules.includes(k))
+    .slice(0, 4)
+    .map(([, tab]) => tab);
+  const MORE = moreItems(Boolean(itSupport), modules, tabs.map((x) => x.href));
   const on = (m: string[]) => m.some((p) => path === p || path.startsWith(p + "/"));
   const moreOn = MORE.some((n) => isActive(n, path));
 

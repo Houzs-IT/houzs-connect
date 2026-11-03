@@ -20,6 +20,7 @@ export function TeamClient({
   L,
   roles,
   canSuper,
+  canManage,
   requests,
   removed,
   meEmail,
@@ -33,6 +34,8 @@ export function TeamClient({
   /** Role code → its name (t.role). */
   roles: Record<string, string>;
   canSuper: boolean;
+  /** The viewer may change roles and company access: a Super Admin. */
+  canManage: boolean;
   requests: React.ReactNode;
 }) {
   const columns: DataColumn[] = [
@@ -94,11 +97,11 @@ export function TeamClient({
             </span>
           </div>
         ),
-        role: <RoleSelect email={p.email} name={p.name} role={p.role} canSuper={canSuper} erpRole={p.erpRole} setHere={p.roleSetHere} />,
+        role: <RoleSelect email={p.email} name={p.name} role={p.role} canSuper={canSuper} canManage={canManage} erpRole={p.erpRole} setHere={p.roleSetHere} />,
         department: <span className="text-[var(--color-ink)]">{p.department ?? "—"}</span>,
         division: <span className="text-[var(--color-ink)]">{p.division ?? "—"}</span>,
         reportsTo: <span className="text-[var(--color-ink)]">{p.reportsTo ?? "—"}</span>,
-        ...Object.fromEntries(companies.map((co) => [`co:${co.id}`, accessCell(p, co, L)])),
+        ...Object.fromEntries(companies.map((co) => [`co:${co.id}`, accessCell(p, co, L, canManage)])),
         actions:
           p.email.toLowerCase() === meEmail.toLowerCase() || (p.role === "SUPER_ADMIN" && !canSuper) ? null : (
             <RemoveAccess email={p.email} name={p.name} />
@@ -163,8 +166,8 @@ export function TeamClient({
   );
 }
 
-/** One company's access tick: locked when the ERP granted it, a toggle otherwise. */
-function accessCell(p: Person, co: TeamCompany, L: Dict["set"]) {
+/** One company's access tick: locked when the ERP granted it, a toggle for a Super Admin otherwise. */
+function accessCell(p: Person, co: TeamCompany, L: Dict["set"], canManage: boolean) {
   const a = p.access[co.id];
   const on = !!a;
   if (a?.fromErp) {
@@ -172,6 +175,18 @@ function accessCell(p: Person, co: TeamCompany, L: Dict["set"]) {
       <span className="inline-flex flex-col items-center" title="Granted by the Houzs ERP">
         <span className="grid h-[22px] w-[22px] place-items-center rounded-[6px] border border-[#e8c48e] bg-[#fdf1e0] text-[12px] text-[var(--color-pastel-orange-ink)]">✓</span>
         <span className="mt-0.5 text-[9px] font-semibold tracking-[0.06em] text-[var(--color-pastel-orange-ink)]">{L.erp}</span>
+      </span>
+    );
+  }
+  if (!canManage) {
+    return (
+      <span
+        aria-label={`${p.name} access to ${co.name}: ${on ? "yes" : "no"}`}
+        className={`inline-grid h-[22px] w-[22px] place-items-center rounded-[6px] border text-[12px] ${
+          on ? "border-[var(--color-border-strong)] bg-[var(--color-surface-2)] text-[var(--color-muted)]" : "border-[var(--color-border)] bg-white text-transparent"
+        }`}
+      >
+        ✓
       </span>
     );
   }

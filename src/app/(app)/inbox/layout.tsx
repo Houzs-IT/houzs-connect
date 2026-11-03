@@ -1,7 +1,7 @@
 import { Suspense } from "react";
 import { getDb } from "@/db/client";
 import { getCurrentMember } from "@/lib/current-member";
-import { companyChoices, isOwnerOrAdmin } from "@/lib/companies";
+import { companyChoices, isSuperAdmin } from "@/lib/companies";
 import { getDict } from "@/lib/i18n/server";
 import { Topbar } from "@/components/Topbar";
 import { ConversationList } from "@/components/inbox/ConversationList";
@@ -63,7 +63,7 @@ export default async function InboxLayout({
           mobileTitle={t.nav.inbox}
           current={me}
           companies={await companyChoices(getDb(), me)}
-          canCreateCompany={isOwnerOrAdmin(me.role)}
+          canCreateCompany={isSuperAdmin(me.role)}
         />
       </InboxTopbarSlot>
       <InboxPanes

@@ -43,6 +43,11 @@ export const NAV: NavItem[] = [
   { key: "logs", href: "/logs", Icon: IconLogs },
 ];
 
+/** The rail's modules this person may open (lib/full-access.ts myModules). */
+export function navFor(modules: readonly string[]): NavItem[] {
+  return NAV.filter((n) => modules.includes(n.key));
+}
+
 /**
  * IT Support: report a problem with Connect to IT. At the foot of the rail above
  * Settings, and in the phone's More sheet; shown only where the Worker has the

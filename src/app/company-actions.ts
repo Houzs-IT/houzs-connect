@@ -1,14 +1,15 @@
 "use server";
 
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { getDb } from "@/db/client";
 import { member } from "@/db/schema";
 import { getCurrentMember } from "@/lib/current-member";
-import { companyChoices, isOwnerOrAdmin } from "@/lib/companies";
+import { companyChoices, isSuperAdmin } from "@/lib/companies";
 import { createConnectCompany } from "@/lib/whatsapp/number-assignment";
-import { SESSION_COOKIE, signSession } from "@/lib/erp-auth";
+import { SESSION_COOKIE, signHandoff, signSession } from "@/lib/erp-auth";
+import { brandForCompany, companyOrigin } from "@/lib/company-brand";
 
 /** Re-sign this browser's session as one member row — the single place the
  *  session cookie is written, so switching and creating a company sign in the
@@ -39,7 +40,7 @@ const SECTIONS = new Set([
   "templates", "forms", "payments", "logs", "settings",
 ]);
 
-export async function switchCompany(formData: FormData) {
+export async function switchCompany(formData: FormData): Promise<{ go: string } | void> {
   const targetId = String(formData.get("companyId") ?? "");
   const section = String(formData.get("next") ?? "");
   const next = SECTIONS.has(section) ? `/${section}` : "/inbox";
@@ -53,8 +54,8 @@ export async function switchCompany(formData: FormData) {
   const secret = getCloudflareContext().env.SESSION_SECRET;
   if (!secret) redirect("/inbox");
 
-  // A Connect-only company has no ERP sync to create the row, so an owner or
-  // admin gets one on first entry, carrying the role they already hold. For an
+  // A Connect-only company has no ERP sync to create the row, so a Super Admin
+  // gets one on first entry, carrying the role they already hold. For an
   // ERP company the row already exists (that is why it was a choice) and is left
   // exactly as the sync wrote it.
   const [row] = await db
@@ -74,6 +75,18 @@ export async function switchCompany(formData: FormData) {
 
   if (!row?.active) redirect("/inbox");
 
+  // Each company has its own address (CONNECT-0003): move there, carrying the
+  // session over, and leave this address signed in where it was.
+  const env = getCloudflareContext().env;
+  const origin = companyOrigin(brandForCompany(choice.name).key, (await headers()).get("host"), env.COMPANY_DOMAINS_LIVE === "1");
+  // Returned, not redirected: a server action's redirect to another address is
+  // followed in the background and the page never moves (seen locally), so the
+  // switcher sends the browser there itself (TopbarControls goToCompany).
+  if (origin) {
+    const t = await signHandoff(row.id, secret);
+    return { go: `${origin}/api/session/handoff?t=${encodeURIComponent(t)}&next=${encodeURIComponent(next)}` };
+  }
+
   await setSessionCookie(row.id, secret);
   redirect(next);
 }
@@ -83,7 +96,7 @@ export async function switchCompany(formData: FormData) {
  *
  * This is the "number later" path: a company can exist, take contacts and be
  * worked in before any WhatsApp number is assigned (Settings → Numbers attaches
- * one to the already-existing company afterwards). Creation is owner/admin only,
+ * one to the already-existing company afterwards). Creation is Super Admin only,
  * the same bar companyChoices() uses to let them into a Connect-only company —
  * re-checked here because this is a public endpoint, not guarded by the UI.
  *
@@ -93,8 +106,8 @@ export async function switchCompany(formData: FormData) {
 export async function createCompany(rawName: string): Promise<{ ok: true } | { ok: false; error: string }> {
   const me = await getCurrentMember();
   if (!me) return { ok: false, error: "Please sign in again." };
-  if (!isOwnerOrAdmin(me.role)) {
-    return { ok: false, error: "Only an owner or admin can create a company." };
+  if (!isSuperAdmin(me.role)) {
+    return { ok: false, error: "Only a Super Admin can create a company." };
   }
   const secret = getCloudflareContext().env.SESSION_SECRET;
   if (!secret) return { ok: false, error: "The session is misconfigured — try again." };

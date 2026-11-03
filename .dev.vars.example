@@ -27,3 +27,16 @@ DRIVER_WEBHOOK_SECRET=""
 # secret: `wrangler secret put ANTHROPIC_API_KEY`. Left empty, every image becomes
 # a blank payment to check, as before.
 ANTHROPIC_API_KEY=
+
+# Signing in with Hookka ERP or Conts ERP accounts (src/lib/erp-logins.ts): each
+# ERP's origin, and the key that ERP holds as CONNECT_LOGIN_KEY. Left empty, only
+# Houzs ERP accounts can sign in.
+HOOKKA_LOGIN_URL=""
+HOOKKA_LOGIN_KEY=""
+CONTS_LOGIN_URL=""
+CONTS_LOGIN_KEY=""
+
+# "1" once chat.hookka.com, chat.theconts.com and chat.2990shome.com answer:
+# switching company then moves to that company's own address. Leave empty
+# until then; on a computer the .localhost addresses are used regardless.
+COMPANY_DOMAINS_LIVE=""

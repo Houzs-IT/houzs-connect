@@ -11,6 +11,12 @@ import { PersonAvatar } from "../PersonAvatar";
 import { IconChevronDown, IconLogout, IconPanelOpen } from "../icons";
 import { useShell } from "./ShellProvider";
 
+/** Switch company; when it lives on another address, go there (app/company-actions.ts). */
+async function goToCompany(formData: FormData) {
+  const r = await switchCompany(formData);
+  if (r?.go) window.location.assign(r.go);
+}
+
 /**
  * "Show menu" — only visible while this page HAS a secondary menu and it is
  * collapsed. Visibility is pure CSS (`.menu-expand` in globals.css keys off the
@@ -149,7 +155,7 @@ export function CompanySwitcher({
           className="absolute left-0 z-40 mt-1 w-[240px] overflow-hidden rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)] py-1 shadow-[var(--shadow-popover)]"
         >
           {list.map((c) => (
-            <form key={c.id} action={switchCompany}>
+            <form key={c.id} action={goToCompany}>
               <input type="hidden" name="companyId" value={c.id} />
               <input type="hidden" name="next" value={section} />
               <button
@@ -298,7 +304,7 @@ export function UserMenu({
                 {t.shell.company}
               </div>
               {companies.map((c) => (
-                <form key={c.id} action={switchCompany}>
+                <form key={c.id} action={goToCompany}>
                   <input type="hidden" name="companyId" value={c.id} />
                   <input type="hidden" name="next" value={path.split("/")[1] ?? ""} />
                   <button

@@ -1,9 +1,10 @@
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { asc, count, desc, eq } from "drizzle-orm";
 import { getDb } from "@/db/client";
 import { channel, company, contactField, member, quickReply, tag } from "@/db/schema";
 import { PageChrome } from "@/components/PageChrome";
 import { getCurrentMember } from "@/lib/current-member";
+import { myModules } from "@/lib/full-access";
 import { formatPhone } from "@/lib/format";
 import { getDict } from "@/lib/i18n/server";
 import { SetCard, SettingsHead } from "./ui";
@@ -12,6 +13,8 @@ import { SetCard, SettingsHead } from "./ui";
 export default async function GeneralSettingsPage() {
   const me = await getCurrentMember();
   if (!me) notFound();
+  // Without the company's settings (Settings → Access), only their own.
+  if (!(await myModules()).includes("settings")) redirect("/settings/profile");
   const t = await getDict();
   const L = t.set;
   const db = getDb();

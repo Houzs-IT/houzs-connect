@@ -85,6 +85,18 @@ jobs:
       - name: IT Support rules smoke test (pure, no DB)
         run: node scripts/smoke-it-support.mjs
 
+      # Which logo each address and person sees, and the company a sign-in lands in.
+      - name: Company brand smoke test (pure, no DB)
+        run: node scripts/smoke-company-brand.mjs
+
+      # Reading Hookka and Conts answers when their staff sign in, and which is asked first.
+      - name: ERP logins smoke test (pure, no DB)
+        run: node scripts/smoke-erp-logins.mjs
+
+      # Which modules each role starts with, and how Settings → Access changes them.
+      - name: Module access smoke test (pure, no DB)
+        run: node scripts/smoke-module-access.mjs
+
       # Hermetic: every endpoint it calls is a loopback server the script itself
       # starts, so CI never hits the owner's real Apps Script webhooks.
       - name: call_rest_api smoke test (loopback only, no internet)

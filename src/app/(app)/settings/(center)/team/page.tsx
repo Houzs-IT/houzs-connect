@@ -64,6 +64,7 @@ export default async function TeamPage() {
             L={L}
             roles={t.role}
             canSuper={canSuper}
+            canManage={me.role === "SUPER_ADMIN"}
             requests={block}
           />
         )}

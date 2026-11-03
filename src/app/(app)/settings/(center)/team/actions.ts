@@ -5,7 +5,7 @@
 // Numbers module, not scoped to the company you happen to be standing in).
 //
 // Access to a company is an active member row (company x person); the ERP org
-// sync creates them per ERP grant. Here an owner/admin adds EXTRA companies a
+// sync creates them per ERP grant. Here a Super Admin adds EXTRA companies a
 // person can read — the only way into a Connect-only company like Hookka. Extra
 // grants are manual (erp_user_id null), which the org sync never deactivates, so
 // they survive every sign-in; ERP-granted access is the base and is shown locked
@@ -139,8 +139,14 @@ export async function fetchTeam(): Promise<TeamView> {
   // One row per person, keyed by ERP user id when synced, else by email — the
   // same identity the sign-in upsert and sync reconcile on.
   const byKey = new Map<string, Person>();
+  const activeEmails = new Set(members.filter((m) => m.active).map((m) => m.email.toLowerCase()));
+  const removedEmails = new Set(removedRows.map((r) => r.email));
   for (const m of members) {
-    if (!m.active) continue;
+    // Someone whose last company was unticked here stays listed with no ticks,
+    // so a Super Admin can tick them back. ERP rows the sync switched off, and
+    // people removed from Connect (listed further down), stay out.
+    const email = m.email.toLowerCase();
+    if (!m.active && (activeEmails.has(email) || removedEmails.has(email) || m.erpUserId != null)) continue;
     // Key by email — the identity that is stable across a person's ERP-synced
     // rows and any manual grants. Keying ERP rows separately (by erp_user_id)
     // split one person into two rows, so a grant made on the manual row never
@@ -171,12 +177,14 @@ export async function fetchTeam(): Promise<TeamView> {
     if (!p.department && m.departmentId) p.department = deptName.get(m.departmentId) ?? null;
     if (!p.division && divisionOf.has(m.id)) p.division = divisionOf.get(m.id) ?? null;
     if (!p.reportsTo && m.managerId) p.reportsTo = memberName.get(m.managerId) ?? null;
-    p.access[m.companyId] = {
-      companyId: m.companyId,
-      memberId: m.id,
-      role: m.role,
-      fromErp: m.erpUserId != null,
-    };
+    if (m.active) {
+      p.access[m.companyId] = {
+        companyId: m.companyId,
+        memberId: m.id,
+        role: m.role,
+        fromErp: m.erpUserId != null,
+      };
+    }
   }
 
   // Most access first (Super Admin, Owner, Admin, …), then by name.
@@ -206,7 +214,8 @@ export async function fetchTeam(): Promise<TeamView> {
 
 export async function toggleAccess(formData: FormData): Promise<void> {
   const me = await manager();
-  if (!me) return;
+  // Which companies a person may open is a Super Admin's call (CONNECT-0003).
+  if (me?.role !== "SUPER_ADMIN") return;
   const email = String(formData.get("email") ?? "").trim().toLowerCase();
   const name = String(formData.get("name") ?? "").trim();
   const role = cleanRole(String(formData.get("role") ?? "AGENT"));
@@ -217,7 +226,7 @@ export async function toggleAccess(formData: FormData): Promise<void> {
   const db = getDb();
 
   if (on) {
-    // Never let an admin remove their own access to the company they are in.
+    // Never let a Super Admin remove their own access to the company they are in.
     if (email === me.email.toLowerCase() && companyId === me.companyId) return;
     // Only a manual grant (erp_user_id null) can be removed; the ERP owns its own.
     await db
@@ -243,6 +252,8 @@ export async function setRoleForm(formData: FormData): Promise<void> {
   const email = String(formData.get("email") ?? "").trim().toLowerCase();
   const raw = String(formData.get("role") ?? "AGENT");
   if (!email) return;
+  // Roles are a Super Admin's call. Naming the very first one is checked below.
+  if (me.role !== "SUPER_ADMIN" && raw !== "SUPER_ADMIN") return;
   const db = getDb();
   // SUPER_ADMIN is added to the Role enum by migration 0013 (or here, at runtime);
   // role_override by 0021.

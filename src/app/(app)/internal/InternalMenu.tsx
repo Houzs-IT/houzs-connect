@@ -7,6 +7,7 @@ import { companyPresence } from "@/lib/presence";
 import { ensureInternal, peopleOrg, sidebar } from "./data";
 import { NavLink } from "./NavLink";
 import { NewChat } from "./NewChat";
+import { PeopleList } from "./PeopleList";
 import { Avatar } from "./parts";
 
 /** Requests to join waiting for me to approve. */
@@ -122,6 +123,7 @@ export async function InternalMenu({ mobile = false }: { mobile?: boolean }) {
               d.unread
             )
           )}
+          <PeopleList people={others} mobile />
           {side.discussions.length > 0 && head(L.discussions)}
           {side.discussions.map((d) =>
             row(
@@ -186,6 +188,8 @@ export async function InternalMenu({ mobile = false }: { mobile?: boolean }) {
             <Badge n={d.unread} />
           </NavLink>
         ))}
+
+        <PeopleList people={others} />
 
         {side.discussions.length > 0 && (
           <>

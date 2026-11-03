@@ -1,18 +1,18 @@
 "use client";
 
-import { useActionState, useState } from "react";
+import { useActionState, useEffect, useState } from "react";
 import { useShell } from "@/components/shell/ShellProvider";
 import { fmt } from "@/lib/i18n/dict";
+import type { Brand } from "@/lib/company-brand";
 import { login } from "./actions";
 import { submitAccessRequest } from "./request-actions";
 
 /*
-  Sign in with a Houzs ERP account, on the Connect palette: deep ink-blue sky,
+  Sign in with a Houzs, Hookka or Conts ERP account, on the Connect palette: deep ink-blue sky,
   a teal glow, a field of faint stars, and a white glass card.
 */
 
-// The wordmark PNG is black on transparent; brightness(0) invert(1) turns it white.
-const WORDMARK = "/logo-wordmark.png";
+// The wordmark PNGs are dark on transparent; brightness(0) invert(1) turns them white.
 const WHITE = { filter: "brightness(0) invert(1)" } as const;
 
 /** The action's own sentences, in the viewer's language. */
@@ -20,6 +20,10 @@ const ZH_ERRORS: Record<string, string> = {
   "Wrong email or password.": "邮箱或密码错误。",
   "Enter your email and password.": "请输入邮箱和密码。",
   "Cannot reach the staff directory. Ask IT to grant access.": "无法连接员工目录，请联系 IT。",
+  "Your account has no company access in Connect yet. Ask a Super Admin.": "您的账号尚未获得 Connect 的公司权限，请联系超级管理员。",
+  "Enter the code from your authenticator app.": "请输入验证器 App 上的验证码。",
+  "That code is not right.": "验证码不正确。",
+  "Enter your email and password again.": "请重新输入邮箱和密码。",
 };
 
 function Eye({ off }: { off: boolean }) {
@@ -45,10 +49,14 @@ function Eye({ off }: { off: boolean }) {
 const CHIP_TONES = ["green", "blue", "pink"];
 const CHIP_ICONS = ["☏", "⇄", "↗"];
 
-export function LoginView({ openRequest = false }: { openRequest?: boolean }) {
+export function LoginView({ openRequest = false, brand }: { openRequest?: boolean; brand: Brand }) {
   const { t, lang, setLang } = useShell();
   const L = t.login;
   const [state, formAction, pending] = useActionState(login, {});
+  // Signed in on another company's address: carry on there (login/actions.ts).
+  useEffect(() => {
+    if (state.go) window.location.assign(state.go);
+  }, [state.go]);
   const [show, setShow] = useState(false);
   const [panel, setPanel] = useState<"none" | "forgot" | "request" | "sent">(openRequest ? "request" : "none");
   const [req, setReq] = useState({ name: "", email: "", phone: "", department: "", note: "" });
@@ -85,7 +93,7 @@ export function LoginView({ openRequest = false }: { openRequest?: boolean }) {
       <div className="auth-drift pointer-events-none absolute left-[8%] top-[18%] h-[520px] w-[520px] rounded-full bg-[radial-gradient(circle,rgba(56,160,184,0.22),transparent_70%)] blur-[90px]" />
       <div className="auth-drift2 pointer-events-none absolute bottom-[0%] right-[10%] h-[460px] w-[460px] rounded-full bg-[radial-gradient(circle,rgba(30,111,128,0.30),transparent_70%)] blur-[110px]" />
       {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img src={WORDMARK} alt="" aria-hidden draggable={false} style={WHITE} className="pointer-events-none absolute -bottom-10 hidden md:block -left-8 w-[480px] max-w-[64vw] opacity-[0.05]" />
+      <img src={brand.wordmark} alt="" aria-hidden draggable={false} style={WHITE} className="pointer-events-none absolute -bottom-10 hidden md:block -left-8 w-[480px] max-w-[64vw] opacity-[0.05]" />
 
       {/* Language */}
       <div className="absolute right-4 top-4 z-20 flex rounded-full border border-white/20 bg-white/5 p-0.5 md:right-8 md:top-6">
@@ -107,15 +115,15 @@ export function LoginView({ openRequest = false }: { openRequest?: boolean }) {
         <div className="flex w-full max-w-xl flex-col items-center text-center lg:items-start lg:text-left">
           <div className="animate-rise mb-7 hidden items-center gap-2.5 lg:flex">
             <span className="h-px w-10 bg-[var(--color-brand-bright)]" />
-            <span className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[var(--color-brand-bright)]">{L.brand}</span>
+            <span className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[var(--color-brand-bright)]">{brand.name}</span>
           </div>
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={WORDMARK} alt="Houzs Century" draggable={false} style={WHITE} className="animate-rise h-16 w-auto object-contain sm:h-24 xl:h-32" />
+          <img src={brand.wordmark} alt={brand.name} draggable={false} style={WHITE} className="animate-rise h-16 w-auto object-contain sm:h-24 xl:h-32" />
           <span className="animate-rise mt-5 inline-flex items-center gap-2 rounded-full border border-[rgba(56,160,184,0.45)] bg-[rgba(56,160,184,0.14)] px-3 py-1 text-[12.5px] font-semibold text-white">
             <span className="h-1.5 w-1.5 rounded-full bg-[#67bed6] shadow-[0_0_8px_#67bed6]" />
             Connect
           </span>
-          <p className="animate-rise mt-7 hidden max-w-lg text-[15.5px] leading-relaxed text-[#a9b4c6] lg:block">{L.pitch}</p>
+          <p className="animate-rise mt-7 hidden max-w-lg text-[15.5px] leading-relaxed text-[#a9b4c6] lg:block">{fmt(L.pitch, { company: brand.name })}</p>
           <div className="animate-rise mt-6 hidden flex-wrap gap-2.5 lg:flex">
             {L.chips.map((c, i) => (
               <span key={c} className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/5 py-1 pl-1 pr-3.5 text-[13px] text-white/90">
@@ -144,13 +152,44 @@ export function LoginView({ openRequest = false }: { openRequest?: boolean }) {
             </h1>
             <p className="mt-1 text-[13px] text-[var(--color-muted)]">{L.sub}</p>
 
-            {panel === "none" ? (
+            {state.twoStep ? (
+              <form action={formAction} className="mt-6 flex flex-col gap-4">
+                <div className="rounded-[12px] border border-[var(--color-border)] bg-white p-4">
+                  <div className="mb-1.5 text-[13.5px] font-semibold text-[var(--color-ink)]">{L.twoStepTitle}</div>
+                  <p className="text-[13px] leading-relaxed text-[var(--color-muted)]">{fmt(L.twoStepBody, { system: state.twoStep.systemName })}</p>
+                </div>
+                <input type="hidden" name="system" value={state.twoStep.system} />
+                <input type="hidden" name="challenge" value={state.twoStep.challenge} />
+                <div>
+                  <label className={label} htmlFor="code">
+                    {L.code}
+                  </label>
+                  <input id="code" name="code" inputMode="numeric" autoComplete="one-time-code" required autoFocus placeholder="123456" className={input} />
+                </div>
+                {error && (
+                  <p role="alert" className="flex items-center gap-2 rounded-[8px] bg-[var(--color-danger-soft)] px-3 py-2 text-[12.5px] font-medium text-[var(--color-danger)]">
+                    <span className="grid h-4 w-4 place-items-center rounded-full bg-[var(--color-danger)] text-[10px] text-white">!</span>
+                    {error}
+                  </p>
+                )}
+                <button
+                  type="submit"
+                  disabled={pending}
+                  className="h-[46px] w-full rounded-[10px] bg-[var(--color-accent)] text-[14px] font-semibold text-white shadow-[var(--shadow-primary)] transition-colors hover:bg-[var(--color-accent-hi)] disabled:opacity-60"
+                >
+                  {pending ? L.signingIn : L.verify}
+                </button>
+                <a href="/login" className="text-center text-[13px] font-semibold text-[var(--color-accent)] hover:underline">
+                  {L.startOver}
+                </a>
+              </form>
+            ) : panel === "none" ? (
               <form action={formAction} className="mt-6 flex flex-col gap-4">
                 <div>
                   <label className={`${label} hidden sm:block`} htmlFor="email">
                     {L.email}
                   </label>
-                  <input id="email" name="email" type="email" autoComplete="username" required autoFocus placeholder="you@houzscentury.com" className={input} />
+                  <input id="email" name="email" type="email" autoComplete="username" required autoFocus placeholder="you@company.com" className={input} />
                 </div>
                 <div>
                   <div className="mb-1.5 hidden items-center justify-between sm:flex">
@@ -229,7 +268,7 @@ export function LoginView({ openRequest = false }: { openRequest?: boolean }) {
                 {(
                   [
                     ["name", L.fullName, "text", ""],
-                    ["email", L.workEmail, "email", "you@houzscentury.com"],
+                    ["email", L.workEmail, "email", "you@company.com"],
                     ["phone", L.phone, "tel", "+60"],
                     ["department", L.department, "text", ""],
                     ["note", L.note, "text", L.notePh],
@@ -293,7 +332,7 @@ export function LoginView({ openRequest = false }: { openRequest?: boolean }) {
               </div>
             )}
           </div>
-          <div className="mt-5 text-center text-[10.5px] uppercase tracking-[0.18em] text-[#7d889b]">{fmt(L.footer, { year })}</div>
+          <div className="mt-5 text-center text-[10.5px] uppercase tracking-[0.18em] text-[#7d889b]">{fmt(L.footer, { year, company: brand.name })}</div>
         </div>
       </div>
     </div>
