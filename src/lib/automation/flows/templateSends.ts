@@ -145,23 +145,30 @@ Thank you for your patience and understanding! 🙏`,
 // After-sales (ASSR) acknowledgement — the FIRST message a customer gets when a
 // Service Case is created in the ERP, before any date is arranged (that later
 // confirm/amend conversation is the separate Service Arrangement flow). The ERP
-// fires this by name on create with full_name + ref_1 (the ASSR/case number).
+// fires this by name on create and injects full_name, ref_1 (the SO/order ref)
+// and assr_no (the ASSR case number).
+//
+// Template `hc_service_case_received` has THREE positional params:
+//   {{1}} full_name, {{2}} ref_1 (order ref), {{3}} assr_no (ASSR case number).
+// All three MUST be sent — with only two, {{3}} went out as the literal "{{3}}"
+// and Meta rejected the whole send (seen live 2026-11-03, ASSR/2611-008).
 // Button-less, one-shot: reassure, then wait for a human — no callback. Tags the
 // contact "service" on send so the inbox can filter service-case customers.
 export const serviceCaseReceivedFlow = templateFlow({
   key: "service_case_received",
   name: "Service Case Received",
   description:
-    "After-sales acknowledgement sent when an ASSR (service case) is created: hc_service_case_received, full_name + case ref. Tags the contact service.",
+    "After-sales acknowledgement sent when an ASSR (service case) is created: hc_service_case_received, full_name + order ref + ASSR case no. Tags the contact service.",
   event: "service_case_received",
   templateName: "hc_service_case_received",
-  params: ["{full_name}", "{ref_1}"],
+  params: ["{full_name}", "{ref_1}", "{assr_no}"],
   tag: "service",
   message: `Hi {full_name} 👋 This is Houzs Century.
 
-We've received your service request (Service Case *{ref_1}*) and our after-sales team has already started arranging it for you.
+We have received your service request for order *{ref_1}*.
+Your service case number is *{assr_no}* — please keep this for any follow-up.
 
-We'll keep you posted and reach out as soon as there's an update. If there's anything more you'd like to add, just reply here anytime.
+Our after-sales team is now arranging it and will contact you with the next update.
 
-Thank you for your patience! 🙏`,
+Thank you for your patience. 🙏`,
 });
