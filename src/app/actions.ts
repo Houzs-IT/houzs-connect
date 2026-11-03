@@ -24,6 +24,7 @@ import {
   handleTagAdded,
 } from "@/lib/automation/dispatch";
 import { isLive } from "@/lib/whatsapp/cloud-api";
+import { onPaymentVerified } from "@/lib/sync/erp-payments";
 
 /**
  * A signed-in member, and the conversation must be in THEIR company.
@@ -312,6 +313,8 @@ export async function setPaymentStatus(formData: FormData) {
     .update(payment)
     .set({ status: status as "VERIFIED" | "REJECTED" | "PENDING" })
     .where(eq(payment.id, paymentId));
+  // Verifying here (from the inbox) pushes the payment to the ERP too.
+  if (status === "VERIFIED") await onPaymentVerified(db, paymentId);
   revalidatePath("/payments");
 }
 
