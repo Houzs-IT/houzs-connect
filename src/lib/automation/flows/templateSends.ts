@@ -116,22 +116,28 @@ export const deliveryCompletedFlow = templateFlow({
 
 // Overdue Order — a one-way heads-up when a Sales Order's delivery will run LATE
 // because of a production delay. The operator sends it by name from the Delivery
-// Planning board's Send Message menu; it apologises and promises the updated
-// schedule later. No new date and no buttons — distinct from Postpone, which
-// commits a proposed date and opens a Confirm / Amend conversation.
+// Planning board's Send Message menu; it apologises and gives a reason. No
+// buttons — distinct from Postpone, which commits a proposed date and opens a
+// Confirm / Amend conversation.
+//
+// Template `overdue_order_status_update` has FOUR positional params:
+//   {{1}} full_name, {{2}} order ref, {{3}} amend reason — the ERP injects
+//   `amend_reason` (the DP "amend reason" column) on the trigger — and {{4}} a
+//   FIXED timeframe string. The template keeps the {{4}} slot, so the send must
+//   still supply it; it is a literal here ("in next 2 weeks"), not a token. If
+//   the amend reason is not injected, {{3}} sends the literal "{amend_reason}".
 export const overdueOrderFlow = templateFlow({
   key: "overdue_order",
   name: "Overdue Order",
   description:
-    "Production-delay heads-up for a late order (one-way): hc_overdue_order, full_name + order ref. No date, no buttons.",
+    "Production-delay heads-up for a late order (one-way): overdue_order_status_update, full_name + order ref + amend reason; {{4}} fixed 'in next 2 weeks'. No buttons.",
   event: "overdue_order",
-  templateName: "hc_overdue_order",
-  params: ["{full_name}", "{ref_1}"],
-  message: `Hi {full_name} 👋 This is Houzs Century, regarding your order *{ref_1}*.
+  templateName: "overdue_order_status_update",
+  params: ["{full_name}", "{ref_1}", "{amend_reason}", "in next 2 weeks"],
+  message: `Hi {full_name}, this is the Customer Service Team from Houzs Century.
 
-We'd like to let you know that the delivery of your order will take a little longer than scheduled, due to a delay on the production side. We sincerely apologise for the wait.
-
-Our team is working to complete your order as soon as possible, and we'll reach out with the updated delivery schedule shortly. If you have any questions, feel free to reply here anytime.
+We sincerely apologize for the delay with your order *{ref_1}*.
+Due to *{amend_reason}*, your order requires additional time to ensure everything meets our standards. Our team is actively working on your items, and we expect to deliver your order within the next delivery timeframe *in next 2 weeks*. Our logistics team will contact you shortly to confirm the exact date and time. Thank you for your patience and for giving us the opportunity to make this right.
 
 Thank you for your patience and understanding! 🙏`,
 });
