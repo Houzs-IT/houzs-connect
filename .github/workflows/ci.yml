@@ -73,6 +73,11 @@ jobs:
       - name: Delay timing smoke test (pure, no DB)
         run: node scripts/smoke-delay.mjs
 
+      # Bill-back: each company pays for its own numbers, and whatever no company
+      # holds is reported, so the bill always reconciles to what Meta charged.
+      - name: WhatsApp spend smoke test (pure, no network)
+        run: node scripts/smoke-spend.mjs
+
       - name: Business profile validation smoke test (pure, no DB)
         run: node scripts/smoke-business-profile.mjs
 
