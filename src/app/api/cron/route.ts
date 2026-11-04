@@ -3,6 +3,7 @@ import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { getDb } from "@/db/client";
 import { webhookEvent } from "@/db/schema";
 import { resumeDueDelays, sendDueScheduledCampaigns } from "@/lib/automation/sweeper";
+import { sendWhatsAppUsageToHub } from "@/lib/billing-hub";
 import { advanceDueDripEnrollments } from "@/lib/drip";
 
 /**
@@ -12,8 +13,8 @@ import { advanceDueDripEnrollments } from "@/lib/drip";
  * every couple of minutes and POSTs this route, so the work runs in a normal
  * request context where getDb() and secrets behave exactly as in any request (a
  * Worker scheduled() handler cannot call getDb() directly). It runs the time-based
- * sweeps: resume Delay runs that are due, and send scheduled campaigns that are
- * due. Each sweep is isolated so one failing does not block the others, and a
+ * sweeps: resume Delay runs that are due, send scheduled campaigns that are
+ * due, and once a day send the WhatsApp spend per company to the IT Hub. Each sweep is isolated so one failing does not block the others, and a
  * summary is written to System Logs (webhook_event, source "cron").
  *
  * Guard: header `x-cron-key` must equal env.CRON_SECRET. Unset => 503 (fail
@@ -50,6 +51,12 @@ export async function POST(req: NextRequest) {
     summary.drip = await advanceDueDripEnrollments();
   } catch (e) {
     errors.drip = e instanceof Error ? e.message : String(e);
+  }
+  // Writes its own System Logs row (source "hub"); a failure is retried an hour later.
+  try {
+    summary.hubUsage = await sendWhatsAppUsageToHub();
+  } catch (e) {
+    errors.hubUsage = e instanceof Error ? e.message : String(e);
   }
 
   const hadError = Object.keys(errors).length > 0;
