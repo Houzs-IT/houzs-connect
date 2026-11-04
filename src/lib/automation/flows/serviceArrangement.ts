@@ -24,12 +24,19 @@ import {
  * except the opener template.
  *
  * Opener template hc_service_arrangement (UTILITY, en) — Confirm Date / Amend
- * Date quick replies, 4 vars: full_name, the case number (ref_1), the job
- * (service_job: "furniture pickup" / "inspection visit" / "return delivery") and
- * the date (delivery_date_1). The ERP also sends assr_leg, echoed as `leg`.
+ * Date quick replies, 5 vars, in this order: {{1}} full_name, {{2}} the case
+ * number (assr_no), {{3}} the Sales Order number (ref_2), {{4}} the job
+ * (service_job: "furniture pickup" / "inspection visit" / "return delivery")
+ * and {{5}} the date (delivery_date_1). The template body must keep exactly
+ * these 5 slots — a param-count mismatch leaves a literal "{{5}}" in the
+ * customer's message and shifts every value one slot. The ERP also sends
+ * assr_leg (echoed as `leg`) and ref_1 (the case number the callback echoes
+ * back as `ref`); both stay on the contact for the callback but are NOT
+ * template params.
  */
 
-const OPENING = `Hi {full_name}, this is Houzs Century about your service case *{ref_1}*.
+const OPENING = `Hi {full_name}, this is Houzs Century about your service case {assr_no}.
+(SO Number: {ref_2})
 
 We have arranged the *{service_job}* on *{delivery_date_1}*.
 
@@ -77,7 +84,7 @@ export const serviceArrangementFlow: SeedFlow = {
         data: {
           templateName: "hc_service_arrangement",
           templateLang: "en",
-          templateParams: ["{full_name}", "{ref_1}", "{service_job}", "{delivery_date_1}"],
+          templateParams: ["{full_name}", "{assr_no}", "{ref_2}", "{service_job}", "{delivery_date_1}"],
           message: OPENING,
           buttons: [
             { id: OPENER_CONFIRM_BTN, label: OPENER_CONFIRM_BTN },
