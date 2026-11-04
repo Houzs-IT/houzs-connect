@@ -58,6 +58,11 @@ jobs:
       - name: Org-sync planner smoke test (pure, no DB)
         run: node scripts/smoke-org-sync.mjs
 
+      # The Connect -> ERP payment push: body built for /api/connect/payments and
+      # how the response is read (recorded / needs_manual / retry / block).
+      - name: Payment push core smoke test (pure, no DB)
+        run: node scripts/smoke-payment-push.mjs
+
       # Several WhatsApp numbers on one account: a delivery lands in the company
       # that owns the receiving number, and an unassigned number is refused.
       - name: Multi-number routing smoke test (pure, no DB)

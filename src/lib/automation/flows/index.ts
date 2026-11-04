@@ -14,6 +14,8 @@ import {
   reminder3Flow,
   driverInfoFlow,
   deliveryCompletedFlow,
+  serviceCaseReceivedFlow,
+  overdueOrderFlow,
 } from "./templateSends";
 
 export type { SeedFlow, SeedForm } from "./types";
@@ -40,5 +42,7 @@ export const REBUILD_FLOWS: SeedFlow[] = [
   reminder3Flow,
   driverInfoFlow,
   deliveryCompletedFlow,
+  serviceCaseReceivedFlow,
+  overdueOrderFlow,
   serviceArrangementFlow,
 ];

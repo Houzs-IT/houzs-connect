@@ -13,6 +13,7 @@ import { PaymentReview } from "./PaymentReview";
 import { RecordPayment } from "./RecordPayment";
 import { money, monthStart } from "./util";
 import { mediaIdOf } from "@/lib/whatsapp/download";
+import { ensurePaymentErpColumns, type ErpSyncState } from "@/lib/sync/erp-payments";
 
 /*
   Receipts customers sent in chat: a queue on the left, the selected receipt on
@@ -126,6 +127,19 @@ export default async function PaymentsPage({ searchParams }: { searchParams: Pro
           .where(and(mine, eq(payment.referenceNo, selected.referenceNo), sql`${payment.id} <> ${selected.id}`))
           .limit(1)
       : [];
+
+  // ERP push state per receipt (raw column, see lib/sync/erp-payments.ts). One
+  // small query for the shown ids; the review panel and the queue show it.
+  await ensurePaymentErpColumns(db);
+  const syncRows = shown.length
+    ? ((await db.execute(
+        sql`select id, erp_sync from connect.payment where id in (${sql.join(
+          shown.map((r) => sql`${r.id}`),
+          sql`, `
+        )})`
+      )) as unknown as { id: string; erp_sync: ErpSyncState | null }[])
+    : [];
+  const syncById = new Map(syncRows.map((s) => [s.id, s.erp_sync]));
 
   const href = (extra: Record<string, string>) => {
     const p = new URLSearchParams();
@@ -329,6 +343,17 @@ export default async function PaymentsPage({ searchParams }: { searchParams: Pro
                               {warn}
                             </span>
                           )}
+                          {r.status === "VERIFIED" &&
+                            (() => {
+                              const st = syncById.get(r.id)?.status;
+                              const [cls, label] =
+                                st === "SYNCED"
+                                  ? ["text-[var(--color-success)]", L.erpSynced]
+                                  : st === "BLOCKED"
+                                    ? ["text-[var(--color-danger)]", L.erpBlocked]
+                                    : ["text-[var(--color-faint)]", L.erpSending];
+                              return <span className={`text-[11px] font-medium ${cls}`}>{label}</span>;
+                            })()}
                         </span>
                       </span>
                     </Link>
@@ -366,6 +391,7 @@ export default async function PaymentsPage({ searchParams }: { searchParams: Pro
                     }),
                   }}
                   dupWith={dupOther[0] ? dupOther[0].name || dupOther[0].phone : null}
+                  erpSync={syncById.get(selected.id) ?? null}
                   nextHref={nextId ? href({ p: nextId }) : href({})}
                   backHref={href({})}
                 />

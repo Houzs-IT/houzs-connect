@@ -3,10 +3,12 @@
 import { createId } from "@paralleldrive/cuid2";
 import { revalidatePath } from "next/cache";
 import { sql } from "drizzle-orm";
+import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { getDb } from "@/db/client";
 import { ensureInternalTables } from "@/db/ensure-internal";
 import { getCurrentMember } from "@/lib/current-member";
 import { isAdminRole } from "@/lib/permissions";
+import { MAX_ATTACHMENTS, MAX_FILE_BYTES, MAX_TOTAL_BYTES, kindFor } from "@/lib/internal-media";
 import { channelInfo, markRead, slug } from "./data";
 
 type Rows<T> = T[];
@@ -85,6 +87,132 @@ export async function postMessage(input: {
   await markRead(ch.id, me.id);
   revalidatePath("/internal", "layout");
   return { ok: true, id };
+}
+
+/**
+ * Send a message that carries files — images or documents, WhatsApp-group
+ * style, with an optional caption. The bytes go to the FILES R2 bucket; the
+ * metadata rows are what the timeline renders and the serve route authorises.
+ *
+ * A server action (not a route) so it shares postMessage's guards and the 20 MB
+ * body cap in next.config.ts. The same channel / permission / parent / linked-
+ * conversation checks as postMessage run here too: everything exported from a
+ * "use server" module is a POST endpoint anyone signed in can reach.
+ */
+export async function postAttachmentMessage(
+  formData: FormData
+): Promise<{ ok: boolean; id?: string; error?: string }> {
+  const me = await ctx();
+  if (!me) return { ok: false, error: "Not signed in." };
+
+  const channelId = String(formData.get("channelId") ?? "");
+  const body = String(formData.get("body") ?? "").trim().slice(0, 4000);
+  const parentIdIn = String(formData.get("parentId") ?? "") || null;
+  const alsoInChannel = String(formData.get("alsoInChannel") ?? "") === "1";
+  const conversationIdIn = String(formData.get("conversationId") ?? "") || null;
+  // File, not just Blob: we need the name. Drop empty parts a browser may add.
+  const files = formData.getAll("files").filter((f): f is File => f instanceof File && f.size > 0);
+
+  if (files.length === 0) return { ok: false, error: "Attach a file first." };
+  if (files.length > MAX_ATTACHMENTS) return { ok: false, error: `Up to ${MAX_ATTACHMENTS} files at once.` };
+  let total = 0;
+  for (const f of files) {
+    if (f.size > MAX_FILE_BYTES) {
+      return { ok: false, error: `${f.name || "A file"} is too large. Max ${Math.round(MAX_FILE_BYTES / 1024 / 1024)} MB per file.` };
+    }
+    total += f.size;
+  }
+  if (total > MAX_TOTAL_BYTES) return { ok: false, error: "Those files are too large together. Send fewer at a time." };
+
+  const ch = await channelInfo(me.companyId, channelId, me.id);
+  if (!ch) return { ok: false, error: "Channel not found." };
+  if (!ch.isMember) return { ok: false, error: "Join this channel to post in it." };
+  if (ch.kind === "channel" && ch.permPost === "admins" && !ch.isChannelAdmin && !isAdminRole(me.role)) {
+    return { ok: false, error: "Only admins can send messages in this channel." };
+  }
+
+  let parentId: string | null = null;
+  if (parentIdIn) {
+    const p = await q<{ id: string; parent_id: string | null }>(sql`
+      select id, parent_id from connect.internal_message where id = ${parentIdIn} and channel_id = ${ch.id}
+    `);
+    if (!p[0]) return { ok: false, error: "That thread is gone." };
+    parentId = p[0].parent_id ?? p[0].id;
+  }
+
+  let conversationId: string | null = null;
+  if (conversationIdIn) {
+    const c = await q<{ id: string }>(sql`
+      select cv.id from connect.conversation cv join connect.contact ct on ct.id = cv.contact_id
+      where cv.id = ${conversationIdIn} and ct.company_id = ${me.companyId}
+    `);
+    if (!c[0]) return { ok: false, error: "That conversation is not in this company." };
+    conversationId = c[0].id;
+  }
+
+  const bucket = getCloudflareContext().env.FILES;
+  if (!bucket) return { ok: false, error: "File storage is not set up on this server." };
+
+  // Image pixel sizes from the browser, aligned to the files order, so the
+  // timeline can reserve the right space. Missing/garbled => nulls, never a throw.
+  let dims: ({ w: number; h: number } | null)[] = [];
+  try {
+    const parsed: unknown = JSON.parse(String(formData.get("dims") ?? "[]"));
+    if (Array.isArray(parsed)) dims = parsed as ({ w: number; h: number } | null)[];
+  } catch {
+    dims = [];
+  }
+
+  const messageId = createId();
+  type Prepared = { id: string; key: string; kind: string; name: string; mime: string; size: number; width: number | null; height: number | null };
+  const prepared: Prepared[] = [];
+  const uploadedKeys: string[] = [];
+  try {
+    for (let i = 0; i < files.length; i++) {
+      const f = files[i];
+      const id = createId();
+      const key = `internal/${me.companyId}/${ch.id}/${id}`;
+      const mime = f.type || "application/octet-stream";
+      await bucket.put(key, await f.arrayBuffer(), { httpMetadata: { contentType: mime } });
+      uploadedKeys.push(key);
+      const d = dims[i] && typeof dims[i] === "object" ? dims[i] : null;
+      prepared.push({
+        id,
+        key,
+        kind: kindFor(mime),
+        name: (f.name || "file").slice(0, 200),
+        mime,
+        size: f.size,
+        width: d?.w ?? null,
+        height: d?.h ?? null,
+      });
+    }
+
+    const mentions = await mentionsIn(me.companyId, body);
+    await getDb().transaction(async (tx) => {
+      await tx.execute(sql`
+        insert into connect.internal_message (id, channel_id, author_member_id, body, parent_id, also_in_channel, conversation_id, mentions)
+        values (${messageId}, ${ch.id}, ${me.id}, ${body}, ${parentId}, ${!!(parentId && alsoInChannel)}, ${conversationId},
+          ${mentions.length ? JSON.stringify(mentions) : null}::jsonb)
+      `);
+      for (const a of prepared) {
+        await tx.execute(sql`
+          insert into connect.internal_attachment (id, message_id, channel_id, company_id, kind, r2_key, name, mime, size, width, height)
+          values (${a.id}, ${messageId}, ${ch.id}, ${me.companyId}, ${a.kind}, ${a.key}, ${a.name}, ${a.mime}, ${a.size}, ${a.width}, ${a.height})
+        `);
+      }
+    });
+  } catch (e) {
+    // Best effort: drop whatever bytes we uploaded before the failure, so a
+    // failed send leaves no orphan objects in the bucket.
+    if (uploadedKeys.length) await bucket.delete(uploadedKeys).catch(() => {});
+    console.error("[internal] attachment send failed:", e);
+    return { ok: false, error: "Could not send the attachment. Try again." };
+  }
+
+  await markRead(ch.id, me.id);
+  revalidatePath("/internal", "layout");
+  return { ok: true, id: messageId };
 }
 
 type Access = "open" | "approval";

@@ -5,6 +5,7 @@ import { webhookEvent } from "@/db/schema";
 import { resumeDueDelays, sendDueScheduledCampaigns } from "@/lib/automation/sweeper";
 import { sendWhatsAppUsageToHub } from "@/lib/billing-hub";
 import { advanceDueDripEnrollments } from "@/lib/drip";
+import { sweepPendingPaymentPushes } from "@/lib/sync/erp-payments";
 
 /**
  * POST /api/cron — the scheduler tick.
@@ -52,6 +53,13 @@ export async function POST(req: NextRequest) {
   } catch (e) {
     errors.drip = e instanceof Error ? e.message : String(e);
   }
+  // Re-push confirmed payments the ERP has not accepted yet (a transient error,
+  // or a push that fired before the ERP endpoint was merged). Same id each time.
+  try {
+    summary.erpPayments = await sweepPendingPaymentPushes();
+  } catch (e) {
+    errors.erpPayments = e instanceof Error ? e.message : String(e);
+  }
   // Writes its own System Logs row (source "hub"); a failure is retried an hour later.
   try {
     summary.hubUsage = await sendWhatsAppUsageToHub();
@@ -66,6 +74,7 @@ export async function POST(req: NextRequest) {
     (summary.delays as { resumed?: number })?.resumed ||
     (summary.campaigns as { campaigns?: number })?.campaigns ||
     (summary.drip as { sent?: number })?.sent ||
+    (summary.erpPayments as { attempted?: number })?.attempted ||
     hadError;
   if (didWork) {
     try {
