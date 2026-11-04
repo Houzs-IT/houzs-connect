@@ -273,19 +273,24 @@ export function PaymentReview({
               (() => {
                 // After a confirm the payment is pushed to the ERP; show where it got to.
                 const st = erpSync?.status ?? "PENDING";
+                // needs_manual lands in the ERP's manual queue — NOT booked onto
+                // the order yet — so it must not read as "Recorded in the ERP".
+                const needsManual = st === "SYNCED" && erpSync?.erpStatus === "needs_manual";
                 const ref = erpSync?.soNo || erpSync?.erpPaymentRef || null;
                 const [dot, label, tone] =
-                  st === "SYNCED"
-                    ? ["bg-[var(--color-success)]", L.erpSynced, "text-[var(--color-success)]"]
-                    : st === "BLOCKED"
-                      ? ["bg-[var(--color-danger)]", L.erpBlocked, "text-[var(--color-danger)]"]
-                      : ["bg-[var(--color-pastel-orange-ink)]", L.erpSending, "text-[var(--color-pastel-orange-ink)]"];
+                  needsManual
+                    ? ["bg-[var(--color-pastel-orange-ink)]", L.erpNeedsManual, "text-[var(--color-pastel-orange-ink)]"]
+                    : st === "SYNCED"
+                      ? ["bg-[var(--color-success)]", L.erpSynced, "text-[var(--color-success)]"]
+                      : st === "BLOCKED"
+                        ? ["bg-[var(--color-danger)]", L.erpBlocked, "text-[var(--color-danger)]"]
+                        : ["bg-[var(--color-pastel-orange-ink)]", L.erpSending, "text-[var(--color-pastel-orange-ink)]"];
                 return (
                   <div className="mt-2">
                     <span className={`flex items-center gap-1.5 text-[12px] font-semibold ${tone}`}>
                       <span className={`h-1.5 w-1.5 rounded-full ${dot}`} />
                       {label}
-                      {st === "SYNCED" && ref && (
+                      {st === "SYNCED" && !needsManual && ref && (
                         <span className="font-normal text-[var(--color-faint)]">
                           · {L.erpRef} {ref}
                         </span>
