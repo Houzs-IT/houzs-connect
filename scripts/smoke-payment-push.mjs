@@ -18,9 +18,8 @@ function assert(cond, msg) {
   if (!cond) throw new Error(`ASSERT FAILED: ${msg}`);
 }
 
-const { buildPaymentBody, interpretErpResponse, resolveMethod, normalizeCurrency, MAX_SLIP_BYTES } = await import(
-  "../src/lib/sync/erp-payments-core.ts"
-);
+const { buildPaymentBody, interpretErpResponse, resolveMethod, normalizeCurrency, mapBankToErpCode, mapOnlineType, MAX_SLIP_BYTES } =
+  await import("../src/lib/sync/erp-payments-core.ts");
 
 const slip = { base64: "AAAA", mime: "image/jpeg", bytes: 1024 };
 const base = {
@@ -57,6 +56,26 @@ assert(resolveMethod(null, "Maybank")?.method === "Card", "stored bank name -> C
 assert(resolveMethod(null, "something weird") === null, "unknown stored method -> null (block)");
 assert(resolveMethod(null, "") === null, "empty stored method -> null");
 
+// ── bank / online_type → ERP codes (per company) ────────────────────
+assert(mapBankToErpCode("Maybank", 1) === "MBB", "co1 Maybank -> MBB");
+assert(mapBankToErpCode("Maybank", 2) === "MBB", "co2 Maybank -> MBB");
+assert(mapBankToErpCode("MBB", 1) === "MBB", "host code MBB -> MBB");
+assert(mapBankToErpCode("Public Bank", 1) === "Public", "co1 Public Bank -> Public");
+assert(mapBankToErpCode("Public Bank", 2) === "PBB", "co2 Public Bank -> PBB");
+assert(mapBankToErpCode("Hong Leong", 1) === "HLB", "co1 Hong Leong -> HLB");
+assert(mapBankToErpCode("CIMB", 1) === "CIMB", "co1 CIMB");
+assert(mapBankToErpCode("AEON", 1) === "AEON", "co1 AEON");
+assert(mapBankToErpCode("GHL", 2) === "GHL", "co2 GHL");
+// Known bank the company doesn't offer -> sent as-is so the ERP queues it (never guessed).
+assert(mapBankToErpCode("CIMB", 2) === "CIMB", "co2 has no CIMB -> as-is");
+assert(mapBankToErpCode("Some Random Bank", 1) === "Some Random Bank", "unknown bank -> as-is");
+assert(mapBankToErpCode("", 1) === undefined, "empty bank -> undefined");
+
+assert(mapOnlineType("DuitNow", 1) === "DuitNow", "co1 DuitNow");
+assert(mapOnlineType("bank transfer", 1) === "Bank Transfer", "case-normalized to the live value");
+assert(mapOnlineType("DuitNow", 2) === "DuitNow", "co2 has no DuitNow -> as-is (needs_manual)");
+assert(mapOnlineType("", 1) === undefined, "empty online_type -> undefined");
+
 // ── buildPaymentBody: the happy paths ───────────────────────────────
 const b1 = buildPaymentBody(base);
 assert(b1.ok, "base builds");
@@ -65,7 +84,7 @@ assert(b1.body.erp_company_id === 2, "erp_company_id");
 assert(b1.body.order_ref === "SO-2990-1001", "order_ref");
 assert(b1.body.amount === 4600, "amount");
 assert(b1.body.method === "Card", "stored bank -> Card method");
-assert(b1.body.bank === "Maybank", "bank from stored method");
+assert(b1.body.bank === "MBB", "Maybank mapped to ERP code MBB (co2)");
 assert(b1.body.approval_code === "073496", "approval_code from reference for a card");
 assert(b1.body.slip_base64 === "AAAA" && b1.body.slip_mime === "image/jpeg", "slip passthrough");
 assert(b1.body.currency === "MYR", "currency MYR");
@@ -76,6 +95,7 @@ assert(b1.body.paid_at === "2026-11-03", "paid_at falls back to createdAt when n
 const b2 = buildPaymentBody({ ...base, reading: cardReading });
 assert(b2.ok && b2.body.paid_at === "2026-06-22", "paid_at prefers the reading's slip date");
 assert(b2.ok && b2.body.installment_months === 0, "installment 0 (One Shot) is sent, not omitted");
+assert(b2.ok && b2.body.bank === "PBB", "co2 Public Bank mapped to PBB in the body");
 
 // Online with its sub-type + reference.
 const b3 = buildPaymentBody({
