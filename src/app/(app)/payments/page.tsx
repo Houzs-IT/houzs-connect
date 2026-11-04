@@ -345,13 +345,16 @@ export default async function PaymentsPage({ searchParams }: { searchParams: Pro
                           )}
                           {r.status === "VERIFIED" &&
                             (() => {
-                              const st = syncById.get(r.id)?.status;
+                              const sync = syncById.get(r.id);
+                              const st = sync?.status;
                               const [cls, label] =
-                                st === "SYNCED"
-                                  ? ["text-[var(--color-success)]", L.erpSynced]
-                                  : st === "BLOCKED"
-                                    ? ["text-[var(--color-danger)]", L.erpBlocked]
-                                    : ["text-[var(--color-faint)]", L.erpSending];
+                                st === "SYNCED" && sync?.erpStatus === "needs_manual"
+                                  ? ["text-[var(--color-pastel-orange-ink)]", L.erpNeedsManual]
+                                  : st === "SYNCED"
+                                    ? ["text-[var(--color-success)]", L.erpSynced]
+                                    : st === "BLOCKED"
+                                      ? ["text-[var(--color-danger)]", L.erpBlocked]
+                                      : ["text-[var(--color-faint)]", L.erpSending];
                               return <span className={`text-[11px] font-medium ${cls}`}>{label}</span>;
                             })()}
                         </span>
