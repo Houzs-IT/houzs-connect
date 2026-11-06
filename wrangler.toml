@@ -129,6 +129,10 @@ workers_dev = true
 WHATSAPP_MODE = "DEMO"
 CONNECT_PREVIEW = "1"
 CONNECT_STAGING = "1"
+# Hookka and Conts accounts sign in through their staging sites (src/lib/erp-logins.ts);
+# the keys are secrets HOOKKA_LOGIN_KEY / CONTS_LOGIN_KEY on this Worker.
+HOOKKA_LOGIN_URL = "https://staging.hookka-erp-testing.pages.dev"
+CONTS_LOGIN_URL = "https://staging-preview.theconts-os.pages.dev"
 
 [env.staging.observability]
 enabled = true
