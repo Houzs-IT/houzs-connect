@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { CONTACTS_COLS_COOKIE, fmt, type Dict } from "@/lib/i18n/dict";
 import { initials, tint } from "@/lib/format";
@@ -8,7 +8,7 @@ import { useShell } from "@/components/shell/ShellProvider";
 import { IconClose, IconSearch } from "@/components/icons";
 import { RowMenu } from "@/components/RowMenu";
 import { ColumnsList, DataCount, DataHead, DataMenus, WrapButton, useColumnLayout, useDataTable, type DataColumn, type DataRow } from "@/components/DataTable";
-import { bulkBlockContacts, bulkTagContacts, mergeContacts, setContactBlocked } from "./actions";
+import { bulkBlockContacts, bulkTagContacts, mergeContacts, setContactBlocked, setContactCols } from "./actions";
 import { DeleteContactButton } from "./DeleteContactButton";
 import { SearchableSelect } from "@/components/SearchableSelect";
 
@@ -43,39 +43,23 @@ export type DupPair = {
 const OPTIONAL = ["email", "source", "sourceId", "sourceUrl", "company", "remarks", "created", "blocked"] as const;
 type OptCol = (typeof OPTIONAL)[number];
 
-// Extra columns are a per-browser preference, stored in a COOKIE (not
-// localStorage) so the server renders the chosen column set on the first paint
-// instead of the table jumping wider when the client adds them after hydration.
-// The value is the OptCol keys joined by commas — all simple tokens, so the
-// cookie needs no encoding and the server/client read it the same way.
+// Extra columns are a per-person preference. The value is the OptCol keys joined
+// by commas — simple tokens, no encoding. It is held server-seeded (the page
+// reads it from the member's saved prefs, falling back to the cookie) so the
+// first paint already has the right columns — no jump on hydration. A change is
+// written to BOTH the cookie (instant on this browser) and the member's prefs
+// (so it follows them to another device).
 const NO_COLS: OptCol[] = [];
-const colListeners = new Set<() => void>();
 const YEAR = 60 * 60 * 24 * 365;
 export function parseCols(raw: string | null): OptCol[] {
   if (!raw) return NO_COLS;
   const cols = raw.split(",").filter((c): c is OptCol => (OPTIONAL as readonly string[]).includes(c));
   return cols.length ? cols : NO_COLS;
 }
-function readCookie(): string | null {
-  try {
-    const m = document.cookie.match(new RegExp(`(?:^|; )${CONTACTS_COLS_COOKIE}=([^;]*)`));
-    return m ? m[1] : null;
-  } catch {
-    return null;
-  }
-}
-let colCache: { raw: string | null; cols: OptCol[] } = { raw: null, cols: NO_COLS };
-function readCols(): OptCol[] {
-  const raw = readCookie();
-  if (raw === colCache.raw) return colCache.cols;
-  colCache = { raw, cols: parseCols(raw) };
-  return colCache.cols;
-}
-function writeCols(cols: OptCol[]) {
+function writeColsCookie(cols: OptCol[]) {
   try {
     document.cookie = `${CONTACTS_COLS_COOKIE}=${cols.join(",")}; path=/; max-age=${YEAR}; samesite=lax`;
   } catch {}
-  colListeners.forEach((l) => l());
 }
 
 function useOutside(open: boolean, close: () => void) {
@@ -173,17 +157,16 @@ export function ContactsView({
   const router = useRouter();
   const path = usePathname();
   const params = useSearchParams();
-  // Stable reference for the server snapshot: parse once per cookie string so
-  // useSyncExternalStore does not see a new array every render.
+  // Seeded from the server (member prefs → cookie), so the first client render
+  // matches the server HTML — no hydration jump, even on a new device where the
+  // cookie is empty but the saved prefs are not.
   const initialCols = useMemo(() => parseCols(initialColsRaw), [initialColsRaw]);
-  const extra = useSyncExternalStore(
-    (l) => {
-      colListeners.add(l);
-      return () => colListeners.delete(l);
-    },
-    readCols,
-    () => initialCols
-  );
+  const [extra, setExtra] = useState<OptCol[]>(initialCols);
+  const applyCols = (cols: OptCol[]) => {
+    setExtra(cols);
+    writeColsCookie(cols); // instant on this browser
+    void setContactCols(cols); // follows the person to other devices
+  };
 
   const [query, setQuery] = useState(q);
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -379,7 +362,7 @@ export function ContactsView({
                   <input
                     type="checkbox"
                     checked={extra.includes(c)}
-                    onChange={() => writeCols(extra.includes(c) ? extra.filter((x) => x !== c) : [...extra, c])}
+                    onChange={() => applyCols(extra.includes(c) ? extra.filter((x) => x !== c) : [...extra, c])}
                     className="accent-[var(--color-accent)]"
                   />
                   {colLabel[c]}

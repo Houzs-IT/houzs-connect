@@ -175,6 +175,20 @@ export const memberPhoto = connect.table("member_photo", {
   updatedBy: text("updated_by"),
 });
 
+/**
+ * Per-person UI preferences that should follow the person across devices —
+ * keyed by lower-cased email, like member_photo, so one person's choice holds in
+ * every company they belong to. Today: the contacts table's optional columns
+ * (comma-joined keys). Self-applied at runtime (db/ensure-member-pref.ts); a
+ * deploy before its migration must not break the contacts page.
+ */
+export const memberPref = connect.table("member_pref", {
+  email: text("email").primaryKey(),
+  /** Comma-joined optional contact-column keys (see ContactsView). */
+  contactsCols: text("contacts_cols"),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
 export const department = connect.table(
   "department",
   {
