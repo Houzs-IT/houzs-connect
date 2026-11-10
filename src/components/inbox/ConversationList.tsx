@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { useParams, useSearchParams } from "next/navigation";
 import { initials, listTime, previewText, shortDay, tint } from "@/lib/format";
@@ -63,6 +63,47 @@ const NO_FILTERS: Filters = {
   deptId: "",
   msgType: "",
 };
+
+/**
+ * Saved views — named filter presets, remembered per browser in localStorage.
+ * They are applied on demand (from the filter popover), never on load, so there
+ * is no SSR/hydration concern: the server snapshot is simply an empty list and
+ * the browser fills it in after mount.
+ */
+export type SavedView = { name: string; filters: Filters };
+const VIEWS_KEY = "hc_inbox_views";
+const NO_VIEWS: SavedView[] = [];
+const viewListeners = new Set<() => void>();
+let viewsCache: { raw: string | null; views: SavedView[] } = { raw: null, views: NO_VIEWS };
+function readViews(): SavedView[] {
+  let raw: string | null = null;
+  try {
+    raw = localStorage.getItem(VIEWS_KEY);
+  } catch {}
+  if (raw === viewsCache.raw) return viewsCache.views;
+  let views: SavedView[] = NO_VIEWS;
+  try {
+    const parsed = JSON.parse(raw ?? "[]") as unknown;
+    if (Array.isArray(parsed)) {
+      views = parsed.filter(
+        (v): v is SavedView => !!v && typeof v.name === "string" && !!v.filters
+      );
+    }
+  } catch {}
+  viewsCache = { raw, views };
+  return views;
+}
+function writeViews(views: SavedView[]) {
+  try {
+    localStorage.setItem(VIEWS_KEY, JSON.stringify(views));
+  } catch {}
+  viewListeners.forEach((l) => l());
+}
+function subscribeViews(l: () => void) {
+  viewListeners.add(l);
+  return () => viewListeners.delete(l);
+}
+
 function activeFilterCount(f: Filters) {
   return (
     Number(f.starred) +
@@ -110,6 +151,18 @@ export function ConversationList({
   const [q, setQ] = useState("");
   const [filters, setFilters] = useState<Filters>(NO_FILTERS);
   const [filterOpen, setFilterOpen] = useState(false);
+  const savedViews = useSyncExternalStore(subscribeViews, readViews, () => NO_VIEWS);
+  const applyView = (v: SavedView) => {
+    setFilters(v.filters);
+    setFilterOpen(false);
+  };
+  const saveView = (name: string) => {
+    const n = name.trim();
+    if (!n) return;
+    // Replacing a same-named view updates it rather than duplicating.
+    writeViews([...savedViews.filter((v) => v.name !== n), { name: n, filters }]);
+  };
+  const deleteView = (name: string) => writeViews(savedViews.filter((v) => v.name !== name));
   const [older, setOlder] = useState<ConversationListItem[]>([]);
   const [loading, setLoading] = useState(false);
   // null until the rail has paged once, so the server's answer stands until
@@ -329,6 +382,10 @@ export function ConversationList({
           onChange={setFilters}
           matching={refined.length}
           onClose={() => setFilterOpen(false)}
+          views={savedViews}
+          onApplyView={applyView}
+          onSaveView={saveView}
+          onDeleteView={deleteView}
         />
       )}
 
@@ -624,15 +681,30 @@ function FilterPopover({
   onChange,
   matching,
   onClose,
+  views,
+  onApplyView,
+  onSaveView,
+  onDeleteView,
 }: {
   items: ConversationListItem[];
   value: Filters;
   onChange: (f: Filters) => void;
   matching: number;
   onClose: () => void;
+  views: SavedView[];
+  onApplyView: (v: SavedView) => void;
+  onSaveView: (name: string) => void;
+  onDeleteView: (name: string) => void;
 }) {
   const { t } = useShell();
   const s = t.service;
+  const [viewName, setViewName] = useState("");
+  const hasActive = activeFilterCount(value) > 0;
+  const commitView = () => {
+    if (!viewName.trim() || !hasActive) return;
+    onSaveView(viewName);
+    setViewName("");
+  };
 
   const opts = useMemo(() => {
     const tags = new Map<string, { id: string; name: string; color: string }>();
@@ -681,6 +753,55 @@ function FilterPopover({
         </div>
 
         <div className="scroll-thin flex min-h-0 flex-1 flex-col gap-3.5 overflow-y-auto px-3.5 py-3">
+          {/* Saved views — named filter presets (per browser). */}
+          <div className="flex flex-col gap-[7px]">
+            <span className="text-[10.5px] font-semibold uppercase tracking-[0.14em] text-[var(--color-faint)]">
+              {s.savedViews}
+            </span>
+            {views.length > 0 && (
+              <div className="flex flex-wrap gap-1.5">
+                {views.map((v) => (
+                  <span
+                    key={v.name}
+                    className="flex items-center gap-1 rounded-full border border-[var(--color-border)] bg-[var(--color-surface-2)] py-1 pl-2.5 pr-1 text-[12px] text-[var(--color-muted)]"
+                  >
+                    <button type="button" onClick={() => onApplyView(v)} className="max-w-[160px] truncate font-medium hover:text-[var(--color-ink)]">
+                      {v.name}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => onDeleteView(v.name)}
+                      aria-label={`${s.deleteView}: ${v.name}`}
+                      className="grid h-4 w-4 shrink-0 place-items-center rounded-full text-[var(--color-faint)] hover:bg-[var(--color-surface-dim)] hover:text-[var(--color-danger)]"
+                    >
+                      <IconClose width={11} height={11} />
+                    </button>
+                  </span>
+                ))}
+              </div>
+            )}
+            <div className="flex gap-1.5">
+              <input
+                value={viewName}
+                onChange={(e) => setViewName(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && commitView()}
+                placeholder={s.saveViewPh}
+                maxLength={30}
+                className={`${selectCls} flex-1`}
+              />
+              <button
+                type="button"
+                onClick={commitView}
+                disabled={!viewName.trim() || !hasActive}
+                title={hasActive ? undefined : s.saveViewHint}
+                className="shrink-0 rounded-[8px] border border-[var(--color-border)] bg-[var(--color-surface)] px-3 text-[12.5px] font-semibold text-[var(--color-ink)] hover:bg-[var(--color-surface-2)] disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                {s.saveView}
+              </button>
+            </div>
+            {!hasActive && <span className="text-[11px] text-[var(--color-faint)]">{s.saveViewHint}</span>}
+          </div>
+
           <div className="flex flex-col gap-[7px]">
             <span className="text-[10.5px] font-semibold uppercase tracking-[0.14em] text-[var(--color-faint)]">
               {s.quickFilters}
