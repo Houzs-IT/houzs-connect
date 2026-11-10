@@ -229,24 +229,31 @@ export function ContactsView({
     router.refresh();
   }
 
-  function exportSelected() {
+  async function exportSelected() {
     const pick = rows.filter((r) => selected.has(r.id));
-    const cell = (v: unknown) => {
-      const x = v == null ? "" : String(v);
-      return /[",\n]/.test(x) ? `"${x.replace(/"/g, '""')}"` : x;
-    };
-    const lines = [
-      ["Name", "Phone", "Email", "Order", "Sales", "Tags", "Source"].join(","),
-      ...pick.map((r) =>
-        [r.name, r.phone, r.email, r.orderRef, r.sales, r.tags.map((x) => x.name).join(" "), r.source].map(cell).join(",")
-      ),
+    if (pick.length === 0) return;
+    // SheetJS is heavy; load it only when someone actually exports (same
+    // dynamic import the .xlsx IMPORT uses). A real .xlsx, not a CSV, because
+    // Excel is what the office opens it in.
+    const XLSX = await import("xlsx");
+    const header = ["Name", "Phone", "Email", "Order", "Sales", "Tags", "Source"];
+    const aoa = [
+      header,
+      ...pick.map((r) => [
+        r.name,
+        r.phone,
+        r.email ?? "",
+        r.orderRef ?? "",
+        r.sales ?? "",
+        r.tags.map((x) => x.name).join(" "),
+        r.source ?? "",
+      ]),
     ];
-    const url = URL.createObjectURL(new Blob(["﻿" + lines.join("\r\n")], { type: "text/csv;charset=utf-8" }));
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `contacts-${pick.length}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
+    const ws = XLSX.utils.aoa_to_sheet(aoa);
+    ws["!cols"] = [{ wch: 22 }, { wch: 16 }, { wch: 24 }, { wch: 16 }, { wch: 12 }, { wch: 20 }, { wch: 14 }];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Contacts");
+    XLSX.writeFile(wb, `contacts-${pick.length}.xlsx`);
   }
 
   const colLabel: Record<OptCol, string> = {
@@ -411,7 +418,7 @@ export function ContactsView({
             <button type="button" onClick={() => setBulk(bulk === "campaign" ? null : "campaign")} className="rounded-[6px] px-2.5 py-1 hover:bg-white/10">
               {s.addToCampaign}
             </button>
-            <button type="button" onClick={exportSelected} className="rounded-[6px] px-2.5 py-1 hover:bg-white/10">
+            <button type="button" onClick={() => void exportSelected()} className="rounded-[6px] px-2.5 py-1 hover:bg-white/10">
               {s.export}
             </button>
             <button
