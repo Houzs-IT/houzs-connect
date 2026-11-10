@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { useParams, useSearchParams } from "next/navigation";
 import { initials, listTime, previewText, shortDay, tint } from "@/lib/format";
@@ -10,7 +10,7 @@ import { IconClose, IconSearch } from "@/components/icons";
 import { SearchableSelect } from "@/components/SearchableSelect";
 import { useShell } from "@/components/shell/ShellProvider";
 import { SlaTimer, isOverdue } from "./SlaTimer";
-import { fetchConversations } from "@/app/(app)/inbox/actions";
+import { fetchConversations, searchConversations } from "@/app/(app)/inbox/actions";
 import { NewConversation } from "./NewConversation";
 
 export type ConversationListItem = {
@@ -144,6 +144,56 @@ export function ConversationList({
   const [moreAfterPaging, setMoreAfterPaging] = useState<boolean | null>(null);
   const now = useNow();
 
+  // ── Whole-book search (server) ──────────────────────────────────────────
+  // The rail only holds a page, so filtering it cannot find an older/closed
+  // conversation by order number. A non-empty query hits the server, which
+  // searches EVERY conversation by name / phone / SO number / message text.
+  const [serverHits, setServerHits] = useState<ConversationListItem[] | null>(null);
+  const [searching, setSearching] = useState(false);
+  const [searchFailed, setSearchFailed] = useState(false);
+  const [truncated, setTruncated] = useState(false);
+  const searchSeq = useRef(0);
+  const runSearch = useCallback(async (term: string) => {
+    const seq = ++searchSeq.current;
+    setSearching(true);
+    setSearchFailed(false);
+    try {
+      const res = await searchConversations(term);
+      if (seq !== searchSeq.current) return; // a newer keystroke already won
+      setServerHits(res.items);
+      setTruncated(res.truncated);
+    } catch {
+      if (seq !== searchSeq.current) return;
+      setServerHits([]);
+      setTruncated(false);
+      setSearchFailed(true); // "search failed" ≠ "no results" — say so honestly
+    } finally {
+      if (seq === searchSeq.current) setSearching(false);
+    }
+  }, []);
+  useEffect(() => {
+    const term = q.trim();
+    // All state changes run in the timer callback (never synchronously in the
+    // effect body): typing clears to the live list after a tick, a real term
+    // searches after a debounce.
+    const id = setTimeout(
+      () => {
+        if (!term) {
+          searchSeq.current++; // drop any in-flight result
+          setServerHits(null);
+          setSearching(false);
+          setSearchFailed(false);
+          setTruncated(false);
+        } else {
+          void runSearch(term);
+        }
+      },
+      term ? 250 : 0
+    );
+    return () => clearTimeout(id);
+  }, [q, runSearch]);
+  const searchActive = q.trim().length > 0;
+
   const toggleDensity = () => writeCompact(!compact);
 
   const all = useMemo(() => {
@@ -187,14 +237,11 @@ export function ConversationList({
     return true;
   });
 
-  // ── Search + popover filters ──────────────────────────────────────────
-  const needle = q.trim().toLowerCase();
-  const refined = scoped.filter((c) => {
-    if (
-      needle &&
-      !`${c.name} ${c.phone} ${c.orderRef ?? ""}`.toLowerCase().includes(needle)
-    )
-      return false;
+  // ── Popover filters (starred / unread / bot / tag / agent / dept / type) ──
+  // Text search is no longer a client filter over loaded rows — it is the
+  // server search above. These are the funnel-popover filters, applied to the
+  // loaded rail and (when a search is active) to the server hits.
+  const passesFilters = (c: ConversationListItem) => {
     if (filters.starred && !c.starred) return false;
     if (filters.unread && c.unread === 0) return false;
     if (filters.bot && !c.botActive) return false;
@@ -204,7 +251,8 @@ export function ConversationList({
     if (filters.deptId && c.departmentId !== filters.deptId) return false;
     if (filters.msgType && c.lastType !== filters.msgType) return false;
     return true;
-  });
+  };
+  const refined = scoped.filter(passesFilters);
 
   // Departments present in what is loaded, for the tab's chip bar.
   const depts = useMemo(() => {
@@ -230,6 +278,9 @@ export function ConversationList({
 
   let rows =
     tab === "sla" ? overdue : tab === "dept" ? inDept : tab === "unread" ? unread : refined;
+  // A search replaces the tab list with whole-book hits (still subject to the
+  // funnel filters), so order-number lookups find threads that were never paged.
+  if (searchActive) rows = (serverHits ?? []).filter(passesFilters);
   if (filters.sort === "oldest") {
     rows = [...rows].sort((a, b) => (a.lastAt ?? "").localeCompare(b.lastAt ?? ""));
   } else if (filters.sort === "wait") {
@@ -307,7 +358,8 @@ export function ConversationList({
         />
       )}
 
-      {/* All · Unread · Dept · Overdue */}
+      {/* All · Unread · Dept · Overdue — hidden while searching the whole book */}
+      {!searchActive && (
       <div className="flex items-end gap-3 border-b border-[var(--color-border)] px-3 pt-2.5">
         {tabs.map((tb) => {
           const on = tab === tb.key;
@@ -338,8 +390,9 @@ export function ConversationList({
           );
         })}
       </div>
+      )}
 
-      {tab === "dept" && depts.length > 0 && (
+      {!searchActive && tab === "dept" && depts.length > 0 && (
         <div className="flex flex-wrap gap-1.5 border-b border-[var(--color-border-subtle)] px-3 py-2">
           {depts.map((d) => {
             const on = d.id === deptPick;
@@ -362,7 +415,29 @@ export function ConversationList({
       )}
 
       <div className="scroll-thin min-h-0 flex-1 overflow-y-auto">
-        {rows.length === 0 && (
+        {/* Search states — "failed" is told apart from "no results" so an agent
+            on weak wifi does not read a connectivity error as "doesn't exist". */}
+        {searchActive && searchFailed && (
+          <div className="p-6 text-center">
+            <p className="text-[13px] text-[var(--color-danger)]">{s.searchFailed}</p>
+            <button
+              type="button"
+              onClick={() => runSearch(q.trim())}
+              className="mt-2 text-[12.5px] font-semibold text-[var(--color-accent)] hover:underline"
+            >
+              {s.retry}
+            </button>
+          </div>
+        )}
+        {searchActive && !searchFailed && searching && rows.length === 0 && (
+          <p className="p-6 text-center text-[13px] text-[var(--color-faint)]">{s.searching}</p>
+        )}
+        {searchActive && !searchFailed && !searching && rows.length === 0 && (
+          <p className="p-6 text-center text-[13px] text-[var(--color-faint)]">
+            {fmt(s.noMatches, { q: q.trim() })}
+          </p>
+        )}
+        {!searchActive && rows.length === 0 && (
           <p className="p-6 text-center text-[13px] text-[var(--color-faint)]">{s.noConvos}</p>
         )}
         {rows.map((c) => (
@@ -378,7 +453,13 @@ export function ConversationList({
           />
         ))}
 
-        {canLoadMore && (
+        {searchActive && truncated && rows.length > 0 && (
+          <p className="px-3 py-2.5 text-center text-[10.5px] text-[var(--color-faint)]">
+            {fmt(s.searchTruncated, { n: rows.length })}
+          </p>
+        )}
+
+        {!searchActive && canLoadMore && (
           <div className="p-3">
             <button
               type="button"
@@ -388,9 +469,9 @@ export function ConversationList({
             >
               {loading ? s.loading : s.loadMore}
             </button>
-            {/* The filters above only ever see what is loaded, so an empty
-                result is not proof the conversation does not exist. */}
-            {(needle || nFilters > 0) && (
+            {/* The funnel filters above only see what is loaded; an empty result
+                is not proof. (Text search is whole-book, so it is exempt.) */}
+            {nFilters > 0 && (
               <p className="mt-1.5 text-center text-[10.5px] text-[var(--color-faint)]">
                 {fmt(s.searchingLoaded, { n: all.length })}
               </p>

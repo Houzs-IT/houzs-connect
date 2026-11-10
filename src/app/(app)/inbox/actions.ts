@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { and, desc, eq, gt, inArray, isNotNull } from "drizzle-orm";
+import { and, desc, eq, gt, inArray, isNotNull, or, sql, type SQL } from "drizzle-orm";
 import { getCurrentMember } from "@/lib/current-member";
 import { getDb, type DB } from "@/db/client";
 import { automationRun, contact, conversation, conversationMember, member, message } from "@/db/schema";
@@ -41,50 +41,20 @@ async function authorizeConversation(conversationId: string) {
 /** How many conversations the rail loads per page — newest first. */
 const PAGE_SIZE = 200;
 
-/**
- * An offset this deep is already tens of thousands of conversations back; the
- * value arrives from the browser, so cap it rather than let a hand-made call
- * ask Postgres to walk an unbounded scan.
- */
-const MAX_OFFSET = 20_000;
+/** Cap on how many matches a search returns in one go. */
+const SEARCH_LIMIT = 50;
 
 /**
- * One page of the conversation rail. The inbox layout awaits this for the first
- * page and the rail calls it again for each "Load more" — one query, one shape,
- * so the appended rows cannot drift from the rendered ones.
- *
- * Paging is by offset, not by a keyset cursor on lastMessageAt: that column is
- * nullable, and in a DESC order Postgres puts those NULLs first, which no
- * "older than X" cursor can express. The rail dedupes by id, so the one row
- * that can shift while paging is absorbed rather than shown twice.
+ * The one relational shape the rail renders, so the paged list, "Load more" and
+ * search all return identical rows. `where` carries the scope (company +
+ * visibility + freshness) and, for search, the match predicate.
  */
-export async function fetchConversations(
-  offset = 0
-): Promise<{ items: ConversationListItem[]; hasMore: boolean }> {
-  const me = await getCurrentMember();
-  if (!me) return { items: [], hasMore: false };
-  const db = getDb();
-
-  const off = Math.min(Math.max(0, Math.floor(Number(offset) || 0)), MAX_OFFSET);
-
-  const allMembers = await db.query.member.findMany({
-    columns: { id: true, managerId: true },
-  });
-  const vis = getVisibility(me, allMembers, await can(me, "seeAll"));
-
-  // The watcher links are read below; on a deploy that lands before the
-  // migration the table may not exist yet (see ensure-conversation-member.ts).
-  await ensureConversationMemberTable(db).catch(() => {});
-
-  // One row over the page size is how "is there anything older" gets answered
-  // without a second COUNT over the same predicate.
-  const rows = await db.query.conversation.findMany({
-    // Fresh (db/fresh.ts): the rail is refreshed every few seconds to surface new
-    // customer messages; a cached page would sit a minute behind.
-    where: and(conversationCompanyWhere(db, me.companyId), conversationVisibilityWhere(vis), bypassReadCache()),
+function convoQuery(db: DB, where: SQL | undefined, opts: { limit: number; offset?: number }) {
+  return db.query.conversation.findMany({
+    where,
     orderBy: [desc(conversation.lastMessageAt), desc(conversation.createdAt)],
-    limit: PAGE_SIZE + 1,
-    offset: off,
+    limit: opts.limit,
+    offset: opts.offset,
     with: {
       contact: true,
       assignedAgent: true,
@@ -94,10 +64,15 @@ export async function fetchConversations(
       messages: { orderBy: (m, { desc }) => desc(m.createdAt), limit: 1 },
     },
   });
+}
+type ConvoRow = Awaited<ReturnType<typeof convoQuery>>[number];
 
-  const hasMore = rows.length > PAGE_SIZE;
-  const page = hasMore ? rows.slice(0, PAGE_SIZE) : rows;
-
+/**
+ * Turn conversation rows into the rail's list items. Factored out of
+ * fetchConversations so search returns the exact same shape — one mapper, no
+ * drift between the paged list and a search result.
+ */
+async function toListItems(db: DB, page: ConvoRow[]): Promise<ConversationListItem[]> {
   // Customers a flow is currently waiting on — the "Bot handling" filter. One
   // read for the whole page (automation_run is indexed by contact_id, mig 0008).
   const contactIds = [...new Set(page.map((c) => c.contactId))];
@@ -112,7 +87,7 @@ export async function fetchConversations(
   // One lookup for every assignee on the page (lib/member-photo.ts).
   const agentPhotos = await photoSrcs(page.map((c) => c.assignedAgentId));
 
-  const items = page.map((c) => {
+  return page.map((c) => {
     const latest = c.messages[0];
     const a = attrs(c.contact.attributes);
     return {
@@ -151,8 +126,98 @@ export async function fetchConversations(
       botActive: botActive.has(c.contactId),
     };
   });
+}
 
-  return { items, hasMore };
+type Me = NonNullable<Awaited<ReturnType<typeof getCurrentMember>>>;
+
+/** The member's conversation scope (company + role visibility). */
+async function conversationScope(db: DB, me: Me) {
+  const allMembers = await db.query.member.findMany({ columns: { id: true, managerId: true } });
+  const vis = getVisibility(me, allMembers, await can(me, "seeAll"));
+  return and(conversationCompanyWhere(db, me.companyId), conversationVisibilityWhere(vis));
+}
+
+/**
+ * An offset this deep is already tens of thousands of conversations back; the
+ * value arrives from the browser, so cap it rather than let a hand-made call
+ * ask Postgres to walk an unbounded scan.
+ */
+const MAX_OFFSET = 20_000;
+
+/**
+ * One page of the conversation rail. The inbox layout awaits this for the first
+ * page and the rail calls it again for each "Load more" — one query, one shape,
+ * so the appended rows cannot drift from the rendered ones.
+ *
+ * Paging is by offset, not by a keyset cursor on lastMessageAt: that column is
+ * nullable, and in a DESC order Postgres puts those NULLs first, which no
+ * "older than X" cursor can express. The rail dedupes by id, so the one row
+ * that can shift while paging is absorbed rather than shown twice.
+ */
+export async function fetchConversations(
+  offset = 0
+): Promise<{ items: ConversationListItem[]; hasMore: boolean }> {
+  const me = await getCurrentMember();
+  if (!me) return { items: [], hasMore: false };
+  const db = getDb();
+
+  const off = Math.min(Math.max(0, Math.floor(Number(offset) || 0)), MAX_OFFSET);
+
+  // The watcher links are read by convoQuery; on a deploy that lands before the
+  // migration the table may not exist yet (see ensure-conversation-member.ts).
+  await ensureConversationMemberTable(db).catch(() => {});
+
+  // One row over the page size answers "is there anything older" without a
+  // second COUNT. Fresh (db/fresh.ts): the rail refreshes every few seconds, so
+  // a cached page would sit a minute behind.
+  const scope = await conversationScope(db, me);
+  const rows = await convoQuery(db, and(scope, bypassReadCache()), { limit: PAGE_SIZE + 1, offset: off });
+
+  const hasMore = rows.length > PAGE_SIZE;
+  const page = hasMore ? rows.slice(0, PAGE_SIZE) : rows;
+  return { items: await toListItems(db, page), hasMore };
+}
+
+/**
+ * Search the WHOLE conversation book — not just the loaded rail — by customer
+ * name, phone, order (SO) number, or message text. Returns the same row shape as
+ * the rail, so a search for an order number finds an older or even closed
+ * conversation that was never paged in (the exact gap the rail's client-side
+ * filter had). Case-insensitive substring, scoped to the member's company and
+ * visibility, newest first, capped at SEARCH_LIMIT (the caller is told when the
+ * cap was hit so it can say "refine your search" instead of implying these are
+ * all of them).
+ */
+export async function searchConversations(
+  term: string
+): Promise<{ items: ConversationListItem[]; truncated: boolean }> {
+  const me = await getCurrentMember();
+  if (!me) return { items: [], truncated: false };
+  // Strip the LIKE wildcards so a stray % / _ in the term is a literal, not a
+  // match-everything.
+  const cleaned = (term ?? "").replace(/[%_\\]/g, "").trim();
+  if (!cleaned) return { items: [], truncated: false };
+  const db = getDb();
+  await ensureConversationMemberTable(db).catch(() => {});
+
+  const like = `%${cleaned}%`;
+  const digits = cleaned.replace(/\D/g, "");
+  // Match the contact (name / order ref / phone) OR any message body. EXISTS so
+  // one conversation is one row however many messages hit.
+  const match = or(
+    sql`exists (select 1 from connect.contact c where c.id = ${conversation.contactId} and (
+      c.name ilike ${like}
+      or (c.attributes ->> 'ref_1') ilike ${like}
+      ${digits ? sql`or c.phone like ${`%${digits}%`}` : sql``}
+    ))`,
+    sql`exists (select 1 from connect.message m where m.conversation_id = ${conversation.id} and m.body ilike ${like})`
+  );
+
+  const scope = await conversationScope(db, me);
+  const rows = await convoQuery(db, and(scope, match, bypassReadCache()), { limit: SEARCH_LIMIT + 1 });
+  const truncated = rows.length > SEARCH_LIMIT;
+  const page = truncated ? rows.slice(0, SEARCH_LIMIT) : rows;
+  return { items: await toListItems(db, page), truncated };
 }
 
 /**
