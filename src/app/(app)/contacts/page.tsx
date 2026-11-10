@@ -4,7 +4,7 @@ import { contact, contactField, tag } from "@/db/schema";
 import { PageChrome } from "@/components/PageChrome";
 import { getCurrentMember } from "@/lib/current-member";
 import { attrs, formatPhone, previewText, waIdentifier } from "@/lib/format";
-import { getDict } from "@/lib/i18n/server";
+import { getContactsColsRaw, getDict } from "@/lib/i18n/server";
 import { ensureContactColumns, normalisePhone } from "./actions";
 import { ContactDetail } from "./ContactDetail";
 import { PhoneList } from "./PhoneList";
@@ -143,6 +143,7 @@ export default async function ContactsPage({ searchParams }: { searchParams: Pro
           stateOptions={opts.states}
           duplicates={dups}
           activeId={activeId}
+          initialColsRaw={await getContactsColsRaw()}
         />
         </div>
         {activeId && (

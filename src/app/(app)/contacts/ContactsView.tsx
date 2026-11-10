@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { fmt, type Dict } from "@/lib/i18n/dict";
+import { CONTACTS_COLS_COOKIE, fmt, type Dict } from "@/lib/i18n/dict";
 import { initials, tint } from "@/lib/format";
 import { useShell } from "@/components/shell/ShellProvider";
 import { IconClose, IconSearch } from "@/components/icons";
@@ -43,28 +43,37 @@ export type DupPair = {
 const OPTIONAL = ["email", "source", "sourceId", "sourceUrl", "company", "remarks", "created", "blocked"] as const;
 type OptCol = (typeof OPTIONAL)[number];
 
-// Extra columns are a per-browser preference (useSyncExternalStore: the server
-// renders the default set, the browser switches on hydration).
-const COLS_KEY = "hc_contacts_cols";
-const colListeners = new Set<() => void>();
-let colCache: { raw: string | null; cols: OptCol[] } = { raw: null, cols: [] };
-function readCols(): OptCol[] {
-  let raw: string | null = null;
-  try {
-    raw = localStorage.getItem(COLS_KEY);
-  } catch {}
-  if (raw === colCache.raw) return colCache.cols;
-  let cols: OptCol[] = [];
-  try {
-    cols = (JSON.parse(raw ?? "[]") as string[]).filter((c): c is OptCol => (OPTIONAL as readonly string[]).includes(c));
-  } catch {}
-  colCache = { raw, cols };
-  return cols;
-}
+// Extra columns are a per-browser preference, stored in a COOKIE (not
+// localStorage) so the server renders the chosen column set on the first paint
+// instead of the table jumping wider when the client adds them after hydration.
+// The value is the OptCol keys joined by commas — all simple tokens, so the
+// cookie needs no encoding and the server/client read it the same way.
 const NO_COLS: OptCol[] = [];
+const colListeners = new Set<() => void>();
+const YEAR = 60 * 60 * 24 * 365;
+export function parseCols(raw: string | null): OptCol[] {
+  if (!raw) return NO_COLS;
+  const cols = raw.split(",").filter((c): c is OptCol => (OPTIONAL as readonly string[]).includes(c));
+  return cols.length ? cols : NO_COLS;
+}
+function readCookie(): string | null {
+  try {
+    const m = document.cookie.match(new RegExp(`(?:^|; )${CONTACTS_COLS_COOKIE}=([^;]*)`));
+    return m ? m[1] : null;
+  } catch {
+    return null;
+  }
+}
+let colCache: { raw: string | null; cols: OptCol[] } = { raw: null, cols: NO_COLS };
+function readCols(): OptCol[] {
+  const raw = readCookie();
+  if (raw === colCache.raw) return colCache.cols;
+  colCache = { raw, cols: parseCols(raw) };
+  return colCache.cols;
+}
 function writeCols(cols: OptCol[]) {
   try {
-    localStorage.setItem(COLS_KEY, JSON.stringify(cols));
+    document.cookie = `${CONTACTS_COLS_COOKIE}=${cols.join(",")}; path=/; max-age=${YEAR}; samesite=lax`;
   } catch {}
   colListeners.forEach((l) => l());
 }
@@ -141,6 +150,7 @@ export function ContactsView({
   stateOptions,
   duplicates,
   activeId,
+  initialColsRaw,
 }: {
   rows: ContactRow[];
   total: number;
@@ -154,19 +164,25 @@ export function ContactsView({
   stateOptions: string[];
   duplicates: DupPair[];
   activeId: string | null;
+  /** The `hc_contacts_cols` cookie, read server-side, so the first paint already
+   *  has this browser's chosen columns (no hydration jump). */
+  initialColsRaw: string;
 }) {
   const { t } = useShell();
   const s = t.contacts;
   const router = useRouter();
   const path = usePathname();
   const params = useSearchParams();
+  // Stable reference for the server snapshot: parse once per cookie string so
+  // useSyncExternalStore does not see a new array every render.
+  const initialCols = useMemo(() => parseCols(initialColsRaw), [initialColsRaw]);
   const extra = useSyncExternalStore(
     (l) => {
       colListeners.add(l);
       return () => colListeners.delete(l);
     },
     readCols,
-    () => NO_COLS
+    () => initialCols
   );
 
   const [query, setQuery] = useState(q);

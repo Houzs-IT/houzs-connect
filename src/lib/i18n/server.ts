@@ -1,6 +1,6 @@
 import { cache } from "react";
 import { cookies } from "next/headers";
-import { DICTS, LANG_COOKIE, MENU_COOKIE, PANEL_COOKIE, parseLang } from "./dict";
+import { CONTACTS_COLS_COOKIE, DENSITY_COOKIE, DICTS, LANG_COOKIE, MENU_COOKIE, PANEL_COOKIE, parseLang } from "./dict";
 
 /** The viewer's language, from the `hc_lang` cookie (default English). */
 export const getLang = cache(async () => {
@@ -23,4 +23,18 @@ export const getPanelCollapsed = cache(async () => {
 export const getMenuCollapsed = cache(async () => {
   const jar = await cookies();
   return jar.get(MENU_COOKIE)?.value === "0";
+});
+
+/** Whether this browser chose the compact inbox rows (`hc_inbox_density=compact`). */
+export const getDensityCompact = cache(async () => {
+  const jar = await cookies();
+  return jar.get(DENSITY_COOKIE)?.value === "compact";
+});
+
+/** The raw `hc_contacts_cols` cookie (a JSON array string) or "" when unset. The
+ *  client parses and validates it; the server only needs to hand the same string
+ *  back so the table's first paint already has the browser's chosen columns. */
+export const getContactsColsRaw = cache(async () => {
+  const jar = await cookies();
+  return jar.get(CONTACTS_COLS_COOKIE)?.value ?? "";
 });

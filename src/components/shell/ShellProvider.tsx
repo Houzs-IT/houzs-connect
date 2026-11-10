@@ -2,7 +2,7 @@
 
 import { createContext, useCallback, useContext, useState } from "react";
 import { useRouter } from "next/navigation";
-import { DICTS, LANG_COOKIE, MENU_COOKIE, PANEL_COOKIE, type Dict, type Lang } from "@/lib/i18n/dict";
+import { DENSITY_COOKIE, DICTS, LANG_COOKIE, MENU_COOKIE, PANEL_COOKIE, type Dict, type Lang } from "@/lib/i18n/dict";
 
 type Shell = {
   lang: Lang;
@@ -13,6 +13,9 @@ type Shell = {
   /** The customer panel beside a conversation is put away. */
   panelCollapsed: boolean;
   setPanelCollapsed: (v: boolean) => void;
+  /** The inbox conversation rows are in the dense layout. */
+  compact: boolean;
+  setCompact: (v: boolean) => void;
 };
 
 const Ctx = createContext<Shell | null>(null);
@@ -32,17 +35,20 @@ export function ShellProvider({
   lang: initialLang,
   menuCollapsed: initialCollapsed,
   panelCollapsed: initialPanel = false,
+  densityCompact: initialCompact = false,
   children,
 }: {
   lang: Lang;
   menuCollapsed: boolean;
   panelCollapsed?: boolean;
+  densityCompact?: boolean;
   children: React.ReactNode;
 }) {
   const router = useRouter();
   const [lang, setLangState] = useState(initialLang);
   const [menuCollapsed, setCollapsed] = useState(initialCollapsed);
   const [panelCollapsed, setPanel] = useState(initialPanel);
+  const [compact, setCompactState] = useState(initialCompact);
 
   const setLang = useCallback(
     (l: Lang) => {
@@ -65,9 +71,14 @@ export function ShellProvider({
     setPanel(v);
   }, []);
 
+  const setCompact = useCallback((v: boolean) => {
+    writeCookie(DENSITY_COOKIE, v ? "compact" : "expanded");
+    setCompactState(v);
+  }, []);
+
   return (
     <Ctx.Provider
-      value={{ lang, t: DICTS[lang], setLang, menuCollapsed, setMenuCollapsed, panelCollapsed, setPanelCollapsed }}
+      value={{ lang, t: DICTS[lang], setLang, menuCollapsed, setMenuCollapsed, panelCollapsed, setPanelCollapsed, compact, setCompact }}
     >
       {children}
     </Ctx.Provider>
