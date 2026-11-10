@@ -202,12 +202,15 @@ export async function searchConversations(
 
   const like = `%${cleaned}%`;
   const digits = cleaned.replace(/\D/g, "");
-  // Match the contact (name / order ref / phone) OR any message body. EXISTS so
+  // Match the contact (name / any order reference / phone) OR any message body.
+  // "Order reference" is every attribute whose key starts with `ref` — the SO
+  // number (ref_1, ref_2, …) AND the separate "Ref No." (ref_no_1, ref_no_2, …)
+  // shown on the order panel, so a search by either finds the thread. EXISTS so
   // one conversation is one row however many messages hit.
   const match = or(
     sql`exists (select 1 from connect.contact c where c.id = ${conversation.contactId} and (
       c.name ilike ${like}
-      or (c.attributes ->> 'ref_1') ilike ${like}
+      or exists (select 1 from jsonb_each_text(c.attributes) kv where kv.key like 'ref%' and kv.value ilike ${like})
       ${digits ? sql`or c.phone like ${`%${digits}%`}` : sql``}
     ))`,
     sql`exists (select 1 from connect.message m where m.conversation_id = ${conversation.id} and m.body ilike ${like})`
