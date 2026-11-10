@@ -1,11 +1,18 @@
 import { cache } from "react";
 import { cookies } from "next/headers";
-import { CONTACTS_COLS_COOKIE, DENSITY_COOKIE, DICTS, LANG_COOKIE, MENU_COOKIE, PANEL_COOKIE, parseLang } from "./dict";
+import { CONTACTS_COLS_COOKIE, DENSITY_COOKIE, DICTS, LANG_COOKIE, MENU_COOKIE, PANEL_COOKIE, THEME_COOKIE, parseLang, parseTheme } from "./dict";
 
 /** The viewer's language, from the `hc_lang` cookie (default English). */
 export const getLang = cache(async () => {
   const jar = await cookies();
   return parseLang(jar.get(LANG_COOKIE)?.value);
+});
+
+/** The viewer's theme, from the `hc_theme` cookie (default light). Read in the
+ *  root layout so <html data-theme> is right on the first paint — no flash. */
+export const getTheme = cache(async () => {
+  const jar = await cookies();
+  return parseTheme(jar.get(THEME_COOKIE)?.value);
 });
 
 /** The dictionary for the viewer's language. */

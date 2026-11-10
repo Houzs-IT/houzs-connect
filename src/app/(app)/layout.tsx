@@ -8,7 +8,7 @@ import { PresencePing } from "@/components/shell/PresencePing";
 import { NotifyPoller } from "@/components/shell/NotifyPoller";
 import { UpdateBanner } from "@/components/shell/UpdateBanner";
 import { touchPresence } from "@/lib/presence";
-import { getDensityCompact, getLang, getMenuCollapsed, getPanelCollapsed } from "@/lib/i18n/server";
+import { getDensityCompact, getLang, getMenuCollapsed, getPanelCollapsed, getTheme } from "@/lib/i18n/server";
 import { getDb } from "@/db/client";
 import { ensureContactColumns } from "@/db/ensure";
 import { ensureChannelColumns } from "@/db/ensure-channel";
@@ -83,7 +83,7 @@ export default async function AppLayout({
   // as the first child of the row; every page renders its own column
   // (PageChrome), so the two simply sit side by side.
   return (
-    <ShellProvider lang={await getLang()} menuCollapsed={await getMenuCollapsed()} panelCollapsed={await getPanelCollapsed()} densityCompact={await getDensityCompact()}>
+    <ShellProvider lang={await getLang()} menuCollapsed={await getMenuCollapsed()} panelCollapsed={await getPanelCollapsed()} densityCompact={await getDensityCompact()} theme={await getTheme()}>
       <PresencePing />
       <NotifyPoller />
       <UpdateBanner />

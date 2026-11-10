@@ -129,6 +129,67 @@
   --shadow-modal: 0 30px 80px -20px rgba(11, 16, 32, 0.6);
 }
 
+/* ── Dark theme ──────────────────────────────────────────────────────────
+   Ink Orbit after dark: the workspace sinks toward the rail's deep blue-ink,
+   cards lift out of it, petrol brightens so it stays legible, gold warms. Every
+   surface already reads these tokens, so re-declaring them here re-themes the
+   whole app; the rail is ALREADY dark in light mode, so its tokens are left
+   untouched. Applied by `data-theme="dark"` on <html>, which the root layout
+   sets from the `hc_theme` cookie — so the server's first paint is already dark
+   and there is no light flash before hydration. `color-scheme` flips the
+   native controls (scrollbars, form widgets, the caret) too. */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  --color-canvas: #0e1320;
+  --color-surface: #161d2b;
+  --color-surface-2: #1c2433;
+  --color-surface-dim: #0b0f1a;
+
+  --color-ink: #e8ecf3;
+  --color-muted: #a7b1c2;
+  --color-faint: #7b8597;
+
+  --color-border: #2a3344;
+  --color-border-subtle: #212a3a;
+  --color-border-strong: #3a475c;
+
+  --color-accent: #2b93a8;
+  --color-accent-hi: #37a9c0;
+  --color-accent-soft: #15333d;
+  --color-accent-ink: #7fd0e2;
+  --color-accent-ring: rgba(58, 160, 184, 0.35);
+
+  --color-brand: #c99544;
+  --color-brand-bright: #e0b464;
+  --color-brand-soft: #2a2213;
+  --color-brand-ink: #e6c583;
+
+  --color-in: #1c2433;
+  --color-out: #16333d;
+
+  --color-success: #4caf81;
+  --color-success-soft: #15291f;
+  --color-danger: #e0706b;
+  --color-danger-soft: #2c1818;
+  --color-warning: #d2a24a;
+  --color-warning-soft: #2a2211;
+  --color-info: #2b93a8;
+
+  --color-pastel-blue: #1a2742;   --color-pastel-blue-ink: #86a6f2;
+  --color-pastel-green: #16291f;  --color-pastel-green-ink: #5bc98a;
+  --color-pastel-orange: #2a2012; --color-pastel-orange-ink: #e39a52;
+  --color-pastel-purple: #221d35; --color-pastel-purple-ink: #a98bec;
+  --color-pastel-pink: #2a1823;   --color-pastel-pink-ink: #e36aa3;
+  --color-pastel-cyan: #13262e;   --color-pastel-cyan-ink: #4bbfe0;
+
+  /* Light-mode shadows are near-invisible on dark; deepen them so cards and
+     popovers still separate from the canvas. */
+  --shadow-card: 0 1px 0 rgba(0, 0, 0, 0.3), 0 4px 18px -8px rgba(0, 0, 0, 0.5);
+  --shadow-popover: 0 18px 40px -12px rgba(0, 0, 0, 0.6);
+  --shadow-modal: 0 30px 80px -20px rgba(0, 0, 0, 0.75);
+}
+
 @layer base {
   html {
     background: var(--color-canvas);

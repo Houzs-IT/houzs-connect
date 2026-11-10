@@ -21,6 +21,15 @@ export const DENSITY_COOKIE = "hc_inbox_density";
  *  for the same reason: the table renders its real column set server-side rather
  *  than jumping wider when the client adds columns after load. */
 export const CONTACTS_COLS_COOKIE = "hc_contacts_cols";
+/** Light / dark theme, remembered per browser. Light is the default; "dark" is
+ *  set only when the person picks it. A cookie (not localStorage) so the server
+ *  renders `data-theme` on the first paint — no light flash before hydration. */
+export const THEME_COOKIE = "hc_theme";
+
+export type Theme = "light" | "dark";
+export function parseTheme(v: string | undefined | null): Theme {
+  return v === "dark" ? "dark" : "light";
+}
 
 export function parseLang(v: string | undefined | null): Lang {
   return v === "zh" ? "zh" : "en";
@@ -142,6 +151,8 @@ const en = {
     close: "Close",
     account: "Account",
     myProfile: "My profile",
+    darkMode: "Dark mode",
+    lightMode: "Light mode",
     switchCompany: "Switch company",
     newCompany: "New company",
     ncTitle: "Create a company",
@@ -1819,6 +1830,8 @@ const zh: Dict = {
     close: "关闭",
     account: "账号",
     myProfile: "我的资料",
+    darkMode: "深色模式",
+    lightMode: "浅色模式",
     switchCompany: "切换公司",
     newCompany: "新建公司",
     ncTitle: "新建一个公司",
