@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useParams, useSearchParams } from "next/navigation";
 import { initials, listTime, previewText, shortDay, tint } from "@/lib/format";
@@ -76,31 +76,6 @@ function activeFilterCount(f: Filters) {
   );
 }
 
-/**
- * Row density is a per-browser preference. Read through useSyncExternalStore so
- * the server (which has no localStorage) renders "expanded" and the browser
- * switches on hydration without a set-state-in-effect.
- */
-const DENSITY_KEY = "hc_inbox_density";
-const densityListeners = new Set<() => void>();
-function readCompact(): boolean {
-  try {
-    return localStorage.getItem(DENSITY_KEY) === "compact";
-  } catch {
-    return false;
-  }
-}
-function writeCompact(v: boolean) {
-  try {
-    localStorage.setItem(DENSITY_KEY, v ? "compact" : "expanded");
-  } catch {}
-  densityListeners.forEach((l) => l());
-}
-function subscribeDensity(l: () => void) {
-  densityListeners.add(l);
-  return () => densityListeners.delete(l);
-}
-
 /** Ticks every 30s — enough to move a row into "SLA overdue" on time. */
 function useNow() {
   const [now, setNow] = useState(() => Date.now());
@@ -120,7 +95,7 @@ export function ConversationList({
   hasMore: boolean;
   me: { id: string; departmentId: string | null };
 }) {
-  const { t } = useShell();
+  const { t, compact, setCompact } = useShell();
   const s = t.service;
   const params = useParams();
   const search = useSearchParams();
@@ -133,7 +108,6 @@ export function ConversationList({
   const [tab, setTab] = useState<Tab>("all");
   const [dept, setDept] = useState<string | null>(null);
   const [q, setQ] = useState("");
-  const compact = useSyncExternalStore(subscribeDensity, readCompact, () => false);
   const [filters, setFilters] = useState<Filters>(NO_FILTERS);
   const [filterOpen, setFilterOpen] = useState(false);
   const [older, setOlder] = useState<ConversationListItem[]>([]);
@@ -194,7 +168,7 @@ export function ConversationList({
   }, [q, runSearch]);
   const searchActive = q.trim().length > 0;
 
-  const toggleDensity = () => writeCompact(!compact);
+  const toggleDensity = () => setCompact(!compact);
 
   const all = useMemo(() => {
     // Offset paging can hand back a row twice: a conversation moves up the
