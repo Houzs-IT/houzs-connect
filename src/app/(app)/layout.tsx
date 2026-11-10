@@ -4,6 +4,7 @@ import { and, gt, ne } from "drizzle-orm";
 import { Sidebar } from "@/components/Sidebar";
 import { MobileTabBar } from "@/components/shell/MobileTabBar";
 import { ShellProvider } from "@/components/shell/ShellProvider";
+import { CommandPalette } from "@/components/shell/CommandPalette";
 import { PresencePing } from "@/components/shell/PresencePing";
 import { NotifyPoller } from "@/components/shell/NotifyPoller";
 import { UpdateBanner } from "@/components/shell/UpdateBanner";
@@ -87,6 +88,7 @@ export default async function AppLayout({
       <PresencePing />
       <NotifyPoller />
       <UpdateBanner />
+      <CommandPalette />
       <div data-shell className="flex h-dvh flex-col overflow-hidden">
         {staging ? (
           <div className="shrink-0 bg-amber-400 px-3 py-0.5 text-center text-xs font-semibold text-amber-950">
