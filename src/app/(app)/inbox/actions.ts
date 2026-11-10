@@ -15,6 +15,7 @@ import { photoSrcs } from "@/lib/member-photo";
 import { attrs, displayName, mediaCaption } from "@/lib/format";
 import { can } from "@/lib/permissions";
 import { enrollContactInDrip } from "@/lib/drip";
+import { logActivity } from "@/lib/activity";
 
 /**
  * A signed-in member, and the conversation must be in THEIR company.
@@ -301,6 +302,13 @@ export async function pushConversationToQueue(formData: FormData) {
     .update(conversation)
     .set({ status: "QUEUE" })
     .where(eq(conversation.id, conversationId));
+  await logActivity(auth.db, {
+    companyId: auth.convo.contact.companyId,
+    actorMemberId: auth.me.id,
+    entityType: "conversation",
+    entityId: conversationId,
+    action: "queued",
+  });
   revalidatePath(`/inbox/${conversationId}`);
   revalidatePath("/inbox");
 }
@@ -362,7 +370,7 @@ export async function addChatMember(formData: FormData) {
   // (and would then be named in its panel and its header).
   const target = await auth.db.query.member.findFirst({
     where: eq(member.id, memberId),
-    columns: { id: true, companyId: true },
+    columns: { id: true, companyId: true, name: true },
   });
   if (!target || target.companyId !== auth.me.companyId) return;
 
@@ -373,6 +381,14 @@ export async function addChatMember(formData: FormData) {
     .onConflictDoNothing({
       target: [conversationMember.conversationId, conversationMember.memberId],
     });
+  await logActivity(auth.db, {
+    companyId: auth.convo.contact.companyId,
+    actorMemberId: auth.me.id,
+    entityType: "conversation",
+    entityId: conversationId,
+    action: "watcher_added",
+    detail: { to: target.name },
+  });
   revalidatePath(`/inbox/${conversationId}`);
   revalidatePath("/inbox");
 }
@@ -401,6 +417,15 @@ export async function removeChatMember(formData: FormData) {
         eq(conversationMember.memberId, memberId)
       )
     );
+  const removed = await auth.db.query.member.findFirst({ where: eq(member.id, memberId), columns: { name: true } });
+  await logActivity(auth.db, {
+    companyId: auth.convo.contact.companyId,
+    actorMemberId: auth.me.id,
+    entityType: "conversation",
+    entityId: conversationId,
+    action: "watcher_removed",
+    detail: { to: removed?.name ?? null },
+  });
   revalidatePath(`/inbox/${conversationId}`);
   revalidatePath("/inbox");
 }
@@ -418,6 +443,13 @@ export async function unassignConversation(formData: FormData) {
     .update(conversation)
     .set({ assignedAgentId: null })
     .where(eq(conversation.id, conversationId));
+  await logActivity(auth.db, {
+    companyId: auth.convo.contact.companyId,
+    actorMemberId: auth.me.id,
+    entityType: "conversation",
+    entityId: conversationId,
+    action: "unassigned",
+  });
   revalidatePath(`/inbox/${conversationId}`);
   revalidatePath("/inbox");
 }

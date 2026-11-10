@@ -9,12 +9,14 @@ import {
   contactTag,
   conversation,
   conversationTag,
+  member,
   message,
   note,
   payment,
   quickReply,
   tag,
 } from "@/db/schema";
+import { logActivity } from "@/lib/activity";
 import { recordInbound, sendOutbound } from "@/lib/whatsapp/transport";
 import { countPlaceholders, listTemplates, templateConfig } from "@/lib/whatsapp/templates";
 import {
@@ -177,6 +179,19 @@ export async function assignConversation(formData: FormData) {
   if (!auth) return;
   const { db } = auth;
   await db.update(conversation).set(set).where(eq(conversation.id, conversationId));
+  if (formData.has("assignedAgentId")) {
+    const toName = set.assignedAgentId
+      ? (await db.query.member.findFirst({ where: eq(member.id, set.assignedAgentId), columns: { name: true } }))?.name ?? null
+      : null;
+    await logActivity(db, {
+      companyId: auth.convo.contact.companyId,
+      actorMemberId: auth.me.id,
+      entityType: "conversation",
+      entityId: conversationId,
+      action: set.assignedAgentId ? "assigned" : "unassigned",
+      detail: { to: toName },
+    });
+  }
   revalidatePath(`/inbox/${conversationId}`);
   revalidatePath("/inbox");
 }
@@ -197,6 +212,14 @@ export async function setConversationStatus(formData: FormData) {
       ...(status === "CLOSED" ? { unreadCount: 0 } : {}),
     })
     .where(eq(conversation.id, conversationId));
+  await logActivity(db, {
+    companyId: auth.convo.contact.companyId,
+    actorMemberId: auth.me.id,
+    entityType: "conversation",
+    entityId: conversationId,
+    action: "status",
+    detail: { status },
+  });
   revalidatePath(`/inbox/${conversationId}`);
   revalidatePath("/inbox");
 }
@@ -244,6 +267,15 @@ export async function toggleConversationTag(formData: FormData) {
       }
     }
   }
+  const tagName = (await db.query.tag.findFirst({ where: eq(tag.id, tagId), columns: { name: true } }))?.name ?? null;
+  await logActivity(db, {
+    companyId: auth.convo.contact.companyId,
+    actorMemberId: auth.me.id,
+    entityType: "conversation",
+    entityId: conversationId,
+    action: remove ? "tag_removed" : "tag_added",
+    detail: { tag: tagName },
+  });
   revalidatePath(`/inbox/${conversationId}`);
   revalidatePath("/inbox");
 }
