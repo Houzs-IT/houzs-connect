@@ -35,7 +35,7 @@ export function ShellProvider({
   lang: initialLang,
   menuCollapsed: initialCollapsed,
   panelCollapsed: initialPanel = false,
-  densityCompact: initialCompact = false,
+  densityCompact: initialCompact = true,
   children,
 }: {
   lang: Lang;

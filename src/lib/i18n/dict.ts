@@ -12,9 +12,10 @@ export const LANG_COOKIE = "hc_lang";
 export const MENU_COOKIE = "hc_menu";
 /** "0" when this browser put the customer panel beside a conversation away. */
 export const PANEL_COOKIE = "hc_panel";
-/** "compact" when this browser chose the dense inbox row layout. Stored as a
- *  cookie (not localStorage) so the server renders the chosen density on the
- *  first paint instead of flashing the expanded rows and shrinking on hydration. */
+/** Inbox row density, remembered per browser. Compact is the standard default;
+ *  the value is set to "expanded" only when a person switches away from it.
+ *  A cookie (not localStorage) so the server renders the right density on the
+ *  first paint instead of flashing one layout and shrinking on hydration. */
 export const DENSITY_COOKIE = "hc_inbox_density";
 /** JSON array of the optional contact columns this browser turned on. A cookie,
  *  for the same reason: the table renders its real column set server-side rather

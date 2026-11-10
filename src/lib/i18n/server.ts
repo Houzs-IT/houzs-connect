@@ -25,10 +25,15 @@ export const getMenuCollapsed = cache(async () => {
   return jar.get(MENU_COOKIE)?.value === "0";
 });
 
-/** Whether this browser chose the compact inbox rows (`hc_inbox_density=compact`). */
+/**
+ * Whether the inbox rows render compact. Compact is the STANDARD DEFAULT for
+ * everyone; a person only gets expanded if they explicitly switched to it (the
+ * toggle writes `hc_inbox_density=expanded`, remembered per browser). Rendered
+ * server-side so the first paint is already the right density — no load flash.
+ */
 export const getDensityCompact = cache(async () => {
   const jar = await cookies();
-  return jar.get(DENSITY_COOKIE)?.value === "compact";
+  return jar.get(DENSITY_COOKIE)?.value !== "expanded";
 });
 
 /** The raw `hc_contacts_cols` cookie (a JSON array string) or "" when unset. The
