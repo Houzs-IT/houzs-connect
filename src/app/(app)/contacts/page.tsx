@@ -5,6 +5,7 @@ import { PageChrome } from "@/components/PageChrome";
 import { getCurrentMember } from "@/lib/current-member";
 import { attrs, formatPhone, previewText, waIdentifier } from "@/lib/format";
 import { getContactsColsRaw, getDict } from "@/lib/i18n/server";
+import { getMemberContactCols } from "@/lib/member-prefs";
 import { ensureContactColumns, normalisePhone } from "./actions";
 import { ContactDetail } from "./ContactDetail";
 import { PhoneList } from "./PhoneList";
@@ -143,7 +144,7 @@ export default async function ContactsPage({ searchParams }: { searchParams: Pro
           stateOptions={opts.states}
           duplicates={dups}
           activeId={activeId}
-          initialColsRaw={await getContactsColsRaw()}
+          initialColsRaw={(await getMemberContactCols(db, me.email)) ?? (await getContactsColsRaw())}
         />
         </div>
         {activeId && (

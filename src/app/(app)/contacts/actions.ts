@@ -19,6 +19,7 @@ import {
 } from "@/db/schema";
 import { getCurrentMember } from "@/lib/current-member";
 import { logActivity } from "@/lib/activity";
+import { saveMemberContactCols } from "@/lib/member-prefs";
 import { attrs } from "@/lib/format";
 import {
   CHUNK_ROWS,
@@ -34,6 +35,17 @@ async function ctx() {
   const me = await getCurrentMember();
   if (!me) return null;
   return { db: getDb(), companyId: me.companyId, actorId: me.id };
+}
+
+/**
+ * Persist this person's contacts columns so the choice follows them across
+ * devices. The cookie already made it stick on this browser; this is the
+ * cross-device half. Best-effort inside saveMemberContactCols.
+ */
+export async function setContactCols(cols: string[]): Promise<void> {
+  const me = await getCurrentMember();
+  if (!me?.email) return;
+  await saveMemberContactCols(getDb(), me.email, cols.join(","));
 }
 
 /**
