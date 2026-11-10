@@ -826,6 +826,39 @@ export const webhookEvent = connect.table(
   (t) => ({ sourceIdx: index("webhook_event_source_idx").on(t.source) })
 );
 
+/**
+ * Who did what on a shared inbox — an accountability trail distinct from the
+ * message history: assignments, tag changes, status changes, watchers added,
+ * contacts merged / blocked. Written best-effort by lib/activity.ts (a logging
+ * failure must never break the action it records). A standalone table, like
+ * member_photo: a deploy that lands before its migration (0027) must not break
+ * the reads sign-in depends on, and the reader guards for its absence.
+ */
+export const activityLog = connect.table(
+  "activity_log",
+  {
+    id: id(),
+    companyId: text("company_id").notNull(),
+    /** The member who did it; null for automation / system actions. */
+    actorMemberId: text("actor_member_id"),
+    /** "conversation" | "contact". */
+    entityType: text("entity_type").notNull(),
+    entityId: text("entity_id").notNull(),
+    /** e.g. assigned, unassigned, queued, status, tag_added, tag_removed,
+     *  watcher_added, watcher_removed, merged, blocked, unblocked. */
+    action: text("action").notNull(),
+    /** Human-facing specifics: { to, tag, status, into, … }. */
+    detail: jsonb("detail"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    // The company feed, newest first.
+    companyIdx: index("activity_log_company_idx").on(t.companyId, t.createdAt),
+    // One entity's own history.
+    entityIdx: index("activity_log_entity_idx").on(t.entityType, t.entityId),
+  })
+);
+
 // ─────────────────────────── Relations (for db.query nested reads) ───────────────────────────
 
 export const companyRelations = relations(company, ({ many }) => ({

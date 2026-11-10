@@ -18,6 +18,7 @@ import {
   tag,
 } from "@/db/schema";
 import { getCurrentMember } from "@/lib/current-member";
+import { logActivity } from "@/lib/activity";
 import { attrs } from "@/lib/format";
 import {
   CHUNK_ROWS,
@@ -32,7 +33,7 @@ import {
 async function ctx() {
   const me = await getCurrentMember();
   if (!me) return null;
-  return { db: getDb(), companyId: me.companyId };
+  return { db: getDb(), companyId: me.companyId, actorId: me.id };
 }
 
 /**
@@ -121,6 +122,13 @@ export async function setContactBlocked(formData: FormData): Promise<void> {
     .update(contact)
     .set({ blocked })
     .where(and(eq(contact.id, id), eq(contact.companyId, c.companyId)));
+  await logActivity(c.db, {
+    companyId: c.companyId,
+    actorMemberId: c.actorId,
+    entityType: "contact",
+    entityId: id,
+    action: blocked ? "blocked" : "unblocked",
+  });
   revalidatePath("/contacts");
   revalidatePath("/inbox");
 }
@@ -294,6 +302,15 @@ export async function mergeContacts(formData: FormData) {
       .where(eq(contact.id, keepId));
 
     await tx.delete(contact).where(eq(contact.id, mergeId));
+  });
+
+  await logActivity(c.db, {
+    companyId: c.companyId,
+    actorMemberId: c.actorId,
+    entityType: "contact",
+    entityId: keepId,
+    action: "merged",
+    detail: { into: keep.name ?? keep.phone, from: loser.name ?? loser.phone },
   });
 
   revalidatePath("/contacts");
