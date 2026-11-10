@@ -2,7 +2,7 @@
 
 import { createContext, useCallback, useContext, useState } from "react";
 import { useRouter } from "next/navigation";
-import { DENSITY_COOKIE, DICTS, LANG_COOKIE, MENU_COOKIE, PANEL_COOKIE, type Dict, type Lang } from "@/lib/i18n/dict";
+import { DENSITY_COOKIE, DICTS, LANG_COOKIE, MENU_COOKIE, PANEL_COOKIE, THEME_COOKIE, type Dict, type Lang, type Theme } from "@/lib/i18n/dict";
 
 type Shell = {
   lang: Lang;
@@ -16,6 +16,9 @@ type Shell = {
   /** The inbox conversation rows are in the dense layout. */
   compact: boolean;
   setCompact: (v: boolean) => void;
+  /** Light / dark theme. */
+  theme: Theme;
+  setTheme: (t: Theme) => void;
 };
 
 const Ctx = createContext<Shell | null>(null);
@@ -36,12 +39,14 @@ export function ShellProvider({
   menuCollapsed: initialCollapsed,
   panelCollapsed: initialPanel = false,
   densityCompact: initialCompact = true,
+  theme: initialTheme = "light",
   children,
 }: {
   lang: Lang;
   menuCollapsed: boolean;
   panelCollapsed?: boolean;
   densityCompact?: boolean;
+  theme?: Theme;
   children: React.ReactNode;
 }) {
   const router = useRouter();
@@ -49,6 +54,7 @@ export function ShellProvider({
   const [menuCollapsed, setCollapsed] = useState(initialCollapsed);
   const [panelCollapsed, setPanel] = useState(initialPanel);
   const [compact, setCompactState] = useState(initialCompact);
+  const [theme, setThemeState] = useState<Theme>(initialTheme);
 
   const setLang = useCallback(
     (l: Lang) => {
@@ -76,9 +82,17 @@ export function ShellProvider({
     setCompactState(v);
   }, []);
 
+  const setTheme = useCallback((t: Theme) => {
+    writeCookie(THEME_COOKIE, t);
+    setThemeState(t);
+    // Flip the attribute now so the whole app re-themes instantly, no reload —
+    // the cookie just makes the next server render match.
+    document.documentElement.dataset.theme = t;
+  }, []);
+
   return (
     <Ctx.Provider
-      value={{ lang, t: DICTS[lang], setLang, menuCollapsed, setMenuCollapsed, panelCollapsed, setPanelCollapsed, compact, setCompact }}
+      value={{ lang, t: DICTS[lang], setLang, menuCollapsed, setMenuCollapsed, panelCollapsed, setPanelCollapsed, compact, setCompact, theme, setTheme }}
     >
       {children}
     </Ctx.Provider>

@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { IBM_Plex_Sans, IBM_Plex_Mono } from "next/font/google";
-import { getLang } from "@/lib/i18n/server";
+import { getLang, getTheme } from "@/lib/i18n/server";
 import "./globals.css";
 
 /*
@@ -56,10 +56,11 @@ export const metadata: Metadata = {
 export default async function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
-  const lang = await getLang();
+  const [lang, theme] = await Promise.all([getLang(), getTheme()]);
   return (
     <html
       lang={lang === "zh" ? "zh-CN" : "en"}
+      data-theme={theme}
       className={`${plexSans.variable} ${plexMono.variable} h-full antialiased`}
     >
       <body className="min-h-full">{children}</body>
