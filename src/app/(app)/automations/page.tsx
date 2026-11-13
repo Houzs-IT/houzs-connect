@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { notFound } from "next/navigation";
 import { and, asc, count, desc, eq, gte, sql } from "drizzle-orm";
 import { getDb } from "@/db/client";
@@ -200,6 +201,15 @@ export default async function AutomationsPage({
     };
   });
 
+  // Phone / tablet cards have no side menu to filter by, so the same status
+  // links sit above them as chips (they go to the same `?status=` URLs).
+  const chips = [
+    { key: "all", href: "?", label: L.chipAll, n: cards.length, dot: "var(--color-accent)", active: !sp.status && !sp.trigger },
+    { key: "live", href: "?status=live", label: L.live, n: liveCount, dot: "var(--color-success)", active: sp.status === "live" },
+    { key: "draft", href: "?status=draft", label: L.draft, n: cards.length - liveCount, dot: "var(--color-border-strong)", active: sp.status === "draft" },
+    { key: "check", href: "?status=check", label: L.needsCheck, n: cards.filter(needs).length, dot: "var(--color-pastel-orange-ink)", active: sp.status === "check" },
+  ];
+
   return (
     <>
       <SecondaryMenu
@@ -243,10 +253,42 @@ export default async function AutomationsPage({
             searchPlaceholder={L.search}
             empty={cards.length ? L.noMatch : L.none}
             toolbar={
-              <span className="text-[12px] text-[var(--color-faint)]">
+              <span className="mr-auto text-[12px] text-[var(--color-faint)]">
                 {fmt(L.summary, { n: cards.length, live: liveCount })}
               </span>
             }
+            cards={{
+              title: "name",
+              actions: "actions",
+              detail: ["when", "runs", "edited", "status"],
+              chips: (
+                <>
+                  {chips.map((c) => (
+                <Link
+                  key={c.key}
+                  href={c.href}
+                  aria-current={c.active ? "true" : undefined}
+                  className={`flex h-[34px] shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border px-3 text-[12.5px] ${
+                    c.active
+                      ? "border-[var(--color-accent)] bg-[var(--color-accent-soft)] font-semibold text-[var(--color-accent-ink)]"
+                      : "border-[var(--color-border)] bg-[var(--color-surface)] font-medium text-[var(--color-ink)]"
+                  }`}
+                >
+                  <span className="h-[7px] w-[7px] rounded-full" style={{ background: c.dot }} />
+                  {c.label}
+                  <span className={`tabular-nums ${c.active ? "font-medium" : "text-[var(--color-muted)]"}`}>{c.n}</span>
+                </Link>
+                  ))}
+                </>
+              ),
+              sortLabel: L.sort,
+              sortDefault: L.sortDefault,
+              sorts: [
+                { key: "name", dir: "asc", label: L.sortName },
+                { key: "runs", dir: "desc", label: L.sortRuns },
+                { key: "status", dir: "desc", label: L.sortLive },
+              ],
+            }}
             minWidth={900}
             stateKey="automations"
           />

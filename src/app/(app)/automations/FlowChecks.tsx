@@ -29,12 +29,15 @@ export function FlowChecks({
   gaps,
   importApproximations,
   size = "sm",
+  fit = false,
 }: {
   name: string;
   gaps: FlowGap[];
   /** the number frozen into `description` at import time, if any */
   importApproximations: number | null;
   size?: "sm" | "md";
+  /** Narrow-screen dialog; set by the Automations list only. */
+  fit?: boolean;
 }) {
   const [open, setOpen] = useState(false);
 
@@ -65,6 +68,7 @@ export function FlowChecks({
       </button>
 
       <ActionDialog
+        fit={fit}
         open={open}
         title={`What to check in “${name}”`}
         subtitle={

@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, useTransition, type ReactNode } from "react";
 import { ActionConfirm, ActionDialog } from "@/components/ActionConfirm";
@@ -10,6 +9,7 @@ import { fmt } from "@/lib/i18n/dict";
 import { useShell } from "@/components/shell/ShellProvider";
 import { type FlowGap } from "./copy";
 import { FlowChecks } from "./FlowChecks";
+import { DesktopNotice, OpenBuilderLink } from "./OpenBuilderLink";
 import { PublishControl } from "./PublishControl";
 import {
   deleteAutomation,
@@ -91,6 +91,7 @@ export function AutomationName({ a }: { a: AutomationCardData }) {
   const L = t.autos;
   // The "what needs checking" explainer opens from the yellow badge.
   const [showChecks, setShowChecks] = useState(false);
+  const [showNotice, setShowNotice] = useState(false);
   const { gapCount } = gapTotals(a.gaps);
 
   return (
@@ -103,9 +104,10 @@ export function AutomationName({ a }: { a: AutomationCardData }) {
         <IconBolt width={17} height={17} />
       </span>
       <div className="min-w-0">
-        <Link href={`/automations/${a.id}`} className="block truncate text-[13.5px] font-semibold text-[var(--color-ink)] hover:underline">
+        <OpenBuilderLink id={a.id} onBlocked={() => setShowNotice(true)} className="block truncate text-[13.5px] font-semibold text-[var(--color-ink)] hover:underline">
           {a.name}
-        </Link>
+        </OpenBuilderLink>
+        <DesktopNotice open={showNotice} onClose={() => setShowNotice(false)} />
         <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[11.5px] text-[var(--color-faint)]">
           {fmt(L.steps, { n: a.nodeCount })}
           {gapCount > 0 && (
@@ -121,7 +123,7 @@ export function AutomationName({ a }: { a: AutomationCardData }) {
         </div>
         {(a.gaps.length > 0 || a.importApproximations != null) && showChecks && (
           <div className="mt-1.5">
-            <FlowChecks name={a.name} gaps={a.gaps} importApproximations={a.importApproximations} />
+            <FlowChecks name={a.name} gaps={a.gaps} importApproximations={a.importApproximations} fit />
           </div>
         )}
       </div>
@@ -161,6 +163,7 @@ type Mode = "none" | "delete" | "edit";
 export function AutomationActions({ a }: { a: AutomationCardData }) {
   const router = useRouter();
   const [mode, setMode] = useState<Mode>("none");
+  const [desktopNotice, setDesktopNotice] = useState(false);
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [flash, setFlash] = useState<string | null>(null);
@@ -223,9 +226,9 @@ export function AutomationActions({ a }: { a: AutomationCardData }) {
       <RowMenu label="Actions">
         {(close) => (
           <>
-            <Link href={`/automations/${a.id}`} className="block px-3 py-2 text-[13px] text-[var(--color-ink)] hover:bg-[var(--color-surface-2)]">
+            <OpenBuilderLink id={a.id} onBlocked={() => { close(); setDesktopNotice(true); }} className="block px-3 py-2 text-[13px] text-[var(--color-ink)] hover:bg-[var(--color-surface-2)]">
               {L.open}
-            </Link>
+            </OpenBuilderLink>
             {[
               [L.rename, () => { close(); openEdit(); }],
               [L.duplicate, () => { close(); duplicate(); }],
@@ -267,6 +270,8 @@ export function AutomationActions({ a }: { a: AutomationCardData }) {
         </div>
       )}
 
+      <DesktopNotice open={desktopNotice} onClose={() => setDesktopNotice(false)} />
+
       {/* ── Delete ──────────────────────────────────────────────── */}
       <ActionConfirm
         open={mode === "delete"}
@@ -275,6 +280,7 @@ export function AutomationActions({ a }: { a: AutomationCardData }) {
         busyLabel="Deleting…"
         busy={pending}
         danger
+        fit
         onCancel={close}
         onConfirm={() => run("delete")}
       >
@@ -301,12 +307,13 @@ export function AutomationActions({ a }: { a: AutomationCardData }) {
         title="Edit name and note"
         subtitle="Only the label — the flow itself is edited in the builder."
         onClose={close}
+        fit
       >
         <label className="mb-1 block text-[11px] text-[var(--color-muted)]">Name</label>
         <input
           value={draftName}
           onChange={(e) => setDraftName(e.target.value)}
-          className="mb-3 w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] px-2.5 py-1.5 text-[13px] text-[var(--color-ink)] outline-none focus:border-[var(--color-accent)]"
+          className="mb-3 w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] px-2.5 py-1.5 text-[13px] max-sm:min-h-11 max-sm:text-[16px] text-[var(--color-ink)] outline-none focus:border-[var(--color-accent)]"
         />
         <label className="mb-1 block text-[11px] text-[var(--color-muted)]">
           Note (optional — what this flow is for)
@@ -315,7 +322,7 @@ export function AutomationActions({ a }: { a: AutomationCardData }) {
           value={draftNote}
           onChange={(e) => setDraftNote(e.target.value)}
           rows={3}
-          className="mb-3 w-full resize-none rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] p-2 text-[13px] text-[var(--color-ink)] outline-none focus:border-[var(--color-accent)]"
+          className="mb-3 w-full resize-none rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] p-2 text-[13px] max-sm:text-[16px] text-[var(--color-ink)] outline-none focus:border-[var(--color-accent)]"
         />
         {a.imported && (
           <p className="mb-3 rounded-lg bg-[var(--color-surface-2)] px-2.5 py-2 text-[11px] text-[var(--color-faint)]">
@@ -326,11 +333,11 @@ export function AutomationActions({ a }: { a: AutomationCardData }) {
         {error && (
           <p className="mb-3 text-[11.5px] text-[var(--color-danger)]">{error}</p>
         )}
-        <div className="flex justify-end gap-2">
+        <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
           <button
             type="button"
             onClick={close}
-            className="rounded-lg border border-[var(--color-border)] px-3 py-1.5 text-[12.5px] text-[var(--color-ink)] hover:bg-[var(--color-surface-2)]"
+            className="rounded-lg border border-[var(--color-border)] px-3 py-1.5 text-[12.5px] text-[var(--color-ink)] hover:bg-[var(--color-surface-2)] max-sm:min-h-11"
           >
             Cancel
           </button>
@@ -338,7 +345,7 @@ export function AutomationActions({ a }: { a: AutomationCardData }) {
             type="button"
             onClick={() => run("edit")}
             disabled={pending}
-            className="rounded-lg bg-[var(--color-accent)] px-3 py-1.5 text-[12.5px] font-medium text-white disabled:opacity-60"
+            className="rounded-lg bg-[var(--color-accent)] px-3 py-1.5 text-[12.5px] font-medium text-white disabled:opacity-60 max-sm:min-h-11"
           >
             {pending ? "Saving…" : "Save"}
           </button>

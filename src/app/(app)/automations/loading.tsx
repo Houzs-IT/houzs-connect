@@ -6,7 +6,25 @@ export default function AutomationsLoading() {
     <PageSkeleton section="automations" page="allFlows">
       <div className="flex flex-col gap-4 p-4 md:p-6">
         <Skel className="h-[38px] w-[320px] rounded-[8px]" />
-        <div className="overflow-hidden rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)]">
+        <div className="skeleton-stagger grid grid-cols-1 gap-2.5 sm:grid-cols-2 lg:hidden">
+          {Array.from({ length: 4 }, (_, i) => (
+            <div
+              key={i}
+              className="flex flex-col gap-2.5 rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)] p-3"
+              style={{ "--i": i } as React.CSSProperties}
+            >
+              <div className="flex items-center gap-2.5">
+                <Skel className="h-9 w-9 rounded-[10px]" />
+                <div className="flex-1">
+                  <Skel className="h-[14px] w-40" />
+                  <Skel className="mt-1.5 h-[11px] w-16" />
+                </div>
+              </div>
+              <Skel className="h-[92px] w-full rounded-[10px]" />
+            </div>
+          ))}
+        </div>
+        <div className="hidden overflow-hidden rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)] lg:block">
           <div className="h-10 border-b border-[var(--color-border)]" />
           <div className="skeleton-stagger">
             {Array.from({ length: 6 }, (_, i) => (
