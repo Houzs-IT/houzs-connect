@@ -97,3 +97,14 @@ export function roleFromErp(erpRole: string | null | undefined): "OWNER" | "ADMI
 }
 
 export const SESSION_COOKIE = "hc_session";
+
+/** How the session cookie is written. One place, because three paths write it
+ *  (sign-in, switching company, opening a unified-inbox thread of another
+ *  company) and a drift between them would sign someone out on a switch. */
+export const SESSION_COOKIE_OPTIONS = {
+  httpOnly: true,
+  secure: true,
+  sameSite: "lax" as const,
+  path: "/",
+  maxAge: 7 * 24 * 3600,
+};

@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { and, asc, desc, eq } from "drizzle-orm";
 import { getDb } from "@/db/client";
 import { contactField, conversation, department, dripCampaign, member, note, payment, tag } from "@/db/schema";
@@ -19,7 +19,8 @@ import { PersonAvatar } from "@/components/PersonAvatar";
 import { ensureConversationMemberTable } from "@/db/ensure-conversation-member";
 import { ensureDripTables } from "@/db/ensure-drip";
 import { isLive } from "@/lib/whatsapp/cloud-api";
-import { attrs, displayName, initials, stamp, tint, waIdentifier } from "@/lib/format";
+import { attrs, displayName, formatPhone, initials, stamp, tint, waIdentifier } from "@/lib/format";
+import { getInboxScopes, scopeChannels, scopeLabel } from "@/lib/inbox-group";
 import { bypassReadCache } from "@/db/fresh";
 import { getDict } from "@/lib/i18n/server";
 import { SLA_MINUTES } from "@/lib/sla";
@@ -57,6 +58,9 @@ export default async function ConversationPage({
     where: and(eq(conversation.id, id), bypassReadCache()),
     with: {
       contact: true,
+      // The number the customer wrote to — shown in the header so an agent in a
+      // unified inbox knows which line (and which brand) they are answering on.
+      channel: { columns: { phone: true, companyId: true } },
       assignedAgent: true,
       assignedDepartment: true,
       tagLinks: { with: { tag: true } },
@@ -70,7 +74,26 @@ export default async function ConversationPage({
   // A conversation id is guessable and the list page's visibility filter does
   // not protect this route — without the company check any signed-in member
   // could read another tenant's thread, phone number and order attributes.
-  if (!convo || convo.contact.companyId !== me.companyId) notFound();
+  if (!convo) notFound();
+  const scopes = await getInboxScopes();
+  if (convo.contact.companyId !== me.companyId) {
+    // Another company of this person's unified inbox (a bookmarked link, or the
+    // rail of the company they just left): switch into it, then come back here.
+    // Anything else is another tenant's thread and stays a 404.
+    if (scopes.some((sc) => sc.companyId === convo.contact.companyId)) redirect(`/inbox/open/${convo.id}`);
+    notFound();
+  }
+  // "HOUZS · 011-6155 6133" when the inbox spans companies; just the number when
+  // the company alone has several (8822 service, 6133 logistics); nothing when
+  // there is only one number and the chip would say nothing new.
+  const ownScope = scopes.find((sc) => sc.companyId === convo.channel.companyId);
+  const lineCount = (await scopeChannels(db, scopes)).length;
+  const origin =
+    scopes.length > 1 && ownScope
+      ? `${scopeLabel(ownScope)} · ${formatPhone(convo.channel.phone)}`
+      : lineCount > 1
+        ? formatPhone(convo.channel.phone)
+        : null;
 
   // Live drips the agent can enrol this contact into, for the conversation menu.
   await ensureDripTables(db).catch(() => {});
@@ -234,6 +257,11 @@ export default async function ConversationPage({
               <span className={`hidden whitespace-nowrap rounded-full px-[7px] py-px text-[10px] font-semibold uppercase tracking-[0.06em] md:inline ${statusTone[convo.status] ?? statusTone.CLOSED}`}>
                 {s.statusLabel[convo.status] ?? convo.status}
               </span>
+              {origin && (
+                <span className="shrink-0 whitespace-nowrap rounded-[4px] border border-[var(--color-border)] bg-[var(--color-surface-2)] px-1.5 py-px text-[10px] font-semibold tabular-nums text-[var(--color-muted)]">
+                  {origin}
+                </span>
+              )}
             </div>
             {/* Phone: the window as a line of text. Desktop: number · order. */}
             <div className="md:hidden">
