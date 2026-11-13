@@ -20,6 +20,8 @@ import {
 import { testRunAutomation } from "../actions";
 import { runStats } from "@/lib/automation/run-stats";
 import { relTime } from "@/lib/format";
+import { getDict } from "@/lib/i18n/server";
+import { DesktopOnlyNotice } from "./DesktopOnlyNotice";
 
 export default async function AutomationDetail({
   params,
@@ -86,8 +88,14 @@ export default async function AutomationDetail({
   // Server action bound to this automation for the header "Test run" button.
   const runTest = testRunAutomation.bind(null, automation.id);
 
+  const L = (await getDict()).autos;
+
   return (
-    <div className="flex min-w-0 flex-1 flex-col">
+    <>
+    {/* The Builder is a desktop tool: on phones and small touch iPads (the same
+        cutoff as the Automations list) it is hidden and this notice shows instead. */}
+    <DesktopOnlyNotice message={L.desktopOnly} ok={L.ok} />
+    <div className="flex min-w-0 flex-1 flex-col compact:hidden">
       <header className="flex h-14 shrink-0 items-center gap-3 border-b border-[var(--color-border)] bg-[var(--color-surface)] px-4">
         <Link
           href="/automations"
@@ -160,5 +168,6 @@ export default async function AutomationDetail({
         version={automation.version}
       />
     </div>
+    </>
   );
 }

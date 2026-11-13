@@ -1,5 +1,17 @@
 @import "tailwindcss";
 
+/* "compact" = phones and touch tablets: under 768px with any pointer, or touch at
+   768-1023px. Mouse and trackpad keep the desktop layout from 768px up, and
+   everyone keeps it from 1024px. Used by the Automations Builder. */
+@custom-variant compact {
+  @media (width < 48rem) {
+    @slot;
+  }
+  @media (pointer: coarse) and (width < 64rem) {
+    @slot;
+  }
+}
+
 /*
   Houzs Connect — 6a "Ink Orbit".
   Deep-space ink rail against a cool grey workspace. Petrol is the only

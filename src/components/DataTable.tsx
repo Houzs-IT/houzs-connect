@@ -52,6 +52,28 @@ export type DataRow = {
   active?: boolean;
 };
 
+/**
+ * Opt-in card layout for phones and touch tablets. The rows are drawn as cards
+ * instead of a table that scrolls sideways when the viewport is under 768px, or
+ * is 768-1023px wide on a touch screen. From 1024px, and from 768px with a
+ * mouse or trackpad, the table is exactly what it was. `title` and `actions`
+ * are cell keys for the card header, `detail` the cell keys shown in the
+ * labelled grid under it (in this order, skipping any the viewer hid in
+ * "Columns"). The cells are the same JSX the table uses, so every control
+ * keeps working.
+ */
+export type DataCards = {
+  title: string;
+  actions: string;
+  detail: string[];
+  /** Quick filters (status chips), shown above the cards only. */
+  chips?: ReactNode;
+  /** Sort choices for the cards, which have no clickable headers. */
+  sortLabel?: string;
+  sortDefault?: string;
+  sorts?: { key: string; dir: "asc" | "desc"; label: string }[];
+};
+
 type Sort = { key: string; dir: "asc" | "desc" } | null;
 type Saved = { q: string; sort: Sort; filters: Record<string, string[]> };
 
@@ -230,6 +252,9 @@ export function useColumnLayout(
   const [drag, setDrag] = useState<{ key: string; over: string | null } | null>(null);
   const [measured, setMeasured] = useState<Measured | null>(null);
   const [menu, setMenu] = useState<{ key: string; x: number; y: number } | null>(null);
+  // Bumped when a table that was not laid out (display: none while the cards
+  // show) gets a size, so its widths are read then.
+  const [shownTick, setShownTick] = useState(0);
 
   // The viewer's order (columns it does not know keep their page order, after
   // it), then visible columns, frozen ones first. Never hide them all.
@@ -287,7 +312,18 @@ export function useColumnLayout(
     const extra = Math.max(0, Math.round(box.width - sum));
     const lead = Math.max(0, Math.round(heads[0].getBoundingClientRect().left - box.left));
     setMeasured({ sig, widths, extra, lead });
-  }, [enabled, fixed, sig, tableRef]);
+  }, [enabled, fixed, sig, tableRef, shownTick]);
+
+  useEffect(() => {
+    if (!enabled || fixed || typeof ResizeObserver === "undefined") return;
+    const table = tableRef.current;
+    if (!table) return;
+    const ro = new ResizeObserver(() => {
+      if (table.getBoundingClientRect().width > 0) setShownTick((n) => n + 1);
+    });
+    ro.observe(table);
+    return () => ro.disconnect();
+  }, [enabled, fixed, tableRef]);
 
   const saveWidths = (next: Record<string, number>, persist: boolean) => {
     storedRef.current = next;
@@ -888,11 +924,11 @@ export function DataMenus({ table }: { table: DataTableState }) {
 }
 
 /** The search box DataTable shows above its rows. */
-export function DataSearch({ table, placeholder }: { table: DataTableState; placeholder?: string }) {
+export function DataSearch({ table, placeholder, className = "" }: { table: DataTableState; placeholder?: string; className?: string }) {
   const { t } = useShell();
   const L = t.table;
   return (
-    <div className="flex h-[36px] min-w-[220px] max-w-[360px] flex-1 items-center gap-2 rounded-[8px] border border-[var(--color-border)] bg-[var(--color-surface)] px-3 focus-within:border-[var(--color-accent)] focus-within:shadow-[0_0_0_3px_var(--color-accent-ring)]">
+    <div className={`flex h-[36px] min-w-[220px] max-w-[360px] flex-1 items-center gap-2 rounded-[8px] border border-[var(--color-border)] bg-[var(--color-surface)] px-3 focus-within:border-[var(--color-accent)] focus-within:shadow-[0_0_0_3px_var(--color-accent-ring)] ${className}`}>
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="shrink-0 text-[var(--color-faint)]" aria-hidden>
         <circle cx="11" cy="11" r="7" />
         <path d="m20 20-3.5-3.5" />
@@ -939,6 +975,7 @@ export function DataTable({
   stateKey,
   className = "",
   resizable = true,
+  cards,
 }: {
   columns: DataColumn[];
   rows: DataRow[];
@@ -956,6 +993,8 @@ export function DataTable({
   className?: string;
   /** Column tools — resize, freeze, hide (on by default). */
   resizable?: boolean;
+  /** Draw cards on phones and touch tablets instead of the table (see DataCards). */
+  cards?: DataCards;
 }) {
   const { t } = useShell();
   const L = t.table;
@@ -968,23 +1007,95 @@ export function DataTable({
   const columnsButton = resizable && cw.panel.columns.length >= 4;
   const filler = cw.fixed ? 1 : 0;
 
+  const visibleKeys = new Set(cw.cols.map((c) => c.key));
+  const labelOf = (key: string) => columns.find((c) => c.key === key)?.label ?? "";
+  const cardDetail = cards ? cards.detail.filter((k) => visibleKeys.has(k)) : [];
+  const sortValue = table.sort ? `${table.sort.key}:${table.sort.dir}` : "";
+
   return (
-    <div className={`flex flex-col gap-2.5 ${className}`}>
-      {(search || toolbar || filtered || columnsButton) && (
+    <div className={`flex flex-col gap-2.5 ${cards ? "@container" : ""} ${className}`}>
+      {(search || toolbar || filtered || columnsButton || cards) && (
         <div className="flex flex-wrap items-center gap-2">
-          {search && <DataSearch table={table} placeholder={searchPlaceholder} />}
+          {search && (
+            <DataSearch
+              table={table}
+              placeholder={searchPlaceholder}
+              className={cards ? "order-1 @max-[639px]:max-w-none @max-[639px]:basis-full" : ""}
+            />
+          )}
           <DataCount table={table} />
           {(toolbar || columnsButton) && (
-            <div className="ml-auto flex flex-wrap items-center gap-2">
+            <div className={`ml-auto flex flex-wrap items-center gap-2 ${cards ? "order-3 @max-[639px]:w-full @min-[640px]:order-2" : ""}`}>
               {toolbar}
-              {columnsButton && <WrapButton layout={cw} />}
+              {/* Wrap is for the table's one-line cells; cards always wrap. */}
+              {columnsButton && (
+                <div className={cards ? "max-md:hidden pointer-coarse:max-lg:hidden" : "contents"}>
+                  <WrapButton layout={cw} />
+                </div>
+              )}
               {columnsButton && <ColumnsButton layout={cw} />}
+            </div>
+          )}
+          {cards && (cards.chips || cards.sorts) && (
+            <div className="order-2 hidden w-full items-center gap-2 @min-[640px]:order-3 max-md:flex pointer-coarse:max-lg:flex">
+              <div className="flex min-w-0 flex-1 flex-wrap gap-2">{cards.chips}</div>
+              {cards.sorts && (
+                <label className="hidden shrink-0 items-center gap-1.5 text-[12px] text-[var(--color-faint)] @min-[640px]:flex">
+                  {cards.sortLabel}
+                  <select
+                    value={sortValue}
+                    onChange={(e) => {
+                      const [key, dir] = e.target.value.split(":");
+                      table.setSort(key ? { key, dir: dir as "asc" | "desc" } : null);
+                    }}
+                    className="h-[34px] rounded-[8px] border border-[var(--color-border)] bg-[var(--color-surface)] px-2 text-[12.5px] text-[var(--color-ink)]"
+                  >
+                    <option value="">{cards.sortDefault}</option>
+                    {cards.sorts.map((s) => (
+                      <option key={`${s.key}:${s.dir}`} value={`${s.key}:${s.dir}`}>
+                        {s.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
             </div>
           )}
         </div>
       )}
 
-      <div className="overflow-x-auto rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)]">
+      {cards && (
+        <div className="hidden grid-cols-1 gap-2.5 @min-[640px]:grid-cols-2 max-md:grid pointer-coarse:max-lg:grid">
+          {shown.map((r) => (
+            <div
+              key={r.id}
+              className="flex min-w-0 flex-col gap-2.5 rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)] p-3 [&_.truncate]:overflow-visible [&_.truncate]:whitespace-normal [&_.truncate]:text-clip [&_.truncate]:break-words [&_button[aria-haspopup=menu]]:h-11 [&_button[aria-haspopup=menu]]:w-11 [&_button[role=switch]]:min-h-10"
+            >
+              <div className="flex items-start gap-2">
+                <div className="min-w-0 flex-1">{r.cells[cards.title]}</div>
+                <div className="-mr-1.5 -mt-1 shrink-0">{r.cells[cards.actions]}</div>
+              </div>
+              {cardDetail.length > 0 && (
+                <div className="grid grid-cols-2 gap-x-4 gap-y-3 rounded-[10px] @max-[319px]:grid-cols-1 bg-[var(--color-surface-2)] px-3 py-2.5">
+                  {cardDetail.map((k) => (
+                    <div key={k} className="min-w-0">
+                      <div className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--color-faint)]">{labelOf(k)}</div>
+                      <div className="mt-1">{r.cells[k] ?? <span className="text-[var(--color-faint)]">—</span>}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          ))}
+          {shown.length === 0 && (
+            <div className="col-span-full rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-10 text-center text-[13px] text-[var(--color-faint)]">
+              {rows.length === 0 ? (empty ?? L.none) : L.noMatch}
+            </div>
+          )}
+        </div>
+      )}
+
+      <div className={`overflow-x-auto rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)] ${cards ? "max-md:hidden pointer-coarse:max-lg:hidden" : ""}`}>
         <table ref={tableRef} className={`w-full text-left text-[13px] ${cw.tableClass}`} style={cw.tableStyle ?? { minWidth }}>
           <thead>
             <tr className="border-b border-[var(--color-border)]">

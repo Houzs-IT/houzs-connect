@@ -117,6 +117,7 @@ export function PublishControl({
       </button>}
 
       <ActionConfirm
+        fit
         open={open === "publish"}
         title={`Publish “${facts.name}” to real customers?`}
         confirmLabel="Yes, publish live"
@@ -166,6 +167,7 @@ export function PublishControl({
       </ActionConfirm>
 
       <ActionConfirm
+        fit
         open={open === "unpublish"}
         title={`Switch “${facts.name}” off?`}
         confirmLabel="Switch it off"
