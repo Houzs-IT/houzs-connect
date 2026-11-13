@@ -8,20 +8,13 @@ import { member } from "@/db/schema";
 import { getCurrentMember } from "@/lib/current-member";
 import { companyChoices, isOwnerOrAdmin } from "@/lib/companies";
 import { createConnectCompany } from "@/lib/whatsapp/number-assignment";
-import { SESSION_COOKIE, signSession } from "@/lib/erp-auth";
+import { SESSION_COOKIE, SESSION_COOKIE_OPTIONS, signSession } from "@/lib/erp-auth";
 
-/** Re-sign this browser's session as one member row — the single place the
- *  session cookie is written, so switching and creating a company sign in the
- *  same way. */
+/** Re-sign this browser's session as one member row, so switching and creating
+ *  a company sign in the same way. */
 async function setSessionCookie(memberId: string, secret: string) {
   const jar = await cookies();
-  jar.set(SESSION_COOKIE, await signSession(memberId, secret), {
-    httpOnly: true,
-    secure: true,
-    sameSite: "lax",
-    path: "/",
-    maxAge: 7 * 24 * 3600,
-  });
+  jar.set(SESSION_COOKIE, await signSession(memberId, secret), SESSION_COOKIE_OPTIONS);
 }
 
 /**

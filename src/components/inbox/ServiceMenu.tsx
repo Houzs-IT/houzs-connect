@@ -1,14 +1,13 @@
 import { and, asc, eq, inArray, isNull, ne, type SQL } from "drizzle-orm";
 import { getDb } from "@/db/client";
-import { channel, company, conversation, conversationMember, tag } from "@/db/schema";
+import { conversation, conversationMember, tag } from "@/db/schema";
 import { bypassReadCache } from "@/db/fresh";
 import { ensureConversationMemberTable } from "@/db/ensure-conversation-member";
-import { conversationCompanyWhere, conversationVisibilityWhere, getVisibility } from "@/lib/access";
 import type { CurrentMember } from "@/lib/current-member";
 import { getDict } from "@/lib/i18n/server";
 import { formatPhone } from "@/lib/format";
 import { SecondaryMenu } from "@/components/shell/SecondaryMenu";
-import { can } from "@/lib/permissions";
+import { getInboxScopes, scopeChannels, scopeLabel, unifiedConversationWhere } from "@/lib/inbox-group";
 
 /** Status dots, in the redesign's colours. */
 const STATUS_DOT: Record<string, string> = {
@@ -23,34 +22,31 @@ const STATUS_DOT: Record<string, string> = {
  * `?query` link — the conversation list reads the same params — so a filter
  * keeps the open thread open.
  *
- * Counts are real COUNTs over the same company + visibility predicate the list
- * uses, so they stay true beyond the rail's first page. "All" and the views
- * leave closed conversations out, as the list does by default; closed ones are
- * reached through Status → Closed.
+ * Counts are real COUNTs over the same scope predicate the list uses (company
+ * group + visibility, lib/inbox-group.ts), so they stay true beyond the rail's
+ * first page. "All" and the views leave closed conversations out, as the list
+ * does by default; closed ones are reached through Status → Closed.
  */
 export async function ServiceMenu({ me }: { me: CurrentMember }) {
   const t = await getDict();
   const db = getDb();
-  const allMembers = await db.query.member.findMany({ columns: { id: true, managerId: true } });
-  const vis = getVisibility(me, allMembers, await can(me, "seeAll"));
   await ensureConversationMemberTable(db).catch(() => {});
 
+  const scopes = await getInboxScopes();
+  const scopeWhere = await unifiedConversationWhere(db, scopes);
+  const companyIds = scopes.map((sc) => sc.companyId);
+  // "Mine" in a unified inbox is any of the person's member rows.
+  const myIds = scopes.length ? scopes.map((sc) => sc.memberId) : [me.id];
+  const multi = scopes.length > 1;
+
   const base = (...extra: (SQL | undefined)[]) =>
-    db.$count(
-      conversation,
-      and(
-        conversationCompanyWhere(db, me.companyId),
-        conversationVisibilityWhere(vis),
-        bypassReadCache(),
-        ...extra
-      )
-    );
+    db.$count(conversation, and(scopeWhere, bypassReadCache(), ...extra));
   const active = ne(conversation.status, "CLOSED");
 
-  const [all, mine, unassigned, watching, open, pending, queue, tags, co, numbers] =
+  const [all, mine, unassigned, watching, open, pending, queue, tags, numbers] =
     await Promise.all([
       base(active),
-      base(active, eq(conversation.assignedAgentId, me.id)),
+      base(active, inArray(conversation.assignedAgentId, myIds)),
       base(active, isNull(conversation.assignedAgentId)),
       base(
         active,
@@ -59,22 +55,23 @@ export async function ServiceMenu({ me }: { me: CurrentMember }) {
           db
             .select({ id: conversationMember.conversationId })
             .from(conversationMember)
-            .where(eq(conversationMember.memberId, me.id))
+            .where(inArray(conversationMember.memberId, myIds))
         )
       ),
       base(eq(conversation.status, "OPEN")),
       base(eq(conversation.status, "PENDING")),
       base(eq(conversation.status, "QUEUE")),
-      db.query.tag.findMany({ where: eq(tag.companyId, me.companyId), orderBy: asc(tag.name) }),
-      db.query.company.findFirst({ where: eq(company.id, me.companyId), columns: { name: true } }),
-      db.query.channel.findMany({
-        where: eq(channel.companyId, me.companyId),
-        columns: { phone: true, isDefault: true },
-      }),
+      companyIds.length
+        ? db.query.tag.findMany({ where: inArray(tag.companyId, companyIds), orderBy: asc(tag.name) })
+        : Promise.resolve([]),
+      scopeChannels(db, scopes),
     ]);
 
   const live = process.env.WHATSAPP_MODE === "LIVE";
-  const number = (numbers.find((n) => n.isDefault) ?? numbers[0])?.phone;
+  const labelOf = new Map(scopes.map((sc) => [sc.companyId, scopeLabel(sc)]));
+  // Default number first, then the rest — every number this inbox answers.
+  const phones = [...numbers].sort((a, b) => Number(b.isDefault) - Number(a.isDefault));
+  const coName = scopes.map((sc) => sc.companyName).filter(Boolean).join(" + ");
   const s = t.service;
 
   return (
@@ -105,7 +102,8 @@ export async function ServiceMenu({ me }: { me: CurrentMember }) {
                 title: s.tags,
                 items: tags.map((tg) => ({
                   href: `?tag=${encodeURIComponent(tg.id)}`,
-                  label: tg.name,
+                  // Two companies can each have a "Scheduling" tag; say whose.
+                  label: multi ? `${tg.name} · ${labelOf.get(tg.companyId) ?? ""}` : tg.name,
                   dot: tg.color,
                 })),
               },
@@ -133,8 +131,13 @@ export async function ServiceMenu({ me }: { me: CurrentMember }) {
             />
             {live ? "LIVE · WhatsApp" : "DEMO · WhatsApp"}
           </div>
-          {co?.name && <div className="truncate text-[var(--color-muted)]">{co.name}</div>}
-          {number && <div className="tabular-nums text-[var(--color-faint)]">{formatPhone(number)}</div>}
+          {coName && <div className="truncate text-[var(--color-muted)]">{coName}</div>}
+          {phones.map((n) => (
+            <div key={n.id} className="tabular-nums text-[var(--color-faint)]">
+              {formatPhone(n.phone)}
+              {multi && <span className="ml-1 text-[10px]">· {labelOf.get(n.companyId)}</span>}
+            </div>
+          ))}
         </div>
       }
     />

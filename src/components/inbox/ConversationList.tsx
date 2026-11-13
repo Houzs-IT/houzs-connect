@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ComponentProps } from "react";
 import Link from "next/link";
 import { useParams, useSearchParams } from "next/navigation";
 import { initials, listTime, previewText, shortDay, tint } from "@/lib/format";
@@ -39,6 +39,14 @@ export type ConversationListItem = {
   lastType: string | null;
   /** A flow is waiting on this customer (automation_run `waiting`). */
   botActive: boolean;
+  /** Unified inbox: the thread's company as a short label (HOUZS, 2990) — set
+   *  only when the rail spans several companies (lib/inbox-group.ts). */
+  companyLabel?: string | null;
+  /** The thread belongs to another company than the signed-in one; opening it
+   *  goes through /inbox/open/[id], which switches company first. */
+  foreign?: boolean;
+  /** The business number the customer wrote to (8822 service, 6133 logistics…). */
+  channelPhone?: string | null;
 };
 
 type Tab = "all" | "unread" | "dept" | "sla";
@@ -131,12 +139,19 @@ export function ConversationList({
   items,
   hasMore,
   me,
+  showOrigin = false,
 }: {
   items: ConversationListItem[];
   hasMore: boolean;
-  me: { id: string; departmentId: string | null };
+  /** `memberIds`: the person's member row in every company the rail spans — in a
+   *  unified inbox they are a different member in each, and "Mine" / "Watching"
+   *  must count all of them. Defaults to just `id`. */
+  me: { id: string; departmentId: string | null; memberIds?: string[] };
+  /** The rail spans more than one number, so each row says which it came in on. */
+  showOrigin?: boolean;
 }) {
   const { t, compact, setCompact } = useShell();
+  const myIds = useMemo(() => new Set(me.memberIds?.length ? me.memberIds : [me.id]), [me.id, me.memberIds]);
   const s = t.service;
   const params = useParams();
   const search = useSearchParams();
@@ -257,9 +272,9 @@ export function ConversationList({
     if (statusParam) {
       if (c.status !== statusParam) return false;
     } else if (c.status === "CLOSED") return false;
-    if (view === "mine" && c.agentId !== me.id) return false;
+    if (view === "mine" && !(c.agentId && myIds.has(c.agentId))) return false;
     if (view === "unassigned" && c.agentId) return false;
-    if (view === "watching" && !c.watcherIds.includes(me.id)) return false;
+    if (view === "watching" && !c.watcherIds.some((id) => myIds.has(id))) return false;
     if (tagParam && !c.tags.some((tg) => tg.id === tagParam)) return false;
     return true;
   });
@@ -475,7 +490,10 @@ export function ConversationList({
           <Row
             key={c.id}
             c={c}
-            href={`/inbox/${c.id}${qs ? `?${qs}` : ""}`}
+            // Another company's thread opens through the switch route, which
+            // re-signs the session into that company and lands on the thread.
+            href={`/inbox/${c.foreign ? "open/" : ""}${c.id}${qs ? `?${qs}` : ""}`}
+            origin={showOrigin ? originLabel(c) : null}
             active={c.id === activeId}
             overdue={isOverdue(c.waitingSince, now)}
             compact={compact}
@@ -515,9 +533,40 @@ export function ConversationList({
   );
 }
 
+/** "8822", or "2990 · 7788" when the rail spans companies — the last digits are
+ *  how the team already names its numbers. */
+function originLabel(c: ConversationListItem): string | null {
+  const tail = c.channelPhone ? c.channelPhone.replace(/\D/g, "").slice(-4) : "";
+  const parts = [c.companyLabel, tail].filter(Boolean);
+  return parts.length ? parts.join(" · ") : null;
+}
+
+/** The origin chip on a row: which company / number the customer wrote to. */
+function OriginChip({ label, full }: { label: string; full: string | null | undefined }) {
+  return (
+    <span
+      title={full ?? undefined}
+      className="shrink-0 whitespace-nowrap rounded-[4px] border border-[var(--color-border)] bg-[var(--color-surface-2)] px-1 text-[9.5px] font-semibold tabular-nums leading-[15px] text-[var(--color-muted)]"
+    >
+      {label}
+    </span>
+  );
+}
+
+/**
+ * The row's link. Another company's thread is a plain <a>: opening it switches
+ * the session cookie, and a full navigation is what makes the whole shell — top
+ * bar, menu, counts — re-render as that company. A client <Link> would keep the
+ * old company's layout on screen until the next refresh.
+ */
+function RowLink({ hard, ...props }: { hard: boolean } & ComponentProps<"a"> & { href: string }) {
+  return hard ? <a {...props} /> : <Link {...props} />;
+}
+
 function Row({
   c,
   href,
+  origin,
   active,
   overdue,
   compact,
@@ -526,6 +575,7 @@ function Row({
 }: {
   c: ConversationListItem;
   href: string;
+  origin: string | null;
   active: boolean;
   overdue: boolean;
   compact: boolean;
@@ -547,7 +597,8 @@ function Row({
   if (compact) {
     const tag1 = c.tags[0];
     return (
-      <Link
+      <RowLink
+        hard={!!c.foreign}
         href={href}
         aria-current={active ? "page" : undefined}
         className={`relative flex gap-2.5 border-b border-[var(--color-border-subtle)] px-3.5 py-2 transition-colors ${bg}`}
@@ -559,6 +610,7 @@ function Row({
             <span className={`min-w-0 flex-1 truncate text-[13px] text-[var(--color-ink)] ${unread ? "font-bold" : "font-semibold"}`}>
               {c.name}
             </span>
+            {origin && <OriginChip label={origin} full={c.channelPhone} />}
             {unread && <UnreadBadge n={c.unread} small />}
             <span className={`shrink-0 text-[10.5px] ${timeCls}`}>{time}</span>
           </div>
@@ -577,12 +629,13 @@ function Row({
             )}
           </div>
         </div>
-      </Link>
+      </RowLink>
     );
   }
 
   return (
-    <Link
+    <RowLink
+      hard={!!c.foreign}
       href={href}
       aria-current={active ? "page" : undefined}
       className={`relative flex gap-2.5 border-b border-[var(--color-border-subtle)] px-3.5 py-[11px] transition-colors ${bg}`}
@@ -594,6 +647,7 @@ function Row({
           <span className={`min-w-0 flex-1 truncate text-[13.5px] text-[var(--color-ink)] ${unread ? "font-bold" : "font-semibold"}`}>
             {c.name}
           </span>
+          {origin && <OriginChip label={origin} full={c.channelPhone} />}
           <span className={`shrink-0 text-[11px] ${timeCls}`}>{time}</span>
         </div>
         <div className="flex items-center gap-2">
@@ -636,7 +690,7 @@ function Row({
           )}
         </div>
       </div>
-    </Link>
+    </RowLink>
   );
 }
 

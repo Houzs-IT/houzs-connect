@@ -8,12 +8,11 @@ import { automationRun, contact, conversation, conversationMember, member, messa
 import { senderForChannel } from "@/lib/whatsapp/channels";
 import { markRead } from "@/lib/whatsapp/cloud-api";
 import { ensureConversationMemberTable } from "@/db/ensure-conversation-member";
-import { conversationCompanyWhere, conversationVisibilityWhere, getVisibility } from "@/lib/access";
+import { getInboxScopes, scopeLabel, unifiedConversationWhere, type InboxScope } from "@/lib/inbox-group";
 import type { ConversationListItem } from "@/components/inbox/ConversationList";
 import { bypassReadCache } from "@/db/fresh";
 import { photoSrcs } from "@/lib/member-photo";
 import { attrs, displayName, mediaCaption } from "@/lib/format";
-import { can } from "@/lib/permissions";
 import { enrollContactInDrip } from "@/lib/drip";
 import { logActivity } from "@/lib/activity";
 
@@ -58,6 +57,9 @@ function convoQuery(db: DB, where: SQL | undefined, opts: { limit: number; offse
     offset: opts.offset,
     with: {
       contact: true,
+      // Which number (and so which company) the customer wrote to — the rail's
+      // origin chip, and how a row of another company is told apart.
+      channel: { columns: { companyId: true, phone: true } },
       assignedAgent: true,
       assignedDepartment: true,
       tagLinks: { with: { tag: true } },
@@ -68,12 +70,20 @@ function convoQuery(db: DB, where: SQL | undefined, opts: { limit: number; offse
 }
 type ConvoRow = Awaited<ReturnType<typeof convoQuery>>[number];
 
+/** Where the rail's rows come from, for labelling them. */
+interface RailContext {
+  /** The signed-in company; a row of any other company is `foreign`. */
+  homeCompanyId: string;
+  /** companyId → short label, only when the rail spans several companies. */
+  labels: Map<string, string> | null;
+}
+
 /**
  * Turn conversation rows into the rail's list items. Factored out of
  * fetchConversations so search returns the exact same shape — one mapper, no
  * drift between the paged list and a search result.
  */
-async function toListItems(db: DB, page: ConvoRow[]): Promise<ConversationListItem[]> {
+async function toListItems(db: DB, page: ConvoRow[], ctx: RailContext): Promise<ConversationListItem[]> {
   // Customers a flow is currently waiting on — the "Bot handling" filter. One
   // read for the whole page (automation_run is indexed by contact_id, mig 0008).
   const contactIds = [...new Set(page.map((c) => c.contactId))];
@@ -125,17 +135,29 @@ async function toListItems(db: DB, page: ConvoRow[]): Promise<ConversationListIt
       starred: a.starred === "1",
       lastType: latest?.type ?? null,
       botActive: botActive.has(c.contactId),
+      companyLabel: ctx.labels?.get(c.channel.companyId) ?? null,
+      foreign: c.channel.companyId !== ctx.homeCompanyId,
+      channelPhone: c.channel.phone,
     };
   });
 }
 
 type Me = NonNullable<Awaited<ReturnType<typeof getCurrentMember>>>;
 
-/** The member's conversation scope (company + role visibility). */
-async function conversationScope(db: DB, me: Me) {
-  const allMembers = await db.query.member.findMany({ columns: { id: true, managerId: true } });
-  const vis = getVisibility(me, allMembers, await can(me, "seeAll"));
-  return and(conversationCompanyWhere(db, me.companyId), conversationVisibilityWhere(vis));
+/**
+ * The member's conversation scope: every company in their inbox group they hold
+ * a row in (lib/inbox-group.ts), each with that row's role visibility. A company
+ * in no group is just its own company — the scope this used to be.
+ */
+async function conversationScope(db: DB, me: Me): Promise<{ where: SQL | undefined; ctx: RailContext }> {
+  const scopes: InboxScope[] = await getInboxScopes();
+  return {
+    where: await unifiedConversationWhere(db, scopes),
+    ctx: {
+      homeCompanyId: me.companyId,
+      labels: scopes.length > 1 ? new Map(scopes.map((s) => [s.companyId, scopeLabel(s)])) : null,
+    },
+  };
 }
 
 /**
@@ -172,11 +194,11 @@ export async function fetchConversations(
   // second COUNT. Fresh (db/fresh.ts): the rail refreshes every few seconds, so
   // a cached page would sit a minute behind.
   const scope = await conversationScope(db, me);
-  const rows = await convoQuery(db, and(scope, bypassReadCache()), { limit: PAGE_SIZE + 1, offset: off });
+  const rows = await convoQuery(db, and(scope.where, bypassReadCache()), { limit: PAGE_SIZE + 1, offset: off });
 
   const hasMore = rows.length > PAGE_SIZE;
   const page = hasMore ? rows.slice(0, PAGE_SIZE) : rows;
-  return { items: await toListItems(db, page), hasMore };
+  return { items: await toListItems(db, page, scope.ctx), hasMore };
 }
 
 /**
@@ -218,10 +240,10 @@ export async function searchConversations(
   );
 
   const scope = await conversationScope(db, me);
-  const rows = await convoQuery(db, and(scope, match, bypassReadCache()), { limit: SEARCH_LIMIT + 1 });
+  const rows = await convoQuery(db, and(scope.where, match, bypassReadCache()), { limit: SEARCH_LIMIT + 1 });
   const truncated = rows.length > SEARCH_LIMIT;
   const page = truncated ? rows.slice(0, SEARCH_LIMIT) : rows;
-  return { items: await toListItems(db, page), truncated };
+  return { items: await toListItems(db, page, scope.ctx), truncated };
 }
 
 /**

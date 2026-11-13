@@ -12,6 +12,7 @@ import {
   roleFromErp,
   signSession,
   SESSION_COOKIE,
+  SESSION_COOKIE_OPTIONS,
 } from "@/lib/erp-auth";
 
 type LoginState = { error?: string };
@@ -91,13 +92,7 @@ export async function login(
 
   const token = await signSession(m.id, secret);
   const jar = await cookies();
-  jar.set(SESSION_COOKIE, token, {
-    httpOnly: true,
-    secure: true,
-    sameSite: "lax",
-    path: "/",
-    maxAge: 7 * 24 * 3600,
-  });
+  jar.set(SESSION_COOKIE, token, SESSION_COOKIE_OPTIONS);
   redirect("/inbox");
 }
 
