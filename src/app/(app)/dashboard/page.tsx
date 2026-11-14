@@ -1,6 +1,7 @@
 import { Suspense } from "react";
 import Link from "next/link";
 import { CompanySwitcher, LangToggle } from "@/components/shell/TopbarControls";
+import { HouzsConnectMarkThemed } from "@/components/brand/HouzsConnectLogo";
 import { getDb } from "@/db/client";
 import { companyChoices, isOwnerOrAdmin } from "@/lib/companies";
 import { getCurrentMember } from "@/lib/current-member";
@@ -114,9 +115,13 @@ export default async function DashboardPage({
         {/* Greeting · presence · language · export */}
         <div className="flex flex-wrap items-start gap-4">
         <div className="min-w-0 flex-1">
-          <h1 className="text-[24px] font-medium tracking-[-0.02em] text-[var(--color-ink)] md:text-[28px]">
-            {fmt(s.welcome, { name: firstName })}
-          </h1>
+          <div className="flex items-center gap-3">
+            {/* Houzs Connect mark beside the greeting — follows the workspace theme. */}
+            <HouzsConnectMarkThemed size={40} className="shrink-0" />
+            <h1 className="text-[24px] font-medium tracking-[-0.02em] text-[var(--color-ink)] md:text-[28px]">
+              {fmt(s.welcome, { name: firstName })}
+            </h1>
+          </div>
           <div className="mt-1 hidden text-[12.5px] text-[var(--color-faint)] md:block">
             {dateLine} · {s.signedInAs} <b className="font-semibold text-[var(--color-muted)]">{me.name}</b>
           </div>

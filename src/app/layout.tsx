@@ -1,7 +1,8 @@
-import type { Metadata } from "next";
-import { IBM_Plex_Sans, IBM_Plex_Mono } from "next/font/google";
+import type { Metadata, Viewport } from "next";
+import { IBM_Plex_Sans, IBM_Plex_Mono, Archivo } from "next/font/google";
 import { getLang, getTheme } from "@/lib/i18n/server";
 import "./globals.css";
+import "./brand-tokens.css";
 
 /*
   Houzs brand type — one face with the Houzs ERP.
@@ -46,11 +47,35 @@ const plexMono = IBM_Plex_Mono({
   variable: "--font-plex-mono",
   display: "swap",
 });
+// The Houzs Connect wordmark (logo scheme 6a): Archivo 800 "HOUZS" / 600
+// "CONNECT". Loaded via next/font (downloaded at build, served from
+// /_next/static/media) — NOT the handoff's Google Fonts <link>, which the
+// Worker CSP blocks at runtime, same as the Plex faces above.
+const archivo = Archivo({
+  subsets: ["latin"],
+  weight: ["600", "800"],
+  variable: "--font-archivo",
+  display: "swap",
+});
 
 export const metadata: Metadata = {
   title: "Houzs Century Chat",
   description:
     "Houzs Century internal WhatsApp communication & automation platform.",
+  // Logo scheme 6a. Files live in /public; see /site.webmanifest for the PWA
+  // icons. The app icon / favicon does not follow the theme (white-bg mark).
+  icons: {
+    icon: [
+      { url: "/favicon.ico", sizes: "48x48" },
+      { url: "/favicon.svg", type: "image/svg+xml" },
+    ],
+    apple: "/apple-touch-icon.png",
+  },
+  manifest: "/site.webmanifest",
+};
+
+export const viewport: Viewport = {
+  themeColor: "#11140f",
 };
 
 export default async function RootLayout({
@@ -61,7 +86,7 @@ export default async function RootLayout({
     <html
       lang={lang === "zh" ? "zh-CN" : "en"}
       data-theme={theme}
-      className={`${plexSans.variable} ${plexMono.variable} h-full antialiased`}
+      className={`${plexSans.variable} ${plexMono.variable} ${archivo.variable} h-full antialiased`}
     >
       <body className="min-h-full">{children}</body>
     </html>

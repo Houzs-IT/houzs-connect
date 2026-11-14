@@ -4,6 +4,7 @@ import Link, { useLinkStatus } from "next/link";
 import { usePathname } from "next/navigation";
 import { initials, tint } from "@/lib/format";
 import { PersonAvatar } from "./PersonAvatar";
+import { HouzsConnectMark } from "./brand/HouzsConnectMark";
 import { useShell } from "./shell/ShellProvider";
 import { IT_SUPPORT_NAV, NAV, SETTINGS_NAV, isActive, type NavItem } from "./shell/nav";
 import { useItUnread, useRememberPage } from "./it-support/useItSupportShell";
@@ -99,10 +100,11 @@ export function Sidebar({
       <Link
         href="/inbox"
         aria-label="Houzs Connect"
-        className="mb-3.5 grid h-9 w-9 place-items-center rounded-[8px] bg-white shadow-[var(--shadow-logo)]"
+        className="mb-3.5 grid h-10 w-10 place-items-center rounded-[8px]"
       >
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src="/logo-hc-mark.png" alt="" className="h-[22px] w-[22px] object-contain" />
+        {/* Straight on the rail, no chip. The rail is deep ink in both themes
+            (globals.css: left untouched by dark mode), so the white variant. */}
+        <HouzsConnectMark size={36} variant="white" title="Houzs Connect" />
       </Link>
 
       <nav className="flex flex-col items-center gap-1">
