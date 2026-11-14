@@ -62,7 +62,7 @@ export function PaymentReview({
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [pending, start] = useTransition();
   const [turn, setTurn] = useState(0);
-  const [imgFailed, setImgFailed] = useState(false);
+  const [notImage, setNotImage] = useState(false);
   const who = displayName(p.name, p.phone);
   const c = tint(p.phone);
 
@@ -104,6 +104,35 @@ export function PaymentReview({
         ? ["bg-[var(--color-success-soft)] text-[var(--color-success)]", L.confirmed]
         : ["bg-[var(--color-danger-soft)] text-[var(--color-danger)]", L.rejected];
   const unread = rows.some(([k]) => !f[k].trim());
+  const mediaUrl = `/payments/${p.id}/receipt`;
+  // The slip rebuilt from what was read — shown when there is no file to show
+  // (no attachment), and as the fallback when a file cannot be rendered.
+  const summaryCard = (
+    <div className="grid flex-1 place-items-center rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface-2)] p-6">
+      <div className="w-full max-w-[260px] -rotate-2 rounded-[10px] bg-white p-4 shadow-[0_8px_24px_-8px_rgba(17,23,34,0.25)]">
+        <div className="flex items-center gap-2">
+          <span className="grid h-6 w-6 place-items-center rounded-[6px] bg-[var(--color-pastel-orange)] text-[9px] font-bold text-[var(--color-pastel-orange-ink)]">
+            {(f.method || "?").slice(0, 2).toUpperCase()}
+          </span>
+          <span className="text-[12.5px] font-semibold text-[var(--color-ink)]">{f.method || L.unknown}</span>
+        </div>
+        <div className="mt-3 text-[10px] font-semibold uppercase tracking-[0.1em] text-[var(--color-faint)]">{L.transfer}</div>
+        <div className="mt-1.5 text-[22px] font-semibold text-[var(--color-ink)]">{f.amount ? money(Number(f.amount) || 0, p.currency) : "—"}</div>
+        <dl className="mt-3 space-y-1.5 border-t border-dashed border-[var(--color-border)] pt-3 text-[11px]">
+          {[
+            [L.reference, f.referenceNo || "—", true],
+            [L.date, p.date, false],
+            [L.note, f.orderRef || "—", true],
+          ].map(([k, v, chip]) => (
+            <div key={k as string} className="flex items-center justify-between gap-2">
+              <dt className="text-[var(--color-faint)]">{k}</dt>
+              <dd className={`text-right text-[var(--color-ink)] ${chip ? "rounded-[3px] bg-[var(--color-brand-soft)] px-1" : ""}`}>{v}</dd>
+            </div>
+          ))}
+        </dl>
+      </div>
+    </div>
+  );
 
   return (
     <div className="flex h-full min-h-[560px] flex-col overflow-hidden rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)]">
@@ -139,21 +168,23 @@ export function PaymentReview({
       <div className="scroll-thin grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)] gap-4 overflow-y-auto p-4 xl:grid-cols-2">
         <div className="flex flex-col">
           <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.1em] text-[var(--color-faint)]">{L.receipt}</div>
-          {p.hasImage && !imgFailed ? (
+          {!p.hasImage ? (
+            summaryCard
+          ) : !notImage ? (
             <>
               <div className="grid min-h-[320px] flex-1 place-items-center overflow-hidden rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface-2)] p-3">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
-                  src={`/payments/${p.id}/receipt`}
+                  src={mediaUrl}
                   alt={L.receipt}
-                  onError={() => setImgFailed(true)}
+                  onError={() => setNotImage(true)}
                   className="max-h-[440px] max-w-full rounded-[8px] object-contain shadow-[0_8px_24px_-8px_rgba(17,23,34,0.25)] transition-transform"
                   style={{ transform: `rotate(${turn}deg)` }}
                 />
               </div>
               <div className="mt-2 flex gap-2">
                 {[
-                  [L.zoom, () => window.open(`/payments/${p.id}/receipt`, "_blank", "noopener")],
+                  [L.zoom, () => window.open(mediaUrl, "_blank", "noopener")],
                   [L.rotate, () => setTurn((d) => (d + 90) % 360)],
                 ].map(([l, fn]) => (
                   <button
@@ -166,7 +197,7 @@ export function PaymentReview({
                   </button>
                 ))}
                 <a
-                  href={`/payments/${p.id}/receipt`}
+                  href={mediaUrl}
                   download
                   className="flex h-[32px] items-center rounded-[8px] border border-[var(--color-border)] px-3 text-[12.5px] font-semibold text-[var(--color-ink)] hover:bg-[var(--color-surface-2)]"
                 >
@@ -175,32 +206,34 @@ export function PaymentReview({
               </div>
             </>
           ) : (
-          <div className="grid flex-1 place-items-center rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface-2)] p-6">
-              <div className="w-full max-w-[260px] -rotate-2 rounded-[10px] bg-white p-4 shadow-[0_8px_24px_-8px_rgba(17,23,34,0.25)]">
-                <div className="flex items-center gap-2">
-                  <span className="grid h-6 w-6 place-items-center rounded-[6px] bg-[var(--color-pastel-orange)] text-[9px] font-bold text-[var(--color-pastel-orange-ink)]">
-                    {(f.method || "?").slice(0, 2).toUpperCase()}
-                  </span>
-                  <span className="text-[12.5px] font-semibold text-[var(--color-ink)]">{f.method || L.unknown}</span>
-                </div>
-                <div className="mt-3 text-[10px] font-semibold uppercase tracking-[0.1em] text-[var(--color-faint)]">{L.transfer}</div>
-                <div className="mt-1.5 text-[22px] font-semibold text-[var(--color-ink)]">{f.amount ? money(Number(f.amount) || 0, p.currency) : "—"}</div>
-                <dl className="mt-3 space-y-1.5 border-t border-dashed border-[var(--color-border)] pt-3 text-[11px]">
-                  {[
-                    [L.reference, f.referenceNo || "—", true],
-                    [L.date, p.date, false],
-                    [L.note, f.orderRef || "—", true],
-                  ].map(([k, v, chip]) => (
-                    <div key={k as string} className="flex items-center justify-between gap-2">
-                      <dt className="text-[var(--color-faint)]">{k}</dt>
-                      <dd className={`text-right text-[var(--color-ink)] ${chip ? "rounded-[3px] bg-[var(--color-brand-soft)] px-1" : ""}`}>{v}</dd>
-                    </div>
-                  ))}
-                </dl>
+            // A non-image file — a PDF slip, say: show the whole document inline
+            // in the browser's own viewer (scroll / zoom / all pages). The
+            // summary card is the fallback if it can't be rendered or fetched.
+            <>
+              <div className="min-h-[440px] flex-1 overflow-hidden rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface-2)]">
+                <object data={mediaUrl} className="h-full min-h-[440px] w-full">
+                  {summaryCard}
+                </object>
               </div>
-            </div>
+              <div className="mt-2 flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => window.open(mediaUrl, "_blank", "noopener")}
+                  className="h-[32px] rounded-[8px] border border-[var(--color-border)] px-3 text-[12.5px] font-semibold text-[var(--color-ink)] hover:bg-[var(--color-surface-2)]"
+                >
+                  {L.zoom}
+                </button>
+                <a
+                  href={mediaUrl}
+                  download
+                  className="flex h-[32px] items-center rounded-[8px] border border-[var(--color-border)] px-3 text-[12.5px] font-semibold text-[var(--color-ink)] hover:bg-[var(--color-surface-2)]"
+                >
+                  {L.download}
+                </a>
+              </div>
+            </>
           )}
-          {(!p.hasImage || imgFailed) && <p className="mt-2 text-[11.5px] text-[var(--color-faint)]">{L.receiptNote}</p>}
+          {!p.hasImage && <p className="mt-2 text-[11.5px] text-[var(--color-faint)]">{L.receiptNote}</p>}
           {p.ocrRawText && (
             <details className="mt-2 text-[12px] text-[var(--color-muted)]">
               <summary className="cursor-pointer text-[12px] font-semibold text-[var(--color-ink)]">{L.ocrText}</summary>
