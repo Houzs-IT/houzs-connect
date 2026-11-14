@@ -112,6 +112,35 @@ function subscribeViews(l: () => void) {
   return () => viewListeners.delete(l);
 }
 
+/**
+ * The search text, held in sessionStorage and read through useSyncExternalStore
+ * — like the saved views above, and for the same reason there is no hydration
+ * concern: the server snapshot is an empty string and the browser fills it in.
+ * Opening a thread can tear the rail down (the phone master–detail swaps panes),
+ * and a half-typed search should survive that. Going through the store rather
+ * than restoring into useState in an effect also avoids a set-state-in-effect.
+ * It is sessionStorage, not localStorage, so a new tab starts clean.
+ */
+const SEARCH_KEY = "hc_inbox_search";
+const searchListeners = new Set<() => void>();
+function readSearch(): string {
+  try {
+    return sessionStorage.getItem(SEARCH_KEY) ?? "";
+  } catch {
+    return "";
+  }
+}
+function writeSearch(v: string) {
+  try {
+    sessionStorage.setItem(SEARCH_KEY, v);
+  } catch {}
+  searchListeners.forEach((l) => l());
+}
+function subscribeSearch(l: () => void) {
+  searchListeners.add(l);
+  return () => searchListeners.delete(l);
+}
+
 function activeFilterCount(f: Filters) {
   return (
     Number(f.starred) +
@@ -163,7 +192,8 @@ export function ConversationList({
 
   const [tab, setTab] = useState<Tab>("all");
   const [dept, setDept] = useState<string | null>(null);
-  const [q, setQ] = useState("");
+  const q = useSyncExternalStore(subscribeSearch, readSearch, () => "");
+  const setQ = writeSearch;
   const [filters, setFilters] = useState<Filters>(NO_FILTERS);
   const [filterOpen, setFilterOpen] = useState(false);
   const savedViews = useSyncExternalStore(subscribeViews, readViews, () => NO_VIEWS);
@@ -354,6 +384,17 @@ export function ConversationList({
             placeholder={s.search}
             className="w-full min-w-0 bg-transparent text-[13px] text-[var(--color-ink)] outline-none placeholder:text-[var(--color-faint)]"
           />
+          {q && (
+            <button
+              type="button"
+              onClick={() => setQ("")}
+              title={s.clearSearch}
+              aria-label={s.clearSearch}
+              className="grid h-[18px] w-[18px] shrink-0 place-items-center rounded-full text-[var(--color-faint)] transition-colors hover:bg-[var(--color-surface)] hover:text-[var(--color-ink)]"
+            >
+              <IconClose width={13} height={13} />
+            </button>
+          )}
         </label>
         <button
           type="button"
