@@ -1,4 +1,6 @@
+import { asc } from "drizzle-orm";
 import { getDb } from "@/db/client";
+import { company as companyTable } from "@/db/schema";
 import { headerKey, storedHeaders } from "@/lib/whatsapp/templateMedia";
 import Link from "next/link";
 import { DataTable, type DataColumn, type DataRow } from "@/components/DataTable";
@@ -18,6 +20,7 @@ import {
   type TemplateStatus,
 } from "@/lib/whatsapp/templates";
 import { bindingKey } from "@/lib/whatsapp/templateBindings";
+import { SHARED_OWNER, templateOwner, type TemplateOwner } from "@/lib/whatsapp/templateCompany";
 import { loadBindings, loadFieldsAndSample, loadTemplateList, needsMapping } from "@/app/(app)/templates/data";
 import { StarterSetButton } from "@/app/(app)/templates/StarterSetButton";
 import { TemplateSide } from "@/app/(app)/templates/TemplateSide";
@@ -43,6 +46,8 @@ const STATUS_TONE: Record<string, string> = {
   DISABLED: "bg-[var(--color-surface-2)] text-[var(--color-muted)]",
 };
 const ICON_TONES = ["blue", "green", "orange", "purple", "pink", "cyan"];
+// Company filter / column order: the companies first, brand-free last.
+const OWNER_ORDER: TemplateOwner[] = ["HOUZS", "2990", "HOOKKA", "THECONTS", SHARED_OWNER];
 
 export default async function TemplatesPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const me = await getCurrentMember();
@@ -50,6 +55,7 @@ export default async function TemplatesPage({ searchParams }: { searchParams: Pr
   const t = await getDict();
   const L = t.tf;
   const sp = await searchParams;
+  const fCo = one(sp.company);
   const fCat = one(sp.category);
   const fLang = one(sp.language);
   const fStatus = one(sp.status);
@@ -57,14 +63,23 @@ export default async function TemplatesPage({ searchParams }: { searchParams: Pr
   const tool = one(sp.tool);
   const q = one(sp.q).trim().toLowerCase();
 
-  const [{ configured, templates: all, error }, bindings, { fields, sample }] = await Promise.all([
+  const [{ configured, templates: all, error }, bindings, { fields, sample }, companies] = await Promise.all([
     loadTemplateList(),
     loadBindings(me.companyId),
     loadFieldsAndSample(me.companyId),
+    getDb().query.company.findMany({ columns: { code: true, name: true }, orderBy: asc(companyTable.createdAt) }),
   ]);
+
+  // Whose template each one is (brand in its wording / `_2990` suffix) — every
+  // company's templates share one WhatsApp Business Account, so Meta's list mixes
+  // them. Labels are the company names the switcher shows; brand-free = shared.
+  const ownerOf = new Map(all.map((x) => [x.id, templateOwner(x)]));
+  const ownerLabel = (o: TemplateOwner) =>
+    o === SHARED_OWNER ? L.companyShared : (companies.find((c) => c.code === o)?.name ?? o);
 
   const templates = all.filter(
     (x) =>
+      (!fCo || ownerOf.get(x.id) === fCo) &&
       (!fCat || x.category === fCat) &&
       (!fLang || x.language === fLang) &&
       (!fStatus || x.status === fStatus) &&
@@ -106,7 +121,7 @@ export default async function TemplatesPage({ searchParams }: { searchParams: Pr
 
   const keep = (extra: Record<string, string>) => {
     const p = new URLSearchParams();
-    for (const [k, v] of Object.entries({ category: fCat, language: fLang, status: fStatus, mapping: fMap, q, ...extra })) {
+    for (const [k, v] of Object.entries({ company: fCo, category: fCat, language: fLang, status: fStatus, mapping: fMap, q, ...extra })) {
       if (v) p.set(k, v);
     }
     return `/settings/templates${p.size ? `?${p}` : ""}`;
@@ -114,6 +129,10 @@ export default async function TemplatesPage({ searchParams }: { searchParams: Pr
 
   const opts = (vals: string[], labels?: Record<string, string>) =>
     [...new Set(vals)].sort().map((v) => ({ value: v, label: labels?.[v] ?? v }));
+  const ownerOpts = OWNER_ORDER.filter((o) => [...ownerOf.values()].includes(o)).map((o) => ({
+    value: o,
+    label: ownerLabel(o),
+  }));
 
   // The rows the server filters above (pills, mapping, `q`) let through; the
   // table sorts them and narrows them further by its header funnels.
@@ -137,6 +156,8 @@ export default async function TemplatesPage({ searchParams }: { searchParams: Pr
     const reason = r.rejectedReason && r.rejectedReason !== "NONE" ? r.rejectedReason : null;
     const varsLabel =
       slots.length === 0 ? L.noVars : missing > 0 ? L.needsMapping : L.allMappedShort;
+    const owner = ownerOf.get(r.id) ?? SHARED_OWNER;
+    const companyLabel = ownerLabel(owner);
     return {
       id: r.id,
       href,
@@ -161,8 +182,20 @@ export default async function TemplatesPage({ searchParams }: { searchParams: Pr
               <Link href={href} scroll={false} className="block truncate text-[13.5px] font-semibold text-[var(--color-ink)]">
                 {r.name}
               </Link>
-              <span className="block truncate text-[11.5px] text-[var(--color-faint)]">
-                {r.language} · {r.header || r.body}
+              <span className="flex min-w-0 items-center gap-1.5 text-[11.5px] text-[var(--color-faint)]">
+                {/* Whose template this is — every company shares one WhatsApp account. */}
+                <span
+                  className={`shrink-0 whitespace-nowrap rounded-full border px-1.5 text-[10.5px] leading-[16px] font-medium ${
+                    owner === SHARED_OWNER
+                      ? "border-dashed border-[var(--color-border)]"
+                      : "border-[var(--color-border)] bg-[var(--color-surface-2)] text-[var(--color-ink)]"
+                  }`}
+                >
+                  {companyLabel}
+                </span>
+                <span className="truncate">
+                  {r.language} · {r.header || r.body}
+                </span>
               </span>
             </span>
           </span>
@@ -308,6 +341,7 @@ export default async function TemplatesPage({ searchParams }: { searchParams: Pr
             <>
               <div className="flex flex-wrap items-center gap-2">
                 <form className="flex h-[36px] w-full max-w-[280px] items-center gap-2 rounded-[8px] border border-[var(--color-border)] bg-[var(--color-surface)] px-3 focus-within:border-[var(--color-accent)]">
+                  {fCo && <input type="hidden" name="company" value={fCo} />}
                   {fCat && <input type="hidden" name="category" value={fCat} />}
                   {fLang && <input type="hidden" name="language" value={fLang} />}
                   {fStatus && <input type="hidden" name="status" value={fStatus} />}
@@ -320,6 +354,7 @@ export default async function TemplatesPage({ searchParams }: { searchParams: Pr
                     className="w-full bg-transparent text-[13px] outline-none placeholder:text-[var(--color-faint)]"
                   />
                 </form>
+                <FilterPill param="company" label={L.company} anyLabel={L.any} options={ownerOpts} />
                 <FilterPill param="category" label={L.category} anyLabel={L.any} options={opts(all.map((x) => x.category))} />
                 <FilterPill param="language" label={L.language} anyLabel={L.any} options={opts(all.map((x) => x.language))} />
                 <FilterPill param="status" label={L.status} anyLabel={L.any} options={opts(all.map((x) => x.status), L.statusL)} />
