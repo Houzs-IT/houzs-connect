@@ -33,6 +33,52 @@ async function resolveCompany(companySlug?: string) {
     : await db.query.company.findFirst({ orderBy: asc(companyTable.createdAt) });
 }
 
+/** The ERP company an order belongs to: its `company_code` ("HOUZS" / "2990"),
+ *  else the doc_no prefix of ref_1 ("2990-SO-…" is 2990's). Null = unknown. */
+export function orderCompanyCode(attributes?: Record<string, string>): string | null {
+  const code = attributes?.company_code?.trim().toUpperCase();
+  if (code) return code;
+  if (attributes?.ref_1?.trim().startsWith("2990-")) return "2990";
+  return null;
+}
+
+/**
+ * Which Connect company an ERP send runs under.
+ *
+ * An explicit `companySlug` wins. Without one — the ERP's delivery-planning
+ * blasts send none, from either ERP company — the send goes to the order's own
+ * company (orderCompanyCode) when that company runs the named automation itself
+ * and has it ENABLED: so a 2990 order's "New Delivery Follow-up" runs 2990's
+ * copy, from 2990's own number with its `_2990` templates, while a Houzs order
+ * keeps running Houzs's. Until the order's company has that automation enabled
+ * (and for everything else: contact syncs, service flows, unknown orders) it
+ * falls back to the first company, Houzs Century — exactly the old behaviour,
+ * so each 2990 flow switches over only when its owner publishes it.
+ */
+export async function resolveErpCompany(payload: ErpWebhookPayload) {
+  if (payload.companySlug) return resolveCompany(payload.companySlug);
+  const fallback = await resolveCompany();
+  const code = orderCompanyCode(payload.attributes);
+  if (!code || !payload.automation || !fallback || code === fallback.code) return fallback;
+
+  const db = getDb();
+  const own = await db.query.company.findFirst({
+    where: eq(companyTable.code, code),
+    orderBy: asc(companyTable.createdAt),
+  });
+  if (!own || own.id === fallback.id) return fallback;
+  const runsIt = await db.query.automation.findFirst({
+    where: and(
+      eq(automationTable.companyId, own.id),
+      eq(automationTable.name, payload.automation),
+      eq(automationTable.enabled, true),
+      eq(automationTable.triggerType, "WEBHOOK")
+    ),
+    columns: { id: true },
+  });
+  return runsIt ? own : fallback;
+}
+
 /**
  * ERP → Houzs Connect. Upserts the contact (with order attributes) and fires the
  * matching WEBHOOK-triggered automation, which sends the first WhatsApp message.
@@ -40,7 +86,7 @@ async function resolveCompany(companySlug?: string) {
  */
 export async function handleErpWebhook(payload: ErpWebhookPayload) {
   const db = getDb();
-  const company = await resolveCompany(payload.companySlug);
+  const company = await resolveErpCompany(payload);
   if (!company) return { ok: false, error: "no company" as const };
 
   const phone = payload.phone.replace(/[^\d]/g, "");

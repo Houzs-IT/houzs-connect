@@ -18,8 +18,11 @@ import {
   overdueOrderFlow,
 } from "./templateSends";
 
+import { FLOW_SET_2990, type CompanyFlowSet } from "./companies";
+
 export type { SeedFlow, SeedForm } from "./types";
 export { validateGraph } from "./validate";
+export { graphForCompany, templateGaps, type CompanyFlowSet } from "./companies";
 
 /**
  * The rebuilt WS-A conversation flows, authored in code (decision B). The seed
@@ -45,4 +48,15 @@ export const REBUILD_FLOWS: SeedFlow[] = [
   serviceCaseReceivedFlow,
   overdueOrderFlow,
   serviceArrangementFlow,
+];
+
+/**
+ * Who gets which flows (see companies.ts). Houzs Century: every flow, its own
+ * templates. 2990's Home: the delivery flows on its own number, with its
+ * `_2990` templates. Hookka / The Conts get none — they must NOT receive
+ * delivery flows.
+ */
+export const COMPANY_FLOW_SETS: CompanyFlowSet[] = [
+  { slug: "houzs-century", flows: REBUILD_FLOWS },
+  FLOW_SET_2990,
 ];
