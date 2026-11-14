@@ -3,7 +3,6 @@
 import { useActionState, useState } from "react";
 import { useShell } from "@/components/shell/ShellProvider";
 import { HouzsConnectMark } from "@/components/brand/HouzsConnectMark";
-import { fmt } from "@/lib/i18n/dict";
 import { login } from "./actions";
 import { submitAccessRequest } from "./request-actions";
 
@@ -39,8 +38,25 @@ function Eye({ off }: { off: boolean }) {
   );
 }
 
-const CHIP_TONES = ["green", "blue", "pink"];
-const CHIP_ICONS = ["☏", "⇄", "↗"];
+// The group's companies, shown on the login hero. Each sits on a uniform white
+// tile so the mixed brand colours and shapes read as one set and the dark logos
+// stay legible on the dark sky.
+// Group companies for the login brand row — white monochrome, no boxes, in one
+// 400px row (space-between). Per-logo w×h from the design handoff, sized for
+// equal visual weight (wide wordmarks short, square lockups tall); order is the
+// handoff's. See design_handoff_login_brand_row/README.md.
+const COMPANIES: { src: string; name: string; w: number; h: number }[] = [
+  { src: "/companies/houzs-venture-white.png", name: "Houzs Venture Holding", w: 68, h: 11 },
+  { src: "/companies/houzs-century-white.png", name: "Houzs Century", w: 24, h: 31 },
+  { src: "/companies/2990-white.png", name: "2990", w: 43, h: 18 },
+  { src: "/companies/the-conts-white.png", name: "The Conts", w: 36, h: 33 },
+  { src: "/companies/carres-white.png", name: "Carres", w: 65, h: 12 },
+  { src: "/companies/hookka-white.png", name: "Hookka", w: 42, h: 18 },
+  { src: "/companies/dreamcrafter-white.png", name: "Dream Crafter", w: 22, h: 33 },
+];
+// Enlarge the left brand area so it balances the sign-in card. Scales the
+// handoff's per-logo sizes; the row/tagline widths scale with it (400 → 520).
+const LOGO_SCALE = 1.3;
 
 export function LoginView({ openRequest = false }: { openRequest?: boolean }) {
   const { t, lang, setLang } = useShell();
@@ -61,7 +77,6 @@ export function LoginView({ openRequest = false }: { openRequest?: boolean }) {
   };
   const plainInput =
     "h-[44px] w-full rounded-[10px] border border-[var(--color-border)] bg-white px-3.5 text-[14px] text-[var(--color-ink)] outline-none placeholder:text-[var(--color-faint)] focus:border-[var(--color-accent)] focus:shadow-[0_0_0_3px_var(--color-accent-ring)]";
-  const year = new Date().getFullYear();
   const error = state.error ? (lang === "zh" ? (ZH_ERRORS[state.error] ?? state.error) : state.error) : null;
 
   const input = `h-[44px] w-full rounded-[10px] border bg-white px-3.5 text-[14px] text-[var(--color-ink)] outline-none transition-shadow placeholder:text-[var(--color-faint)] focus:shadow-[0_0_0_3px_var(--color-accent-ring)] ${
@@ -104,46 +119,48 @@ export function LoginView({ openRequest = false }: { openRequest?: boolean }) {
         ))}
       </div>
 
-      <div className="relative z-10 mx-auto flex min-h-screen max-w-6xl flex-col items-center justify-between gap-10 px-5 pb-8 pt-20 lg:flex-row lg:justify-between lg:px-16 lg:py-12">
+      <div className="relative z-10 mx-auto flex min-h-screen max-w-6xl flex-col items-center justify-center gap-10 px-5 pb-8 pt-20 lg:flex-row lg:justify-between lg:px-16 lg:py-12">
         {/* Brand */}
         <div className="flex w-full max-w-xl flex-col items-center text-center lg:items-start lg:text-left">
-          <div className="animate-rise mb-7 hidden items-center gap-2.5 lg:flex">
-            <span className="h-px w-10 bg-[var(--color-brand-bright)]" />
-            <span className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[var(--color-brand-bright)]">{L.brand}</span>
-          </div>
-          {/* Houzs Connect lockup — mark + Archivo wordmark, white on the dark sky. */}
-          <div className="animate-rise flex items-center gap-3 sm:gap-4">
+          {/* Houzs Connect lockup — mark + Archivo wordmark, white on the dark sky. (unchanged) */}
+          <div className="animate-rise flex items-center gap-4 sm:gap-5">
             <HouzsConnectMark
               variant="white"
-              size={96}
+              size={112}
               title="Houzs Connect"
-              className="h-16 w-16 shrink-0 sm:h-20 sm:w-20 xl:h-24 xl:w-24"
+              className="h-20 w-20 shrink-0 sm:h-24 sm:w-24 xl:h-28 xl:w-28"
             />
-            <div className="flex flex-col gap-1.5 leading-none">
-              <span className="hc-wordmark-main text-[40px] sm:text-[52px] xl:text-[64px]" style={{ color: "#fff" }}>
+            <div className="flex flex-col gap-2 leading-none">
+              <span className="hc-wordmark-main text-[52px] sm:text-[64px] xl:text-[78px]" style={{ color: "#fff" }}>
                 HOUZS
               </span>
-              <span className="hc-wordmark-sub text-[18px] sm:text-[24px] xl:text-[29px]" style={{ color: "var(--hc-wordmark-accent-dark)" }}>
+              <span className="hc-wordmark-sub text-[24px] sm:text-[29px] xl:text-[35px]" style={{ color: "var(--hc-wordmark-accent-dark)" }}>
                 CONNECT
               </span>
             </div>
           </div>
-          <span className="animate-rise mt-5 inline-flex items-center gap-2 rounded-full border border-[rgba(56,160,184,0.45)] bg-[rgba(56,160,184,0.14)] px-3 py-1 text-[12.5px] font-semibold text-white">
-            <span className="h-1.5 w-1.5 rounded-full bg-[#67bed6] shadow-[0_0_8px_#67bed6]" />
-            Connect
-          </span>
-          <p className="animate-rise mt-7 hidden max-w-lg text-[15.5px] leading-relaxed text-[#a9b4c6] lg:block">{L.pitch}</p>
-          <div className="animate-rise mt-6 hidden flex-wrap gap-2.5 lg:flex">
-            {L.chips.map((c, i) => (
-              <span key={c} className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/5 py-1 pl-1 pr-3.5 text-[13px] text-white/90">
-                <span
-                  className="grid h-6 w-6 place-items-center rounded-full text-[11px] font-bold"
-                  style={{ background: `var(--color-pastel-${CHIP_TONES[i]})`, color: `var(--color-pastel-${CHIP_TONES[i]}-ink)` }}
-                >
-                  {CHIP_ICONS[i]}
-                </span>
-                {c}
-              </span>
+
+          {/* Tagline flanked by 1px rules — design handoff (brand row), enlarged. */}
+          <div className="animate-rise mt-6 hidden w-[520px] max-w-full items-center gap-4 whitespace-nowrap lg:flex">
+            <span className="h-px flex-1 bg-[#3A4766]" />
+            <span className="text-[18px] font-normal leading-[1.3] text-[#B8C2D6]">{L.pitch}</span>
+            <span className="h-px flex-1 bg-[#3A4766]" />
+          </div>
+
+          {/* Group companies — white monochrome, no boxes, one row (space-between),
+              handoff per-logo w×h scaled up by LOGO_SCALE. */}
+          <div className="animate-rise mt-11 hidden w-[520px] items-center justify-between lg:flex">
+            {COMPANIES.map((co) => (
+              /* eslint-disable-next-line @next/next/no-img-element */
+              <img
+                key={co.name}
+                src={co.src}
+                alt={co.name}
+                width={co.w}
+                height={co.h}
+                style={{ width: Math.round(co.w * LOGO_SCALE), height: Math.round(co.h * LOGO_SCALE) }}
+                className="object-contain opacity-[0.85] transition-opacity duration-200 hover:opacity-100"
+              />
             ))}
           </div>
         </div>
@@ -151,15 +168,10 @@ export function LoginView({ openRequest = false }: { openRequest?: boolean }) {
         {/* Card */}
         <div className="animate-rise w-full max-w-[362px]">
           <div className="rounded-[26px] border border-white/60 bg-[rgba(238,241,244,0.94)] px-5 py-6 shadow-[0_30px_80px_-30px_rgba(0,0,0,0.85)] backdrop-blur-xl sm:px-7 sm:py-8">
-            <div className="mb-1 hidden items-center gap-2 sm:flex">
-              <span className="h-px w-5 bg-[var(--color-brand)]" />
-              <span className="text-[10.5px] font-semibold uppercase tracking-[0.22em] text-[var(--color-brand)]">{L.signIn}</span>
+            <div className="flex items-center gap-2">
+              <span className="h-px w-5 shrink-0 bg-[var(--color-brand)]" />
+              <p className="text-[13px] text-[var(--color-brand)]">{L.sub}</p>
             </div>
-            <h1 className="text-[24px] font-bold tracking-tight text-[var(--color-ink)]">
-              <span className="sm:hidden">{L.signIn}</span>
-              <span className="hidden sm:inline">{L.title}</span>
-            </h1>
-            <p className="mt-1 text-[13px] text-[var(--color-muted)]">{L.sub}</p>
 
             {panel === "none" ? (
               <form action={formAction} className="mt-6 flex flex-col gap-4">
@@ -310,7 +322,6 @@ export function LoginView({ openRequest = false }: { openRequest?: boolean }) {
               </div>
             )}
           </div>
-          <div className="mt-5 text-center text-[10.5px] uppercase tracking-[0.18em] text-[#7d889b]">{fmt(L.footer, { year })}</div>
         </div>
       </div>
     </div>
