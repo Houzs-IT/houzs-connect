@@ -33,3 +33,29 @@ export function templateOwner(t: {
   const text = [t.header, t.body, t.footer].filter(Boolean).join("\n");
   return RULES.find((r) => r.test(name, text))?.owner ?? SHARED_OWNER;
 }
+
+// connect.company.code is the ERP code verbatim and equals the owner code
+// one-for-one (HOUZS, 2990, HOOKKA, THECONTS), so a member's company scopes the
+// Templates list directly.
+const OWNER_CODES = new Set<TemplateOwner>(["HOUZS", "2990", "HOOKKA", "THECONTS"]);
+
+// Companies run by one team manage their templates together, so a member of one
+// sees the other's templates too. Mirrors the unified inbox (lib/inbox-group.ts
+// INBOX_GROUPS; owner decision 2026-11-13): Houzs Century + 2990's Home are
+// paired, while Hookka and The Conts each stand alone. Keep in step with that
+// list if the pairing changes.
+const OWNER_GROUPS: readonly (readonly TemplateOwner[])[] = [["HOUZS", "2990"]];
+
+/**
+ * The template owners a member of `companyCode` should see on the Templates
+ * page: their own brand, any brand paired with it, and SHARED (brand-free,
+ * sendable by anyone). Returns `null` for a company we don't classify by
+ * brand — then the page shows every owner, so an unknown company is never left
+ * with an empty list.
+ */
+export function visibleOwners(companyCode: string | null | undefined): Set<TemplateOwner> | null {
+  if (!companyCode || !OWNER_CODES.has(companyCode as TemplateOwner)) return null;
+  const code = companyCode as TemplateOwner;
+  const group = OWNER_GROUPS.find((g) => g.includes(code)) ?? [code];
+  return new Set<TemplateOwner>([...group, SHARED_OWNER]);
+}

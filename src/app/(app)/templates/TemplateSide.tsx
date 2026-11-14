@@ -9,7 +9,8 @@ import { positionalSlots, type VarBinding } from "@/lib/automation/vars";
 import { fmt } from "@/lib/i18n/dict";
 import { HEADER_MEDIA, headerFileProblem, isHeaderMediaFormat } from "@/lib/template-media-limits";
 import type { TemplateCounts } from "@/lib/whatsapp/templates";
-import { removeTemplate, saveBindingAction, setTemplateHeaderFile } from "./actions";
+import type { TemplateOwner } from "@/lib/whatsapp/templateCompany";
+import { removeTemplate, saveBindingAction, setTemplateHeaderFile, setTemplateOwnerAction } from "./actions";
 import { SlotSelect } from "./SlotSelect";
 import { TemplateBubble } from "./TemplateBubble";
 import type { FieldOption, SampleContact, TemplateRowData } from "./types";
@@ -21,6 +22,9 @@ export function TemplateSide({
   stats,
   statsOff,
   days,
+  ownerOverride,
+  ownerOptions,
+  detectedLabel,
 }: {
   template: TemplateRowData;
   fields: FieldOption[];
@@ -28,6 +32,12 @@ export function TemplateSide({
   stats: TemplateCounts | null;
   statsOff: boolean;
   days: number;
+  /** The pinned company, or null when the owner is inferred from the wording. */
+  ownerOverride: TemplateOwner | null;
+  /** Assignable companies (+ Shared) for the picker. */
+  ownerOptions: { value: string; label: string }[];
+  /** What the wording-based guess resolves to — shown on the "Auto" option. */
+  detectedLabel: string;
 }) {
   const router = useRouter();
   const { t } = useShell();
@@ -36,6 +46,7 @@ export function TemplateSide({
   const [note, setNote] = useState<{ ok: boolean; text: string } | null>(null);
   const [pending, start] = useTransition();
   const [confirm, setConfirm] = useState(false);
+  const [ownerNote, setOwnerNote] = useState<{ ok: boolean; text: string } | null>(null);
   const slots = positionalSlots(template.body);
   const byIndex = new Map(bindings.map((b) => [b.index, b]));
   const headerFormat = template.headerFormat;
@@ -77,6 +88,15 @@ export function TemplateSide({
       if (res.ok) router.refresh();
     });
 
+  // "" = Auto (clear the override and fall back to the wording-based guess).
+  const saveOwner = (value: string) =>
+    start(async () => {
+      setOwnerNote(null);
+      const res = await setTemplateOwnerAction(template.name, value || null);
+      setOwnerNote(res.ok ? { ok: true, text: L.ownerSaved } : { ok: false, text: res.error ?? "Could not save." });
+      if (res.ok) router.refresh();
+    });
+
   const tiles: [string, number | null, string, string][] = [
     [L.sentT, stats?.sent ?? null, "var(--color-pastel-blue)", "var(--color-pastel-blue-ink)"],
     [L.deliveredT, stats?.delivered ?? null, "var(--color-pastel-green)", "var(--color-pastel-green-ink)"],
@@ -104,6 +124,34 @@ export function TemplateSide({
         >
           {L.edit}
         </Link>
+      </div>
+
+      {/* Which company this template belongs to — drives the list's per-company
+          scoping. Auto = inferred from the wording; pick one to pin it. */}
+      <div>
+        <label className="flex items-center gap-2">
+          <span className="shrink-0 text-[11px] font-semibold uppercase tracking-[0.1em] text-[var(--color-faint)]">
+            {L.ownerPick}
+          </span>
+          <select
+            value={ownerOverride ?? ""}
+            disabled={pending}
+            onChange={(e) => saveOwner(e.target.value)}
+            className="h-[30px] min-w-0 flex-1 rounded-[8px] border border-[var(--color-border)] bg-[var(--color-surface)] px-2 text-[12.5px] text-[var(--color-ink)] disabled:opacity-50"
+          >
+            <option value="">{`${L.ownerAuto} → ${detectedLabel}`}</option>
+            {ownerOptions.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        {ownerNote && (
+          <p className={`mt-1 text-[11.5px] ${ownerNote.ok ? "text-[var(--color-faint)]" : "text-[var(--color-danger)]"}`}>
+            {ownerNote.text}
+          </p>
+        )}
       </div>
 
       <div className="rounded-[12px] bg-[#ebe4d8] p-3">

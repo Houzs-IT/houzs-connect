@@ -708,6 +708,25 @@ export const templateBinding = connect.table(
 );
 
 /**
+ * A manual override of which company a WhatsApp template belongs to, for the
+ * Templates page's company scoping and filter. `templateOwner()` guesses the
+ * brand from a template's wording, but a Houzs template that never names
+ * "Houzs" falls through to SHARED; this row pins the right owner. Global — a
+ * template is one shared-WABA asset — and keyed by template NAME across its
+ * language variants. `owner` is a company code (HOUZS, 2990, HOOKKA, THECONTS)
+ * or SHARED. Self-applied by db/ensure-template-owner.ts.
+ */
+export const templateOwnerOverride = connect.table("template_owner", {
+  templateName: text("template_name").primaryKey(),
+  owner: text("owner").notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .notNull()
+    .defaultNow()
+    .$onUpdate(() => new Date()),
+  updatedBy: text("updated_by"),
+});
+
+/**
  * A template's header file (image / PDF), kept so every send can attach it:
  * Meta refuses a send of a media-header template that carries no header.
  * Keyed by the template itself (WABA + name + language), not by company — a

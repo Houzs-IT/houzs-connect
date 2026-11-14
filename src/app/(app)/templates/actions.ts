@@ -19,6 +19,7 @@ import {
   type TemplateStatus,
 } from "@/lib/whatsapp/templates";
 import { saveTemplateBinding } from "@/lib/whatsapp/templateBindings";
+import { setTemplateOwnerOverride, asTemplateOwner } from "@/lib/whatsapp/templateOwnerStore";
 import { uploadForHandle } from "@/lib/whatsapp/profile";
 import { asBindings, type VarBinding } from "@/lib/automation/vars";
 import { brandForCompanyId } from "@/lib/brand-company";
@@ -268,6 +269,28 @@ export async function saveBindingAction(
   if (!me) return { ok: false, error: "Not signed in." };
   if (!templateName || !language) return { ok: false, error: "Missing template name or language." };
   await saveTemplateBinding(me.companyId, templateName, language, asBindings(bindings));
+  revalidatePath("/settings/templates");
+  return { ok: true };
+}
+
+/**
+ * Pin which company a template belongs to (or reset to the wording-based guess
+ * when `owner` is null/empty). This drives the Templates page's per-company
+ * scoping, so a Houzs template that reads as "shared" can be put back where it
+ * belongs. Global — the override is by template name, not per company.
+ */
+export async function setTemplateOwnerAction(
+  templateName: string,
+  owner: string | null
+): Promise<{ ok: boolean; error?: string }> {
+  const me = await requireMember();
+  if (!me) return { ok: false, error: "Not signed in." };
+  const name = templateName.trim();
+  if (!name) return { ok: false, error: "Missing template name." };
+  // "" / null → clear the override; otherwise it must be a company we know.
+  const value = owner ? asTemplateOwner(owner) : null;
+  if (owner && !value) return { ok: false, error: "Unknown company." };
+  await setTemplateOwnerOverride(name, value, me.id);
   revalidatePath("/settings/templates");
   return { ok: true };
 }
