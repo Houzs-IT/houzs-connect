@@ -1,7 +1,8 @@
 name: Seed WS-A flows (DRAFT)
 
 # Manual-only. Upserts the rebuilt WS-A conversation flows into
-# connect.automation as DRAFT/disabled for the Houzs company. Idempotent and
+# connect.automation as DRAFT/disabled, per company (COMPANY_FLOW_SETS: Houzs
+# Century's full set, 2990's Home's delivery set). Idempotent and
 # non-destructive (no wipe, no sends, DRAFT only), so it is safe to re-run. Does
 # NOT run db:migrate: the migrate runner can't create its tracking table in the
 # connect schema (owned by houzs_connect), so the seed adds the one column it
@@ -9,6 +10,11 @@ name: Seed WS-A flows (DRAFT)
 # DSN, and the postgres role must inherit houzs_connect (one-time GRANT).
 on:
   workflow_dispatch:
+    inputs:
+      company:
+        description: "Company slug to seed (e.g. 2990). Empty = every company set."
+        required: false
+        default: ""
 
 concurrency:
   group: seed-flows
@@ -37,6 +43,7 @@ jobs:
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
       - name: Seed WS-A flows (DRAFT, idempotent)
-        run: pnpm db:seed:flows
+        run: pnpm db:seed:flows ${COMPANY:+--company "$COMPANY"}
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          COMPANY: ${{ inputs.company }}
