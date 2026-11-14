@@ -2,6 +2,7 @@
 
 import { useActionState, useState } from "react";
 import { useShell } from "@/components/shell/ShellProvider";
+import { HouzsConnectMark } from "@/components/brand/HouzsConnectMark";
 import { fmt } from "@/lib/i18n/dict";
 import { login } from "./actions";
 import { submitAccessRequest } from "./request-actions";
@@ -10,10 +11,6 @@ import { submitAccessRequest } from "./request-actions";
   Sign in with a Houzs ERP account, on the Connect palette: deep ink-blue sky,
   a teal glow, a field of faint stars, and a white glass card.
 */
-
-// The wordmark PNG is black on transparent; brightness(0) invert(1) turns it white.
-const WORDMARK = "/logo-wordmark.png";
-const WHITE = { filter: "brightness(0) invert(1)" } as const;
 
 /** The action's own sentences, in the viewer's language. */
 const ZH_ERRORS: Record<string, string> = {
@@ -84,8 +81,13 @@ export function LoginView({ openRequest = false }: { openRequest?: boolean }) {
       />
       <div className="auth-drift pointer-events-none absolute left-[8%] top-[18%] h-[520px] w-[520px] rounded-full bg-[radial-gradient(circle,rgba(56,160,184,0.22),transparent_70%)] blur-[90px]" />
       <div className="auth-drift2 pointer-events-none absolute bottom-[0%] right-[10%] h-[460px] w-[460px] rounded-full bg-[radial-gradient(circle,rgba(30,111,128,0.30),transparent_70%)] blur-[110px]" />
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img src={WORDMARK} alt="" aria-hidden draggable={false} style={WHITE} className="pointer-events-none absolute -bottom-10 hidden md:block -left-8 w-[480px] max-w-[64vw] opacity-[0.05]" />
+      {/* Faint corner watermark — the mark, white on the dark sky. */}
+      <HouzsConnectMark
+        variant="white"
+        size={480}
+        title=""
+        className="pointer-events-none absolute -bottom-16 -left-10 hidden w-[480px] max-w-[64vw] opacity-[0.06] md:block"
+      />
 
       {/* Language */}
       <div className="absolute right-4 top-4 z-20 flex rounded-full border border-white/20 bg-white/5 p-0.5 md:right-8 md:top-6">
@@ -109,8 +111,23 @@ export function LoginView({ openRequest = false }: { openRequest?: boolean }) {
             <span className="h-px w-10 bg-[var(--color-brand-bright)]" />
             <span className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[var(--color-brand-bright)]">{L.brand}</span>
           </div>
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={WORDMARK} alt="Houzs Century" draggable={false} style={WHITE} className="animate-rise h-16 w-auto object-contain sm:h-24 xl:h-32" />
+          {/* Houzs Connect lockup — mark + Archivo wordmark, white on the dark sky. */}
+          <div className="animate-rise flex items-center gap-3 sm:gap-4">
+            <HouzsConnectMark
+              variant="white"
+              size={96}
+              title="Houzs Connect"
+              className="h-16 w-16 shrink-0 sm:h-20 sm:w-20 xl:h-24 xl:w-24"
+            />
+            <div className="flex flex-col gap-1.5 leading-none">
+              <span className="hc-wordmark-main text-[40px] sm:text-[52px] xl:text-[64px]" style={{ color: "#fff" }}>
+                HOUZS
+              </span>
+              <span className="hc-wordmark-sub text-[18px] sm:text-[24px] xl:text-[29px]" style={{ color: "var(--hc-wordmark-accent-dark)" }}>
+                CONNECT
+              </span>
+            </div>
+          </div>
           <span className="animate-rise mt-5 inline-flex items-center gap-2 rounded-full border border-[rgba(56,160,184,0.45)] bg-[rgba(56,160,184,0.14)] px-3 py-1 text-[12.5px] font-semibold text-white">
             <span className="h-1.5 w-1.5 rounded-full bg-[#67bed6] shadow-[0_0_8px_#67bed6]" />
             Connect
