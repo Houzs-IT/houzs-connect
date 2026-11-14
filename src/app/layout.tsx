@@ -59,7 +59,7 @@ const archivo = Archivo({
 });
 
 export const metadata: Metadata = {
-  title: "Houzs Century Chat",
+  title: "Houzs Connect",
   description:
     "Houzs Century internal WhatsApp communication & automation platform.",
   // Logo scheme 6a. Files live in /public; see /site.webmanifest for the PWA
