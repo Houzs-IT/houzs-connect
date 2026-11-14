@@ -17,6 +17,7 @@ import {
   deliveryCompletedFlow,
   overdueOrderFlow,
 } from "./templateSends";
+import { THECONTS_FLOWS } from "./theconts";
 
 /**
  * Which company runs which seeded flows, and with which Meta templates.
@@ -70,6 +71,15 @@ export interface CompanyFlowSet {
   templates?: Record<string, string>;
   /** Brand name to put in place of "Houzs Century" in the DEMO/inbox previews. */
   brandName?: string;
+  /**
+   * Seed NEW automations for this set enabled + PUBLISHED instead of the default
+   * DRAFT/disabled. Only affects a FIRST insert; re-seeding never touches an
+   * existing automation's enabled/status (seed-flows.ts), so this stays
+   * clobber-safe. Used for The Conts, whose fire-on-push flows must be live for
+   * the ERP to trigger them by name (a real send is still gated downstream on
+   * Meta approval + the shared webhook secret).
+   */
+  enabled?: boolean;
 }
 
 /** 2990's delivery set — the Houzs delivery flows minus after-sales service. */
@@ -95,6 +105,20 @@ export const FLOW_SET_2990: CompanyFlowSet = {
   flows: DELIVERY_FLOWS_2990,
   templates: TEMPLATES_2990,
   brandName: BRAND_2990.name,
+};
+
+/**
+ * The Conts' guest-messaging set — its own core-subset templates on its own
+ * number (60182941990), fired by name on an ERP push. No `templates` swap (the
+ * flows already name The Conts' own templates) and no `brandName` (each body has
+ * the property name baked in). Seeded ENABLED so the ERP can trigger it the
+ * moment its own push goes live; a real send is still gated on Meta approval of
+ * the templates + the shared webhook secret.
+ */
+export const FLOW_SET_THECONTS: CompanyFlowSet = {
+  slug: "the-conts",
+  flows: THECONTS_FLOWS,
+  enabled: true,
 };
 
 /** Swap a graph's send_template names (and preview brand) for a company's own. */
