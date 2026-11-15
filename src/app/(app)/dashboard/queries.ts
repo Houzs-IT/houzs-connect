@@ -16,7 +16,8 @@ import {
 import { attrs } from "@/lib/format";
 import { SLA_MINUTES } from "@/lib/sla";
 import { companyPresence } from "@/lib/presence";
-import type { PeriodWindow } from "./util";
+import { ensureConversationClosedAt } from "@/db/ensure-conversation-closed-at";
+import { klDayKey, type PeriodWindow } from "./util";
 
 /*
   Dashboard reads. Every query is scoped to ONE company: `conversation` and
@@ -117,6 +118,82 @@ export async function replyStats(companyId: string, from: Date, to?: Date): Prom
     avgReply: avg(alls),
     byAgent,
   };
+}
+
+/**
+ * Average first-reply time per Malaysian calendar day, aligned to w.buckets, in
+ * MINUTES (0 for a day with no measured first reply). Same measurement as
+ * replyStats (first inbound -> first outbound, automations included), bucketed
+ * by the day of the customer's first message so the dashboard can show the
+ * trend, not just one headline number. Its own message walk so replyStats — the
+ * load-bearing FRT query — stays untouched.
+ */
+export async function firstReplySeries(companyId: string, w: PeriodWindow): Promise<number[]> {
+  const db = getDb();
+  const rows = await db
+    .select({
+      conversationId: message.conversationId,
+      direction: message.direction,
+      createdAt: message.createdAt,
+    })
+    .from(message)
+    .innerJoin(conversation, eq(conversation.id, message.conversationId))
+    .innerJoin(contact, eq(contact.id, conversation.contactId))
+    .where(and(eq(contact.companyId, companyId), gte(message.createdAt, w.since)))
+    .orderBy(asc(message.createdAt))
+    .limit(REPLY_SAMPLE);
+
+  const firstIn = new Map<string, number>();
+  const answered = new Set<string>();
+  const byDay = new Map<string, number[]>(); // KL day -> first-reply seconds
+  for (const r of rows) {
+    const at = r.createdAt.getTime();
+    if (r.direction === "IN") {
+      if (!firstIn.has(r.conversationId)) firstIn.set(r.conversationId, at);
+      continue;
+    }
+    const start = firstIn.get(r.conversationId);
+    if (start == null || answered.has(r.conversationId)) continue;
+    answered.add(r.conversationId);
+    const day = klDayKey(new Date(start)); // bucket by the customer's first message day
+    (byDay.get(day) ?? byDay.set(day, []).get(day)!).push((at - start) / 1000);
+  }
+
+  return w.buckets.map((b) => {
+    const xs = byDay.get(b.key);
+    if (!xs || xs.length === 0) return 0;
+    return xs.reduce((a, s) => a + s, 0) / xs.length / 60; // seconds -> minutes
+  });
+}
+
+/**
+ * Resolution time (conversation created -> closed) over closures in the window.
+ * Reads `closed_at` (ensure-conversation-closed-at.ts; raw SQL, not in the
+ * Drizzle schema). Forward-only: conversations closed before that column existed
+ * have NULL closed_at and are not counted, so a bulk import of already-"CLOSED"
+ * rows (which carry no closed_at) never pollutes this average.
+ */
+export async function resolutionStats(
+  companyId: string,
+  from: Date,
+  to?: Date
+): Promise<{ avgSec: number | null; n: number }> {
+  const db = getDb();
+  await ensureConversationClosedAt(db);
+  const rows = (await db.execute(sql`
+    select
+      avg(extract(epoch from (c.closed_at - c.created_at))) as avg_sec,
+      count(*) as n
+    from connect.conversation c
+    join connect.contact ct on ct.id = c.contact_id
+    where ct.company_id = ${companyId}
+      and c.closed_at is not null
+      and c.closed_at >= ${from}
+      ${to ? sql`and c.closed_at < ${to}` : sql``}
+  `)) as unknown as { avg_sec: number | string | null; n: number | string }[];
+  const row = rows[0];
+  const avgSec = row?.avg_sec == null ? null : Number(row.avg_sec);
+  return { avgSec: Number.isFinite(avgSec as number) ? (avgSec as number) : null, n: Number(row?.n ?? 0) };
 }
 
 // ─────────────────────────── Message volume ───────────────────────────

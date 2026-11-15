@@ -1,6 +1,7 @@
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { getDb } from "@/db/client";
 import { ensureAutomationRunColumns } from "@/db/ensure-automation-run";
+import { setConversationClosedAt } from "@/db/ensure-conversation-closed-at";
 import {
   automation as automationTable,
   automationRun,
@@ -335,6 +336,8 @@ async function execNode(
           .update(conversationTable)
           .set({ status: status as "OPEN" | "CLOSED" | "QUEUE" | "PENDING" })
           .where(eq(conversationTable.id, ctx.conversationId));
+        // Keep closed_at in step with the status (dashboard resolution time).
+        await setConversationClosedAt(db, ctx.conversationId, status === "CLOSED");
       }
       return { next: nextNodeId(ctx.graph, node.id) };
     }

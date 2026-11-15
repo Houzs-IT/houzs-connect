@@ -20,7 +20,7 @@ const KL_PARTS = new Intl.DateTimeFormat("en-CA", {
   day: "2-digit",
 });
 
-function klDayKey(d: Date): string {
+export function klDayKey(d: Date): string {
   // formatToParts rather than the formatted string: the assembled key must be
   // YYYY-MM-DD regardless of how the runtime's locale data orders the fields.
   const parts = KL_PARTS.formatToParts(d);
