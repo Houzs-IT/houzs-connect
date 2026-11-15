@@ -9,6 +9,7 @@ import { fmt } from "@/lib/i18n/dict";
 import { getDict, getLang } from "@/lib/i18n/server";
 import {
   AccountsCard,
+  AgentsCard,
   AiCard,
   CardSkeleton,
   ConversationsCard,
@@ -187,37 +188,45 @@ export default async function DashboardPage({
         </div>
 
         {tab === "overview" && (
-          <div className="grid grid-cols-[minmax(0,1fr)] items-start gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_380px]">
-            <div className="grid grid-cols-[minmax(0,1fr)] gap-4 md:grid-cols-2 xl:col-span-2">
-              {/* Two small tiles side by side on a phone. */}
-              <div className="grid grid-cols-2 gap-3 md:contents">
-                <Suspense fallback={<ReplyRateSkeleton />}>
-                  <ReplyRateCards {...props} />
-                </Suspense>
-              </div>
-              <div className="md:row-span-2">
-                <Suspense fallback={<CardSkeleton h={470} />}>
-                  <FollowUpCard {...props} />
-                </Suspense>
-              </div>
-              <AiCard s={s} />
-              <Suspense fallback={<CardSkeleton h={220} />}>
-                <ConversationsCard {...props} />
+          <div className="flex flex-col gap-4">
+            {/* Headline reply KPIs: reply rate · avg first reply · avg reply (all).
+                Two per row on a phone, three across from md up. */}
+            <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
+              <Suspense fallback={<ReplyRateSkeleton />}>
+                <ReplyRateCards {...props} />
               </Suspense>
-              <div className="md:col-span-2">
-                <Suspense fallback={<CardSkeleton h={360} />}>
-                  <VolumeSection companyId={companyId} w={w} />
-                </Suspense>
-              </div>
             </div>
-            <div className="flex flex-col gap-4">
-              <Suspense fallback={<CardSkeleton h={260} />}>
-                <TeamCard {...props} />
-              </Suspense>
-              <ReportCard s={s} />
-              <Suspense fallback={<CardSkeleton h={380} />}>
-                <AccountsCard companyId={companyId} s={s} />
-              </Suspense>
+            <div className="grid grid-cols-[minmax(0,1fr)] items-start gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_380px]">
+              <div className="grid grid-cols-[minmax(0,1fr)] gap-4 md:grid-cols-2 xl:col-span-2">
+                <div className="md:row-span-2">
+                  <Suspense fallback={<CardSkeleton h={470} />}>
+                    <FollowUpCard {...props} />
+                  </Suspense>
+                </div>
+                <AiCard s={s} />
+                <Suspense fallback={<CardSkeleton h={220} />}>
+                  <ConversationsCard {...props} />
+                </Suspense>
+                <div className="md:col-span-2">
+                  <Suspense fallback={<CardSkeleton h={360} />}>
+                    <VolumeSection companyId={companyId} w={w} />
+                  </Suspense>
+                </div>
+                <div className="md:col-span-2">
+                  <Suspense fallback={<CardSkeleton h={320} />}>
+                    <AgentsCard {...props} />
+                  </Suspense>
+                </div>
+              </div>
+              <div className="flex flex-col gap-4">
+                <Suspense fallback={<CardSkeleton h={260} />}>
+                  <TeamCard {...props} />
+                </Suspense>
+                <ReportCard s={s} />
+                <Suspense fallback={<CardSkeleton h={380} />}>
+                  <AccountsCard companyId={companyId} s={s} />
+                </Suspense>
+              </div>
             </div>
           </div>
         )}

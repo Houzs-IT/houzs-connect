@@ -1,7 +1,7 @@
-import type { Dict } from "@/lib/i18n/dict";
+import { fmt, type Dict } from "@/lib/i18n/dict";
 import { Skel } from "@/components/skeleton";
 import { AreaChart } from "./charts";
-import { agentsReport, supportStats } from "./queries";
+import { agentsReport, firstReplySeries, resolutionStats, supportStats } from "./queries";
 import { Avatar, Badge, Card, EYEBROW, Empty } from "./ui";
 import { delta, humanDuration, type PeriodWindow } from "./util";
 import { DeptFilter } from "./DeptFilter";
@@ -21,11 +21,17 @@ export async function SupportTab({
   s: S;
   dept?: string;
 }) {
-  const [stats, report, people] = await Promise.all([
+  const [stats, report, people, res, prevRes, frtSeries] = await Promise.all([
     supportStats(companyId, w),
     agentsReport(companyId, w, dept),
     companyPresence(companyId),
+    resolutionStats(companyId, w.since),
+    resolutionStats(companyId, w.prevSince, w.since),
+    firstReplySeries(companyId, w),
   ]);
+  // Resolution time (created -> closed), forward-only from closed_at. Faster is
+  // better, so a drop is the good direction.
+  const resDelta = res.avgSec != null && prevRes.avgSec != null ? res.avgSec - prevRes.avgSec : null;
   const online = new Set(people.filter((p) => p.online).map((p) => p.id));
   const photos = await photoSrcs(report.list.map((a) => a.id));
   const onlineCount = report.list.filter((a) => online.has(a.id)).length;
@@ -83,6 +89,42 @@ export async function SupportTab({
           ]}
         />
       </Card>
+
+      {/* Response timing: resolution-time stat + first-reply trend by day. */}
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,0.85fr)_minmax(0,2fr)]">
+        <Card>
+          <div className="flex items-center gap-2">
+            <span className="h-2 w-2 rounded-full" style={{ background: "var(--color-success)" }} />
+            <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-[var(--color-muted)]">{s.k5}</span>
+          </div>
+          <div className="mt-1 flex items-baseline gap-2">
+            <span className="text-[32px] font-medium tracking-[-0.02em] tabular-nums text-[var(--color-ink)]">
+              {res.avgSec == null ? "—" : humanDuration(res.avgSec)}
+            </span>
+            {resDelta != null && Math.round(resDelta) !== 0 && (
+              <span className={`text-[11.5px] font-semibold ${resDelta > 0 ? "text-[var(--color-danger)]" : "text-[var(--color-success)]"}`}>
+                {resDelta > 0 ? "↗" : "↘"} {humanDuration(Math.abs(resDelta))}
+              </span>
+            )}
+          </div>
+          <div className="text-[11.5px] text-[var(--color-faint)]">{s.k5Hint}</div>
+          <div className="mt-2 text-[11.5px] text-[var(--color-faint)]">{fmt(s.resCount, { n: res.n })}</div>
+        </Card>
+        <Card>
+          <div className="mb-2.5 flex flex-wrap items-center gap-3.5">
+            <span className={`flex-1 ${EYEBROW}`}>{s.frtTrend}</span>
+            <span className="flex items-center gap-1.5 text-[11.5px] text-[var(--color-muted)]">
+              <span className="h-[2px] w-3.5 bg-[var(--color-brand)]" />
+              {s.frtTrendUnit}
+            </span>
+          </div>
+          <AreaChart
+            id="frt"
+            labels={w.buckets.map((b) => b.label)}
+            series={[{ name: s.frtTrend, color: "var(--color-brand)", points: frtSeries }]}
+          />
+        </Card>
+      </div>
 
       <Card pad="p-0" className="overflow-hidden">
         <div className="flex flex-wrap items-center gap-4 px-[22px] py-[18px]">

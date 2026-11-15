@@ -17,6 +17,7 @@ import {
   tag,
 } from "@/db/schema";
 import { logActivity } from "@/lib/activity";
+import { setConversationClosedAt } from "@/db/ensure-conversation-closed-at";
 import { recordInbound, sendOutbound } from "@/lib/whatsapp/transport";
 import { countPlaceholders, listTemplates, templateConfig } from "@/lib/whatsapp/templates";
 import {
@@ -212,6 +213,10 @@ export async function setConversationStatus(formData: FormData) {
       ...(status === "CLOSED" ? { unreadCount: 0 } : {}),
     })
     .where(eq(conversation.id, conversationId));
+  // Stamp closed_at on close (cleared on reopen) so the dashboard can measure
+  // resolution time. Raw-SQL column kept out of the Drizzle schema — see
+  // ensure-conversation-closed-at.ts.
+  await setConversationClosedAt(db, conversationId, status === "CLOSED");
   await logActivity(db, {
     companyId: auth.convo.contact.companyId,
     actorMemberId: auth.me.id,
