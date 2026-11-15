@@ -14,6 +14,7 @@ import { getOrCreateConversation, recordInbound } from "@/lib/whatsapp/transport
 import { handleInboundMessage } from "@/lib/automation/dispatch";
 import { loadRoutingTable, pickInboundChannel } from "@/lib/whatsapp/channels";
 import { maybeAutoReply } from "@/lib/auto-reply/run";
+import { autoAssignConversation } from "@/lib/assignment/auto-assign";
 import { mustRefuse, signatureState, type SignatureState } from "@/lib/whatsapp/signature";
 import { MEDIA_TYPE, describeNonText } from "@/lib/whatsapp/inbound-text";
 
@@ -351,6 +352,16 @@ export async function POST(req: NextRequest) {
             companyId: channel.companyId,
             inboundMessageId: inbound.id,
           }).catch((e) => console.error("AUTO_REPLY_FAIL", e));
+          // This inbound is human-bound — no automation took it — so give the
+          // thread an owner if the company has auto-assignment on and nobody owns
+          // it yet (the first non-bot inbound). Off by default; never fails the
+          // delivery, which is already saved. See lib/assignment/auto-assign.ts.
+          if (!convo.assignedAgentId) {
+            await autoAssignConversation(db, {
+              companyId: channel.companyId,
+              conversationId: convo.id,
+            }).catch((e) => console.error("AUTO_ASSIGN_FAIL", e));
+          }
         }
         handled++;
       }
