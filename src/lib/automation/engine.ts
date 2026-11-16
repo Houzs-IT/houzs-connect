@@ -112,6 +112,9 @@ interface RunCtx {
   contactPhone: string;
   /** how many jump_to_automation handoffs led here; caps a jump cycle. */
   jumpDepth: number;
+  /** Staff member who started this run from the ERP ("Send Now"), so a failed
+   *  bot send alerts them (HC-0232). Null for every other trigger. */
+  sentByMemberId: string | null;
 }
 
 /** Append ONE entry to the run's log in Postgres — one statement, not a read
@@ -148,7 +151,7 @@ async function execNode(
 
     case "send_text": {
       await sendOutbound(ctx.conversationId, interpolate(d.message ?? "", varCtx), {
-        isBot: true,
+        isBot: true, sentByMemberId: ctx.sentByMemberId ?? undefined,
       });
       await logStep(ctx.runId, { node: node.id, type: node.type });
       return { next: nextNodeId(ctx.graph, node.id) };
@@ -156,7 +159,7 @@ async function execNode(
 
     case "ask_buttons": {
       await sendOutbound(ctx.conversationId, interpolate(d.message ?? "", varCtx), {
-        isBot: true,
+        isBot: true, sentByMemberId: ctx.sentByMemberId ?? undefined,
         buttons: d.buttons ?? [],
       });
       await logStep(ctx.runId, { node: node.id, type: node.type, awaiting: "button" });
@@ -165,7 +168,7 @@ async function execNode(
 
     case "collect_input": {
       await sendOutbound(ctx.conversationId, interpolate(d.message ?? "", varCtx), {
-        isBot: true,
+        isBot: true, sentByMemberId: ctx.sentByMemberId ?? undefined,
       });
       await logStep(ctx.runId, { node: node.id, type: node.type, awaiting: "text" });
       return { pause: "text" };
@@ -193,7 +196,7 @@ async function execNode(
       const approved = d.templateName ? await approvedTemplateBody(d.templateName, d.templateLang ?? "en") : null;
       const shown = approved ? applyParams(approved, params) : interpolate(d.message ?? "", varCtx);
       await sendOutbound(ctx.conversationId, shown, {
-        isBot: true,
+        isBot: true, sentByMemberId: ctx.sentByMemberId ?? undefined,
         ...(d.templateName
           ? { template: { name: d.templateName, lang: d.templateLang, params } }
           : {}),
@@ -230,7 +233,7 @@ async function execNode(
         return { next: nextNodeId(ctx.graph, node.id) };
       }
       const sent = await sendOutbound(ctx.conversationId, interpolate(d.message ?? "", varCtx), {
-        isBot: true,
+        isBot: true, sentByMemberId: ctx.sentByMemberId ?? undefined,
         flow: {
           flowId,
           flowToken: ctx.runId,
@@ -266,7 +269,7 @@ async function execNode(
         contactName: ctx.contactName,
         attributes: attrs(varCtx.attributes),
       });
-      await sendOutbound(ctx.conversationId, reply, { isBot: true });
+      await sendOutbound(ctx.conversationId, reply, { isBot: true, sentByMemberId: ctx.sentByMemberId ?? undefined });
       await logStep(ctx.runId, { node: node.id, type: node.type });
       return { next: nextNodeId(ctx.graph, node.id) };
     }
@@ -500,6 +503,7 @@ async function advance(ctx: RunCtx, startNodeId: string | undefined) {
             conversationId: ctx.conversationId,
             waitingFor: res.pause,
             saveTo: node.data?.saveTo ?? null,
+            sentByMemberId: ctx.sentByMemberId,
           },
         })
         .where(eq(automationRun.id, ctx.runId));
@@ -538,6 +542,7 @@ async function buildCtx(runId: string, jumpDepth = 0): Promise<RunCtx | null> {
     contactName: contact.name,
     contactPhone: contact.phone,
     jumpDepth,
+    sentByMemberId: (run.context as { sentByMemberId?: string | null } | null)?.sentByMemberId ?? null,
   };
 }
 
@@ -607,7 +612,7 @@ export async function supersedeRuns(
 export async function startRun(
   automationId: string,
   contactId: string,
-  entry?: { callbackId?: string; tag?: string },
+  entry?: { callbackId?: string; tag?: string; sentByMemberId?: string | null },
   jumpDepth = 0
 ) {
   const db = getDb();
@@ -622,7 +627,7 @@ export async function startRun(
 
   const [run] = await db
     .insert(automationRun)
-    .values({ automationId, contactId, status: "running", log: [] })
+    .values({ automationId, contactId, status: "running", log: [], context: { sentByMemberId: entry?.sentByMemberId ?? null } })
     .returning();
   const ctx = await buildCtx(run.id, jumpDepth);
   if (!ctx) return run;

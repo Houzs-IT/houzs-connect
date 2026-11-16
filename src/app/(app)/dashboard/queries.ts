@@ -251,6 +251,8 @@ export async function messagesByAgent(companyId: string, w: PeriodWindow) {
         eq(contact.companyId, companyId),
         eq(message.direction, "OUT"),
         isNotNull(message.sentByMemberId),
+        // ERP-started bot sends now carry the staff member who pressed Send (HC-0232).
+        eq(message.isBot, false),
         gte(message.createdAt, w.since)
       )
     )

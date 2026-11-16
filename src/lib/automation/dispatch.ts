@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, inArray } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import { getDb } from "@/db/client";
 import {
   automation as automationTable,
@@ -167,17 +167,29 @@ export async function handleErpWebhook(payload: ErpWebhookPayload) {
   // skip while a run is active — it retires whatever earlier run of the same
   // automation is still waiting on this customer, or that run would answer
   // the new send's taps as well (supersedeRuns has the live case).
+  // Who pressed "Send Now" in the ERP (attributes.sent_by_email), matched to a
+  // Connect staff member by email, so a failed send alerts them (HC-0232).
+  // Absent or unknown email (older ERP builds, Sheet) = no sender, as before.
+  const senderEmail = payload.attributes?.sent_by_email?.trim().toLowerCase();
+  const sender = senderEmail
+    ? await db.query.member.findFirst({
+        where: and(eq(memberTable.companyId, company.id), sql`lower(${memberTable.email}) = ${senderEmail}`),
+        columns: { id: true },
+      })
+    : undefined;
+  const sentByMemberId = sender?.id ?? null;
+
   const runs: string[] = [];
   for (const a of webhookAutomations) {
     await supersedeRuns(a.id, contact.id, "new ERP send");
-    const run = await startRun(a.id, contact.id);
+    const run = await startRun(a.id, contact.id, { sentByMemberId });
     if (run) runs.push(run.id);
   }
   // ACTION_CALLBACK: pass the matched callback id so a multi-entry flow starts
   // from the trigger node configured for exactly this callback.
   for (const a of callbackAutomations) {
     await supersedeRuns(a.id, contact.id, "new ERP send");
-    const run = await startRun(a.id, contact.id, { callbackId: callbackKey ?? undefined });
+    const run = await startRun(a.id, contact.id, { callbackId: callbackKey ?? undefined, sentByMemberId });
     if (run) runs.push(run.id);
   }
 
