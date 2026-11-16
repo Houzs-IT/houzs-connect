@@ -4,6 +4,7 @@ import { autoReply, channel, company, contactField, department, member, quickRep
 import { SecondaryMenu } from "@/components/shell/SecondaryMenu";
 import { getCurrentMember } from "@/lib/current-member";
 import { myModules } from "@/lib/full-access";
+import { isAdminRole } from "@/lib/permissions";
 import { fmt } from "@/lib/i18n/dict";
 import { getDict } from "@/lib/i18n/server";
 
@@ -14,6 +15,8 @@ export async function SettingsMenu() {
   const me = await getCurrentMember();
   if (!me) return null;
   const companySettings = (await myModules()).includes("settings");
+  // Roles, Team and Access are for owners, admins and Super Admins (lib/full-access.ts requireAdmin).
+  const admin = isAdminRole(me.role);
   const db = getDb();
   const n = (q: Promise<{ n: number }[]>) => q.then((r) => r[0]?.n ?? 0).catch(() => 0);
   const [co, people, companies, depts, ar, qr, tags, fields, numbers] = await Promise.all([
@@ -50,9 +53,13 @@ export async function SettingsMenu() {
               title: L.business,
               items: [
                 { href: "/settings", label: L.general, sub: co?.name ?? "", icon: "▤", tone: "blue", exact: true },
-                { href: "/settings/roles", label: L.roles, sub: fmt(L.nRoles, { n: 7 }), icon: "⛨", tone: "purple" },
-                { href: "/settings/team", label: L.team, sub: fmt(L.nPeople, { p: people, c: companies }), icon: "⊖", tone: "purple" },
-                { href: "/settings/access", label: L.access, sub: L.accessMenuSub, icon: "⚿", tone: "green" },
+                ...(admin
+                  ? [
+                      { href: "/settings/roles", label: L.roles, sub: fmt(L.nRoles, { n: 7 }), icon: "⛨", tone: "purple" },
+                      { href: "/settings/team", label: L.team, sub: fmt(L.nPeople, { p: people, c: companies }), icon: "⊖", tone: "purple" },
+                      { href: "/settings/access", label: L.access, sub: L.accessMenuSub, icon: "⚿", tone: "green" },
+                    ]
+                  : []),
                 { href: "/settings/departments", label: L.departments, sub: fmt(L.nDepts, { n: depts }), icon: "▤", tone: "cyan" },
                 { href: "/settings/auto-replies", label: L.autoReplies, sub: ar?.welcomeEnabled ? L.welcomeOn : L.welcomeOff, icon: "↺", tone: "cyan" },
                 { href: "/settings/library", label: L.library, sub: `${qr} · ${tags} · ${fields}`, icon: "#", tone: "orange" },

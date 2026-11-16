@@ -12,25 +12,24 @@ function assert(cond, msg) {
   if (!cond) throw new Error(`ASSERT FAILED: ${msg}`);
 }
 
-const { MODULES, roleModules, resolveModules, homeFor } = await import("../src/lib/module-access.ts");
+const { MODULES, resolveModules, homeFor } = await import("../src/lib/module-access.ts");
 
 // Starting points.
-for (const r of ["SUPER_ADMIN", "OWNER", "ADMIN"]) assert(roleModules(r).length === MODULES.length, `${r} starts with every module`);
-for (const r of ["MANAGER", "AGENT", "SALES", "VIEWER", "DRIVER"]) {
-  assert(roleModules(r).join() === "inbox,internal,contacts", `${r} starts with the chats and contacts`);
+// Everyone starts with every module; Roles, Team, Access and the switcher are held back by role elsewhere.
+for (const r of ["SUPER_ADMIN", "OWNER", "ADMIN", "MANAGER", "AGENT", "SALES", "VIEWER", "DRIVER", null]) {
+  assert(resolveModules(r, []).length === MODULES.length, `${r} starts with every module`);
 }
-assert(roleModules(null).join() === "inbox,internal,contacts", "no role is staff");
 
 // Ticks over the role.
-let m = resolveModules("AGENT", [{ module: "payments", allowed: true }]);
-assert(m.includes("payments") && m.includes("inbox"), "a tick adds a module to staff");
+let m = resolveModules("AGENT", [{ module: "payments", allowed: false }, { module: "payments", allowed: true }]);
+assert(m.includes("payments") && m.includes("inbox"), "a tick gives a module back");
 m = resolveModules("AGENT", [{ module: "contacts", allowed: false }]);
 assert(!m.includes("contacts") && m.includes("inbox"), "an untick takes one away");
 m = resolveModules("ADMIN", [{ module: "settings", allowed: false }, { module: "logs", allowed: false }]);
 assert(!m.includes("settings") && !m.includes("logs") && m.includes("dashboard"), "an admin can be limited");
 assert(resolveModules("SUPER_ADMIN", [{ module: "settings", allowed: false }]).length === MODULES.length, "a Super Admin always keeps everything");
-assert(resolveModules("AGENT", [{ module: "nonsense", allowed: true }]).join() === "inbox,internal,contacts", "an unknown module is ignored");
-assert(resolveModules("AGENT", [{ module: "dashboard", allowed: true }])[0] === "dashboard", "kept in menu order");
+assert(resolveModules("AGENT", [{ module: "nonsense", allowed: false }]).length === MODULES.length, "an unknown module is ignored");
+assert(resolveModules("AGENT", [])[0] === "dashboard", "kept in menu order");
 
 // Landing.
 assert(homeFor(["dashboard", "inbox"]) === "/dashboard", "first module they have");
