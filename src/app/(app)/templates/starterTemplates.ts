@@ -12,10 +12,20 @@
 
 import type { TemplateDraft } from "@/lib/whatsapp/templates";
 import { DEFAULT_BRAND, type Brand } from "@/lib/brand";
+import type { VarBinding } from "@/lib/automation/vars";
+import {
+  THECONTS_CORE_TEMPLATES,
+  contsBindings,
+} from "@/lib/theconts/coreTemplates";
 
 export interface StarterTemplate extends TemplateDraft {
   label: string;
   note?: string;
+  /** The {{n}} -> field mapping to save alongside the Meta draft, so the
+   *  manual/campaign send path resolves the body without a human re-picking
+   *  every dropdown. Only the company-scoped sets (The Conts) carry it; the HC
+   *  set binds in the campaign wizard, as it always has. */
+  bindings?: VarBinding[];
 }
 
 /**
@@ -117,4 +127,37 @@ Thank you so much! ✨`,
     examples: ["Wong", "znt7001", "supplier delay", "end of August"],
   },
   ];
+}
+
+/**
+ * The Conts' core-subset guest-messaging drafts (Skyline KL), built from the one
+ * source of truth in lib/theconts/coreTemplates.ts. Bodies are verbatim from the
+ * build spec; each carries its {{n}} -> field binding so submitStarterSet saves
+ * the mapping when it submits. The Conts' copy has no brand variable (the
+ * property name is baked into each body), so unlike the Houzs set this takes no
+ * Brand.
+ */
+export function thecontsStarterTemplates(): StarterTemplate[] {
+  return THECONTS_CORE_TEMPLATES.map((t) => ({
+    label: t.automationName,
+    name: t.templateName,
+    language: t.language,
+    category: t.category,
+    body: t.body,
+    examples: t.examples,
+    bindings: contsBindings(t),
+  }));
+}
+
+/**
+ * The starter set for a company, chosen by slug. The Conts gets its own
+ * guest-messaging subset; every other company keeps the Houzs delivery set,
+ * worded for its brand (Houzs by default) exactly as before.
+ */
+export function starterSetForSlug(
+  slug: string | null | undefined,
+  brand: Brand = DEFAULT_BRAND
+): StarterTemplate[] {
+  if (slug === "the-conts") return thecontsStarterTemplates();
+  return starterTemplates(brand);
 }

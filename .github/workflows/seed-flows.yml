@@ -1,9 +1,11 @@
 name: Seed WS-A flows (DRAFT)
 
 # Manual-only. Upserts the rebuilt WS-A conversation flows into
-# connect.automation as DRAFT/disabled, per company (COMPANY_FLOW_SETS: Houzs
-# Century's full set, 2990's Home's delivery set). Idempotent and
-# non-destructive (no wipe, no sends, DRAFT only), so it is safe to re-run. Does
+# connect.automation per company (COMPANY_FLOW_SETS: Houzs Century's full set and
+# 2990's Home's delivery set insert DRAFT/disabled; The Conts' guest-messaging
+# set inserts PUBLISHED/enabled so the ERP can fire it by name). Idempotent and
+# non-destructive (no wipe, no sends; re-seeds never flip an existing flow's
+# status/enabled), so it is safe to re-run. Does
 # NOT run db:migrate: the migrate runner can't create its tracking table in the
 # connect schema (owned by houzs_connect), so the seed adds the one column it
 # needs itself. Needs the DATABASE_URL repo secret = the Connect Postgres pooler

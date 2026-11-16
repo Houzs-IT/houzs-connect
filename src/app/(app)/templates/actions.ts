@@ -22,8 +22,10 @@ import { saveTemplateBinding } from "@/lib/whatsapp/templateBindings";
 import { setTemplateOwnerOverride, asTemplateOwner } from "@/lib/whatsapp/templateOwnerStore";
 import { uploadForHandle } from "@/lib/whatsapp/profile";
 import { asBindings, type VarBinding } from "@/lib/automation/vars";
-import { brandForCompanyId } from "@/lib/brand-company";
-import { starterTemplates } from "./starterTemplates";
+import { brandForSlug } from "@/lib/brand";
+import { company } from "@/db/schema";
+import { eq } from "drizzle-orm";
+import { starterSetForSlug } from "./starterTemplates";
 
 /** Auth gate. Templates steer what every customer receives, so a caller must
  *  be a signed-in member — the same bar settings mutations use. */
@@ -375,8 +377,26 @@ export interface StarterResult {
 export async function submitStarterSet(): Promise<StarterResult[]> {
   const me = await requireMember();
   if (!me) return [];
-  // Worded for the signed-in company's brand (Houzs by default).
-  const templates = starterTemplates(await brandForCompanyId(me.companyId));
+  // The set is chosen by the signed-in company's slug: The Conts gets its own
+  // guest-messaging subset; every other company keeps the Houzs delivery set,
+  // worded for its brand (Houzs by default).
+  const co = await getDb().query.company.findFirst({
+    columns: { slug: true },
+    where: eq(company.id, me.companyId),
+  });
+  const templates = starterSetForSlug(co?.slug, brandForSlug(co?.slug));
+
+  // Persist each draft's {{n}} -> field mapping first, independent of the Meta
+  // submit — like submitTemplateWithBinding, the mapping is saved even when the
+  // submit is skipped or Meta rejects, so a later resubmit needs no re-mapping
+  // and the manual/campaign send path resolves the body straight away. Only the
+  // company-scoped sets carry bindings; the Houzs set has none here.
+  for (const t of templates) {
+    if (t.bindings?.length) {
+      await saveTemplateBinding(me.companyId, normaliseTemplateName(t.name), t.language, t.bindings);
+    }
+  }
+
   const cfg = templateConfig();
   if (!cfg) {
     return templates.map((t) => ({

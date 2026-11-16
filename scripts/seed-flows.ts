@@ -8,10 +8,13 @@
 //
 // IDEMPOTENT and NON-destructive: it never wipes and never creates contacts or
 // sends anything. Flows and their forms are upserted by (companyId, name):
-//   - new            -> inserted as DRAFT / disabled (the owner publishes later)
+//   - new            -> inserted as DRAFT / disabled (the owner publishes later),
+//                       UNLESS the company's set is marked `enabled` (The Conts),
+//                       which inserts PUBLISHED / enabled so the ERP can fire it.
 //   - already there  -> graph / copy / trigger refreshed, version bumped, but
 //                       status + enabled are LEFT ALONE so re-seeding to ship new
-//                       flow content never silently unpublishes a live flow.
+//                       flow content never silently unpublishes a live flow (and
+//                       never re-enables one the owner has since disabled).
 // Unlike seed.ts this is safe to run against a live database; it only writes
 // definitions, so there is no LIVE refusal. Note the refresh: re-seeding a
 // company overwrites its seeded graphs with the code's, so pass --company to
@@ -141,6 +144,10 @@ async function main() {
         updated++;
         console.log(`- ${co.name}: ${dryRun ? "would update" : "updated"} "${flow.name}" (v${(existing.version ?? 1) + 1})${templates ? ` [${templates}]` : ""}`);
       } else {
+        // Most sets insert DRAFT/disabled (owner publishes later); a set marked
+        // `enabled` (The Conts) inserts PUBLISHED/enabled so the ERP can fire it
+        // by name straight away. Insert only — re-seeds never touch these two.
+        const enabled = set.enabled ?? false;
         if (!dryRun) {
           await db.insert(automation).values({
             companyId: co.id,
@@ -149,13 +156,14 @@ async function main() {
             description: flow.description,
             triggerType: flow.triggerType,
             triggerConfig: flow.triggerConfig,
-            status: "DRAFT",
-            enabled: false,
+            status: enabled ? "PUBLISHED" : "DRAFT",
+            enabled,
             graph,
           });
         }
         inserted++;
-        console.log(`- ${co.name}: ${dryRun ? "would insert" : "inserted"} "${flow.name}" (DRAFT, disabled)${templates ? ` [${templates}]` : ""}`);
+        const stateLabel = enabled ? "PUBLISHED, enabled" : "DRAFT, disabled";
+        console.log(`- ${co.name}: ${dryRun ? "would insert" : "inserted"} "${flow.name}" (${stateLabel})${templates ? ` [${templates}]` : ""}`);
       }
     }
   }
