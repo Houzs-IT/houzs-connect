@@ -10,7 +10,7 @@ import { SLA_MINUTES } from "@/lib/sla";
   not sent.
 */
 
-export const NOTIFY_KINDS = ["newMessage", "sla", "mention", "accessRequest"] as const;
+export const NOTIFY_KINDS = ["newMessage", "sla", "mention", "accessRequest", "failedSend"] as const;
 export type NotifyKind = (typeof NOTIFY_KINDS)[number];
 export type Prefs = Record<NotifyKind, { browser: boolean; email: boolean }>;
 
@@ -116,5 +116,42 @@ export async function noticesSince(
       out.push({ kind: "accessRequest", title: r.name, body: r.department ?? "", href: "/settings/team", at: String(r.created_at) });
     }
   }
+  if (prefs.failedSend.browser) {
+    // Messages I sent that WhatsApp did not deliver (HC-0232), with Meta's reason.
+    // Refused at send: the row is FAILED with the reason kept on the row. Refused
+    // later (131026 wrong number etc.): Meta's "failed" status webhook, matched
+    // by wa id; the webhook's time is when it failed, so each alert fires once.
+    const rows = await q<{ conversation_id: string; name: string | null; phone: string; reason: string | null; at: string }>(sql`
+      select m.conversation_id, ct.name, ct.phone,
+        m.interactive_payload->>'reason' as reason, m.created_at as at
+      from connect.message m
+      join connect.conversation cv on cv.id = m.conversation_id
+      join connect.contact ct on ct.id = cv.contact_id
+      where m.sent_by_member_id = ${me.id} and m.direction = 'OUT' and m.status = 'FAILED'
+        and m.wa_message_id is null and m.created_at > ${since.toISOString()}::timestamptz
+      union all
+      select m.conversation_id, ct.name, ct.phone,
+        concat_ws(' · ', s->'errors'->0->>'code', s->'errors'->0->>'title') as reason, w.created_at as at
+      from connect.webhook_event w
+      cross join lateral jsonb_path_query(w.payload, '$.entry[*].changes[*].value.statuses[*] ? (@.status == "failed")') s
+      join connect.message m on m.wa_message_id = s->>'id'
+      join connect.conversation cv on cv.id = m.conversation_id
+      join connect.contact ct on ct.id = cv.contact_id
+      where w.source = 'whatsapp' and w.created_at > ${since.toISOString()}::timestamptz
+        and m.sent_by_member_id = ${me.id}
+      order by at desc
+      limit 5
+    `);
+    for (const r of rows) {
+      out.push({
+        kind: "failedSend",
+        title: `Not delivered: ${r.name || r.phone}`,
+        body: r.reason || "WhatsApp did not deliver this message",
+        href: `/inbox/${r.conversation_id}`,
+        at: String(r.at),
+      });
+    }
+  }
+
   return out.sort((a, b) => (a.at < b.at ? 1 : -1));
 }
