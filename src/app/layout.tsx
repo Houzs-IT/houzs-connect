@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
-import { IBM_Plex_Sans, IBM_Plex_Mono, Archivo } from "next/font/google";
+import { IBM_Plex_Sans, IBM_Plex_Mono } from "next/font/google";
+import localFont from "next/font/local";
 import { getLang, getTheme } from "@/lib/i18n/server";
 import "./globals.css";
 import "./brand-tokens.css";
@@ -48,12 +49,14 @@ const plexMono = IBM_Plex_Mono({
   display: "swap",
 });
 // The Houzs Connect wordmark (logo scheme 6a): Archivo 800 "HOUZS" / 600
-// "CONNECT". Loaded via next/font (downloaded at build, served from
-// /_next/static/media) — NOT the handoff's Google Fonts <link>, which the
+// "CONNECT". Self-hosted (Google's latin variable file, OFL, covers 600-800):
+// next/font/google crashed CI builds when Google answered the Archivo request
+// with a font URL without a file extension ("reading '1'", PR #195, 14 Nov).
+// Served from /_next/static/media — NOT a Google Fonts <link>, which the
 // Worker CSP blocks at runtime, same as the Plex faces above.
-const archivo = Archivo({
-  subsets: ["latin"],
-  weight: ["600", "800"],
+const archivo = localFont({
+  src: "./fonts/archivo-latin.woff2",
+  weight: "600 800",
   variable: "--font-archivo",
   display: "swap",
 });
