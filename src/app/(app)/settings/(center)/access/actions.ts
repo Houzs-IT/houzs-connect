@@ -55,7 +55,7 @@ export async function fetchAccess(): Promise<AccessView> {
     .map((m) => {
       const mine = byEmail.get(m.email.toLowerCase()) ?? [];
       const modules = resolveModules(m.role, mine);
-      const base = roleModules(m.role);
+      const base = roleModules();
       const custom = m.role !== "SUPER_ADMIN" && (modules.length !== base.length || modules.some((x) => !base.includes(x)));
       return { email: m.email, name: m.name, role: m.role, modules, custom };
     })
@@ -85,7 +85,7 @@ export async function toggleModule(formData: FormData): Promise<void> {
   // Super Admins always keep everything.
   if (!target || target.role === "SUPER_ADMIN") return;
   const want = !on;
-  if (roleModules(target.role).includes(mod) === want) {
+  if (roleModules().includes(mod) === want) {
     // Back to what the role gives: nothing to remember.
     await db.execute(sql`delete from connect.module_access where company_id = ${me.companyId} and email = ${email} and module = ${mod}`);
   } else {

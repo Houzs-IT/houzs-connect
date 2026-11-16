@@ -4,7 +4,7 @@ import { getDb } from "@/db/client";
 import { company } from "@/db/schema";
 import { PageChrome } from "@/components/PageChrome";
 import { getCurrentMember } from "@/lib/current-member";
-import { requireModule } from "@/lib/full-access";
+import { requireAdmin } from "@/lib/full-access";
 import { fmt } from "@/lib/i18n/dict";
 import { getDict } from "@/lib/i18n/server";
 import { SettingsHead } from "../ui";
@@ -16,7 +16,7 @@ export const dynamic = "force-dynamic";
 
 /** Settings → Access: who opens which module, in the company being worked in. */
 export default async function AccessPage() {
-  await requireModule("settings");
+  await requireAdmin();
   const me = await getCurrentMember();
   if (!me) notFound();
   const t = await getDict();

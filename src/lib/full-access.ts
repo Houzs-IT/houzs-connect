@@ -1,6 +1,7 @@
 // Who opens which modules (CONNECT-0003), for the signed-in person in the
 // company they are working in. The rules are lib/module-access.ts; the ticks a
-// Super Admin set on Settings → Access live in connect.module_access. The menus
+// Super Admin set on Settings → Access live in connect.module_access; Roles,
+// Team and Access themselves are for admins only (requireAdmin). The menus
 // show only these modules (Sidebar, MobileTabBar, SettingsMenu) and
 // requireModule() turns a typed-in address away on the server.
 
@@ -12,6 +13,7 @@ import { bypassReadCache } from "@/db/fresh";
 import { ensureAccessTables } from "@/db/ensure-access";
 import { getCurrentMember } from "@/lib/current-member";
 import { homeFor, resolveModules, type Module } from "@/lib/module-access";
+import { isAdminRole } from "@/lib/permissions";
 
 /** This person's saved ticks in one company. A missing table (before ensure ran) means none. */
 export async function moduleChoices(companyId: string, email: string): Promise<{ module: string; allowed: boolean }[]> {
@@ -34,6 +36,13 @@ export const myModules = cache(async (): Promise<Module[]> => {
   if (!me) return [];
   return resolveModules(me.role, await moduleChoices(me.companyId, me.email));
 });
+
+/** Settings → Roles, Team and Access: owners, admins and Super Admins only, and only with the company's settings. */
+export async function requireAdmin() {
+  const me = await requireModule("settings");
+  if (!isAdminRole(me.role)) redirect("/settings/profile");
+  return me;
+}
 
 /** For the layout or page of a module: someone without it goes to the first module they have. */
 export async function requireModule(module: Module) {

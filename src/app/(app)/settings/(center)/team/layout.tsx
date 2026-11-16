@@ -1,7 +1,7 @@
-import { requireModule } from "@/lib/full-access";
+import { requireAdmin } from "@/lib/full-access";
 
-/** Only for people with the company's settings (Settings → Access, lib/full-access.ts). */
+/** Owners, admins and Super Admins only (lib/full-access.ts requireAdmin). */
 export default async function Layout({ children }: { children: React.ReactNode }) {
-  await requireModule("settings");
+  await requireAdmin();
   return children;
 }
