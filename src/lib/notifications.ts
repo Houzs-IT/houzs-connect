@@ -117,17 +117,22 @@ export async function noticesSince(
     }
   }
   if (prefs.failedSend.browser) {
-    // Messages I sent that WhatsApp did not deliver (HC-0232), with Meta's reason.
+    // Messages WhatsApp did not deliver (HC-0232), with Meta's reason, to whoever sent them.
     // Refused at send: the row is FAILED with the reason kept on the row. Refused
     // later (131026 wrong number etc.): Meta's "failed" status webhook, matched
     // by wa id; the webhook's time is when it failed, so each alert fires once.
+    // Nobody sent it (automations, the ERP's auto Delivery Completed): the chat's
+    // assigned agent gets it; an unassigned chat goes to the approvers.
+    const mine = sql`(m.sent_by_member_id = ${me.id} or (m.sent_by_member_id is null and (cv.assigned_agent_id = ${me.id}${
+      opts.approver ? sql` or (cv.assigned_agent_id is null and ct.company_id = ${me.companyId})` : sql``
+    })))`;
     const rows = await q<{ conversation_id: string; name: string | null; phone: string; reason: string | null; at: string }>(sql`
       select m.conversation_id, ct.name, ct.phone,
         m.interactive_payload->>'reason' as reason, m.created_at as at
       from connect.message m
       join connect.conversation cv on cv.id = m.conversation_id
       join connect.contact ct on ct.id = cv.contact_id
-      where m.sent_by_member_id = ${me.id} and m.direction = 'OUT' and m.status = 'FAILED'
+      where ${mine} and m.direction = 'OUT' and m.status = 'FAILED'
         and m.wa_message_id is null and m.created_at > ${since.toISOString()}::timestamptz
       union all
       select m.conversation_id, ct.name, ct.phone,
@@ -138,7 +143,7 @@ export async function noticesSince(
       join connect.conversation cv on cv.id = m.conversation_id
       join connect.contact ct on ct.id = cv.contact_id
       where w.source = 'whatsapp' and w.created_at > ${since.toISOString()}::timestamptz
-        and m.sent_by_member_id = ${me.id}
+        and ${mine}
       order by at desc
       limit 5
     `);
