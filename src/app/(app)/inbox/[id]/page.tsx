@@ -25,6 +25,7 @@ import { bypassReadCache } from "@/db/fresh";
 import { getDict } from "@/lib/i18n/server";
 import { SLA_MINUTES } from "@/lib/sla";
 import { getAutomationEvents, getAutomationProgress } from "@/lib/automation/progress";
+import { DELIVERY_DATE_HISTORY_KEY, parseDeliveryDateHistory } from "@/lib/automation/delivery-history";
 
 /**
  * How much of the thread is rendered. WhatsApp threads with a customer run for
@@ -141,19 +142,32 @@ export default async function ConversationPage({
   const name = displayName(convo.contact.name, convo.contact.phone);
   const contactAttrs = attrs(convo.contact.attributes);
 
-  // Every delivery date proposed in this conversation, for the panel: the ERP's
-  // originally arranged date, then each date the customer submitted through the
-  // "New Delivery Date" / service form. The form overwrites amended_delivery_date
-  // on the contact, so the per-submission history survives only on the messages.
-  const proposedDates: { date: string; at: string; source: "erp" | "customer" }[] = [];
-  if (contactAttrs.delivery_date_1) {
-    proposedDates.push({ date: contactAttrs.delivery_date_1, at: "", source: "erp" });
-  }
-  for (const m of messages) {
-    const p = m.interactivePayload as { kind?: string; fields?: Record<string, string> } | null;
-    if (p?.kind === "flow_reply" && p.fields) {
-      const d = p.fields.amended_delivery_date ?? p.fields.delivery_date;
-      if (d) proposedDates.push({ date: d, at: stamp(m.createdAt), source: "customer" });
+  // Every delivery/service date proposed in this conversation, for the panel.
+  // Prefer the durable record on the contact (delivery_date_history, written by
+  // the ERP webhook + the engine's setContactAttr); fall back to deriving it from
+  // the ERP's current date + the form-submission messages for conversations that
+  // predate the record.
+  const storedDates = parseDeliveryDateHistory(
+    (convo.contact.attributes as Record<string, unknown> | null)?.[DELIVERY_DATE_HISTORY_KEY]
+  );
+  let proposedDates: { date: string; at: string; source: "erp" | "customer" }[];
+  if (storedDates.length > 0) {
+    proposedDates = storedDates.map((e) => ({
+      date: e.date,
+      at: e.at ? stamp(new Date(e.at)) : "",
+      source: e.source === "erp" ? "erp" : "customer",
+    }));
+  } else {
+    proposedDates = [];
+    if (contactAttrs.delivery_date_1) {
+      proposedDates.push({ date: contactAttrs.delivery_date_1, at: "", source: "erp" });
+    }
+    for (const m of messages) {
+      const p = m.interactivePayload as { kind?: string; fields?: Record<string, string> } | null;
+      if (p?.kind === "flow_reply" && p.fields) {
+        const d = p.fields.amended_delivery_date ?? p.fields.delivery_date;
+        if (d) proposedDates.push({ date: d, at: stamp(m.createdAt), source: "customer" });
+      }
     }
   }
 

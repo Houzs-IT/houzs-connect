@@ -14,6 +14,7 @@ import {
   tag as tagTable,
 } from "@/db/schema";
 import { asGraph, type FlowGraph, type FlowNode } from "./types";
+import { CUSTOMER_DATE_KEYS, DELIVERY_DATE_HISTORY_KEY } from "./delivery-history";
 import { dueAt } from "./time";
 import { callRestApi, type RestBindings, type RestSecrets } from "./rest";
 import { getCloudflareContext } from "@opennextjs/cloudflare";
@@ -82,6 +83,20 @@ function findNode(graph: FlowGraph, id: string): FlowNode | undefined {
 async function setContactAttr(contactId: string, key: string, value: string) {
   const db = getDb();
   const patch = JSON.stringify({ [key]: value });
+  // A customer-submitted delivery/service date also lands in the durable
+  // `delivery_date_history` record (the form overwrites the live attribute, so
+  // without this every earlier preferred date is lost). One extra array element,
+  // appended atomically in the same jsonb merge — no read-modify-write.
+  if (CUSTOMER_DATE_KEYS.has(key) && value.trim() !== "") {
+    const entry = JSON.stringify({ date: value, source: "customer", at: new Date().toISOString() });
+    await db
+      .update(contactTable)
+      .set({
+        attributes: sql`coalesce(${contactTable.attributes}, '{}'::jsonb) || ${patch}::jsonb || jsonb_build_object(${DELIVERY_DATE_HISTORY_KEY}, coalesce(${contactTable.attributes} -> ${DELIVERY_DATE_HISTORY_KEY}, '[]'::jsonb) || ${entry}::jsonb)`,
+      })
+      .where(eq(contactTable.id, contactId));
+    return;
+  }
   await db
     .update(contactTable)
     .set({ attributes: sql`coalesce(${contactTable.attributes}, '{}'::jsonb) || ${patch}::jsonb` })
