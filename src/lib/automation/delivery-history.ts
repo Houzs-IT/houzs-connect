@@ -15,6 +15,30 @@ export const DELIVERY_DATE_HISTORY_KEY = "delivery_date_history";
 /** Attribute keys whose non-empty writes count as a customer-proposed date. */
 export const CUSTOMER_DATE_KEYS = new Set(["amended_delivery_date"]);
 
+/**
+ * ERP automations whose webhook actually PROPOSES a date to the customer — the
+ * openers that send a "Confirm Date / Amend Date" message. Only these count as
+ * an ERP proposal. Every other ERP event (reminders, driver info, the periodic
+ * `__erp_contact_sync__`) merely carries the current date along and must not be
+ * recorded, or the history fills with dates the customer was never asked about.
+ * Names must match the ERP's automation names (connect.automation.name).
+ */
+export const DATE_PROPOSAL_AUTOMATIONS = new Set([
+  "New Delivery Follow-up",
+  "New Amend",
+  "Service Arrangement",
+]);
+
+/** The last entry already records this date+source — avoids consecutive repeats. */
+export function lastEntryMatches(
+  history: DeliveryDateEntry[],
+  date: string,
+  source: DeliveryDateEntry["source"]
+): boolean {
+  const last = history[history.length - 1];
+  return !!last && last.date === date && last.source === source;
+}
+
 export interface DeliveryDateEntry {
   /** The date as the customer/ERP gave it (format unchanged: e.g. "2026-11-18"). */
   date: string;

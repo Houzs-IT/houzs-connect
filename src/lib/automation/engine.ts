@@ -89,10 +89,18 @@ async function setContactAttr(contactId: string, key: string, value: string) {
   // appended atomically in the same jsonb merge — no read-modify-write.
   if (CUSTOMER_DATE_KEYS.has(key) && value.trim() !== "") {
     const entry = JSON.stringify({ date: value, source: "customer", at: new Date().toISOString() });
+    // Append to the history unless the last entry is already this same customer
+    // date — the amend loop can re-submit the same date, which should not be
+    // recorded twice in a row.
     await db
       .update(contactTable)
       .set({
-        attributes: sql`coalesce(${contactTable.attributes}, '{}'::jsonb) || ${patch}::jsonb || jsonb_build_object(${DELIVERY_DATE_HISTORY_KEY}, coalesce(${contactTable.attributes} -> ${DELIVERY_DATE_HISTORY_KEY}, '[]'::jsonb) || ${entry}::jsonb)`,
+        attributes: sql`coalesce(${contactTable.attributes}, '{}'::jsonb) || ${patch}::jsonb || case
+          when coalesce(${contactTable.attributes} -> ${DELIVERY_DATE_HISTORY_KEY} -> -1 ->> 'date', '') = ${value}
+           and coalesce(${contactTable.attributes} -> ${DELIVERY_DATE_HISTORY_KEY} -> -1 ->> 'source', '') = 'customer'
+          then '{}'::jsonb
+          else jsonb_build_object(${DELIVERY_DATE_HISTORY_KEY}, coalesce(${contactTable.attributes} -> ${DELIVERY_DATE_HISTORY_KEY}, '[]'::jsonb) || ${entry}::jsonb)
+        end`,
       })
       .where(eq(contactTable.id, contactId));
     return;
