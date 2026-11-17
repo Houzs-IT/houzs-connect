@@ -15,7 +15,13 @@ import { attrs } from "@/lib/format";
 import { ensureAutomationRunColumns } from "@/db/ensure-automation-run";
 import { removeRepliedEnrollments } from "@/lib/drip";
 import { startRun, resumeRun, supersedeRuns } from "./engine";
-import { DELIVERY_DATE_HISTORY_KEY, appendDeliveryDate, parseDeliveryDateHistory } from "./delivery-history";
+import {
+  DATE_PROPOSAL_AUTOMATIONS,
+  DELIVERY_DATE_HISTORY_KEY,
+  appendDeliveryDate,
+  lastEntryMatches,
+  parseDeliveryDateHistory,
+} from "./delivery-history";
 import { getOrCreateConversation } from "@/lib/whatsapp/transport";
 import { runOcr } from "@/lib/ocr";
 
@@ -98,17 +104,20 @@ export async function handleErpWebhook(payload: ErpWebhookPayload) {
   });
   const prevAttrs = attrs(existing?.attributes);
   const mergedAttrs: Record<string, unknown> = { ...prevAttrs, ...(payload.attributes ?? {}) };
-  // Record an ERP-arranged delivery/service date into the durable history the
-  // first time it appears or whenever it changes (the customer's own preferred
-  // dates are recorded by the engine's setContactAttr). Guarded on change so the
-  // many ERP events that merely carry the same date don't pile up duplicates.
+  // Record an ERP-proposed delivery/service date into the durable history, but
+  // ONLY when this webhook is an opener that actually asks the customer to
+  // confirm/amend a date (DATE_PROPOSAL_AUTOMATIONS). Reminders, driver events
+  // and the periodic `__erp_contact_sync__` carry the current date along too, and
+  // recording those would fill the history with dates the customer was never
+  // asked about. Deduped against the last entry so a repeat opener is a no-op.
   const erpDate = payload.attributes?.delivery_date_1?.trim();
-  if (erpDate && erpDate !== prevAttrs.delivery_date_1) {
-    mergedAttrs[DELIVERY_DATE_HISTORY_KEY] = appendDeliveryDate(
-      parseDeliveryDateHistory((existing?.attributes as Record<string, unknown> | null)?.[DELIVERY_DATE_HISTORY_KEY]),
-      erpDate,
-      "erp"
+  if (erpDate && DATE_PROPOSAL_AUTOMATIONS.has(payload.automation ?? "")) {
+    const history = parseDeliveryDateHistory(
+      (existing?.attributes as Record<string, unknown> | null)?.[DELIVERY_DATE_HISTORY_KEY]
     );
+    if (!lastEntryMatches(history, erpDate, "erp")) {
+      mergedAttrs[DELIVERY_DATE_HISTORY_KEY] = appendDeliveryDate(history, erpDate, "erp");
+    }
   }
   const contact = existing
     ? (
