@@ -17,6 +17,7 @@ import { attrs } from "@/lib/format";
 import { SLA_MINUTES } from "@/lib/sla";
 import { companyPresence } from "@/lib/presence";
 import { ensureConversationClosedAt } from "@/db/ensure-conversation-closed-at";
+import { loadBusinessHours, elapsedSeconds, hasBusinessHours } from "@/lib/business-hours";
 import { klDayKey, type PeriodWindow } from "./util";
 
 /*
@@ -39,30 +40,40 @@ const REPLY_SAMPLE = 20_000;
 export type ReplyStats = {
   /** Conversations where the customer wrote in the window. */
   asked: number;
-  /** …of which got a reply after it. */
+  /** …of which got ANY reply after it (bot or human) — the reply rate. */
   answered: number;
-  /** Average first-reply wait in seconds (answered only). */
+  /** …of which got a HUMAN reply — the sample behind the first-reply average. */
+  answeredHuman: number;
+  /** Average first-reply wait in seconds, to the first HUMAN reply. */
   avgFirst: number | null;
-  /** Average of every customer-message → next-reply gap, in seconds. */
+  /** Average of every customer-message → next-human-reply gap, in seconds. */
   avgReply: number | null;
-  /** Per assigned agent: first-reply and all-reply averages. */
+  /** Per assigned agent: first-reply and all-reply averages (human-only). */
   byAgent: Map<string, { first: number[]; all: number[] }>;
+  /** True when timing was measured in business-open hours (company has hours set). */
+  businessHours: boolean;
 };
 
 /**
  * Measured, not estimated: walks the window's messages in order. For each
- * conversation the first inbound starts the clock and the first outbound after
- * it stops it — automation replies count, as the customer saw them. Every later
- * "customer wrote → we answered" gap feeds the overall reply average.
+ * conversation the first inbound starts the clock and the first HUMAN outbound
+ * (isBot=false) stops it — bot / automation / flow sends (the category menu, an
+ * auto-reply) do NOT, so the figure is time-to-a-person, not time-to-a-machine.
+ * Every "customer wrote → next human reply" gap feeds the overall reply average.
+ * The reply RATE (asked / answered) still counts ANY reply, bot or human.
+ * Timing is in business-open seconds when the company has hours configured
+ * (reused from the auto-reply settings), else plain wall-clock.
  */
 export async function replyStats(companyId: string, from: Date, to?: Date): Promise<ReplyStats> {
   const db = getDb();
+  const cfg = await loadBusinessHours(db, companyId);
   const rows = await db
     .select({
       conversationId: message.conversationId,
       direction: message.direction,
       createdAt: message.createdAt,
       agentId: conversation.assignedAgentId,
+      isBot: message.isBot,
     })
     .from(message)
     .innerJoin(conversation, eq(conversation.id, message.conversationId))
@@ -78,32 +89,43 @@ export async function replyStats(companyId: string, from: Date, to?: Date): Prom
     .limit(REPLY_SAMPLE);
 
   const firstIn = new Map<string, number>();
-  const answeredFirst = new Set<string>();
-  const pendingIn = new Map<string, number>();
+  const answeredAny = new Set<string>(); // got ANY reply — the reply RATE (bot or human)
+  const answeredHuman = new Set<string>(); // got a HUMAN first reply — the FRT timing
+  const pendingIn = new Map<string, number>(); // earliest inbound awaiting a HUMAN reply
   const firsts: number[] = [];
   const alls: number[] = [];
   const byAgent = new Map<string, { first: number[]; all: number[] }>();
-  const agentOf = new Map<string, string | null>();
 
   for (const r of rows) {
     const at = r.createdAt.getTime();
-    agentOf.set(r.conversationId, r.agentId);
     if (r.direction === "IN") {
       if (!firstIn.has(r.conversationId)) firstIn.set(r.conversationId, at);
       if (!pendingIn.has(r.conversationId)) pendingIn.set(r.conversationId, at);
       continue;
     }
+    // Reply RATE counts ANY outbound after the customer wrote (bot or human) — so
+    // a bot-handled chat still counts as answered. Timing below is human-only.
+    if (firstIn.has(r.conversationId)) answeredAny.add(r.conversationId);
+    // TIMING is human-only: a bot / automation / flow send (the category menu, an
+    // auto-reply, a template push) must NOT stop the clock. The menu fires on
+    // NEW_INCOMING_MESSAGE and goes out within seconds, so counting it would
+    // collapse AVG FIRST REPLY to ~0 (time-to-menu, not time-to-human). `isBot`
+    // is the reliable signal — since HC-0232 a bot send can also carry a
+    // sentByMemberId (the staff who pressed Send in the ERP), so that is NOT it.
+    if (r.isBot) continue;
     const waiting = pendingIn.get(r.conversationId);
     if (waiting == null) continue;
     pendingIn.delete(r.conversationId);
-    const gap = (at - waiting) / 1000;
+    // elapsedSeconds = business-open seconds when the company has hours set, else
+    // wall-clock — so an overnight gap counts only the in-hours part.
+    const gap = elapsedSeconds(waiting, at, cfg);
     alls.push(gap);
     const agent = r.agentId;
     const bucket = agent ? (byAgent.get(agent) ?? { first: [], all: [] }) : null;
     bucket?.all.push(gap);
-    if (!answeredFirst.has(r.conversationId)) {
-      answeredFirst.add(r.conversationId);
-      const f = (at - (firstIn.get(r.conversationId) ?? at)) / 1000;
+    if (!answeredHuman.has(r.conversationId)) {
+      answeredHuman.add(r.conversationId);
+      const f = elapsedSeconds(firstIn.get(r.conversationId) ?? at, at, cfg);
       firsts.push(f);
       bucket?.first.push(f);
     }
@@ -113,10 +135,12 @@ export async function replyStats(companyId: string, from: Date, to?: Date): Prom
   const avg = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null);
   return {
     asked: firstIn.size,
-    answered: answeredFirst.size,
+    answered: answeredAny.size,
+    answeredHuman: answeredHuman.size,
     avgFirst: avg(firsts),
     avgReply: avg(alls),
     byAgent,
+    businessHours: hasBusinessHours(cfg),
   };
 }
 
@@ -130,11 +154,13 @@ export async function replyStats(companyId: string, from: Date, to?: Date): Prom
  */
 export async function firstReplySeries(companyId: string, w: PeriodWindow): Promise<number[]> {
   const db = getDb();
+  const cfg = await loadBusinessHours(db, companyId);
   const rows = await db
     .select({
       conversationId: message.conversationId,
       direction: message.direction,
       createdAt: message.createdAt,
+      isBot: message.isBot,
     })
     .from(message)
     .innerJoin(conversation, eq(conversation.id, message.conversationId))
@@ -152,11 +178,13 @@ export async function firstReplySeries(companyId: string, w: PeriodWindow): Prom
       if (!firstIn.has(r.conversationId)) firstIn.set(r.conversationId, at);
       continue;
     }
+    // Human-only + same clock as the headline FRT: skip bot/menu/auto-reply sends.
+    if (r.isBot) continue;
     const start = firstIn.get(r.conversationId);
     if (start == null || answered.has(r.conversationId)) continue;
     answered.add(r.conversationId);
     const day = klDayKey(new Date(start)); // bucket by the customer's first message day
-    (byDay.get(day) ?? byDay.set(day, []).get(day)!).push((at - start) / 1000);
+    (byDay.get(day) ?? byDay.set(day, []).get(day)!).push(elapsedSeconds(start, at, cfg));
   }
 
   return w.buckets.map((b) => {
@@ -180,20 +208,26 @@ export async function resolutionStats(
 ): Promise<{ avgSec: number | null; n: number }> {
   const db = getDb();
   await ensureConversationClosedAt(db);
+  const cfg = await loadBusinessHours(db, companyId);
+  // Fetch the window's closures and average in JS so the business-hours clock
+  // (which SQL can't express) applies — same clock as first-reply / avg-reply.
+  // Capped like the reply walk; closures per window are bounded by throughput.
   const rows = (await db.execute(sql`
-    select
-      avg(extract(epoch from (c.closed_at - c.created_at))) as avg_sec,
-      count(*) as n
+    select c.created_at, c.closed_at
     from connect.conversation c
     join connect.contact ct on ct.id = c.contact_id
     where ct.company_id = ${companyId}
       and c.closed_at is not null
       and c.closed_at >= ${from}
       ${to ? sql`and c.closed_at < ${to}` : sql``}
-  `)) as unknown as { avg_sec: number | string | null; n: number | string }[];
-  const row = rows[0];
-  const avgSec = row?.avg_sec == null ? null : Number(row.avg_sec);
-  return { avgSec: Number.isFinite(avgSec as number) ? (avgSec as number) : null, n: Number(row?.n ?? 0) };
+    limit ${REPLY_SAMPLE}
+  `)) as unknown as { created_at: string | Date; closed_at: string | Date }[];
+  if (!rows.length) return { avgSec: null, n: 0 };
+  let sum = 0;
+  for (const r of rows) {
+    sum += elapsedSeconds(new Date(r.created_at).getTime(), new Date(r.closed_at).getTime(), cfg);
+  }
+  return { avgSec: sum / rows.length, n: rows.length };
 }
 
 // ─────────────────────────── Message volume ───────────────────────────

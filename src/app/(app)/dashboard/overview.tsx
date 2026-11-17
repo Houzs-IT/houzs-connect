@@ -100,7 +100,8 @@ export async function ReplyRateCards({ companyId, w, s }: Props) {
         }
         foot={
           <>
-            {fmt(s.measured, { n: cur.answered })}
+            {fmt(s.measured, { n: cur.answeredHuman })}
+            {cur.businessHours ? ` · ${s.bizHours}` : ""}
             {firstDelta != null && Math.round(firstDelta) !== 0 && (
               // Faster is better: a negative change is the good one.
               <DeltaChip text={humanDuration(Math.abs(firstDelta))} up={firstDelta > 0} />
