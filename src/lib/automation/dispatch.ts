@@ -15,6 +15,7 @@ import { attrs } from "@/lib/format";
 import { ensureAutomationRunColumns } from "@/db/ensure-automation-run";
 import { removeRepliedEnrollments } from "@/lib/drip";
 import { startRun, resumeRun, supersedeRuns } from "./engine";
+import { DELIVERY_DATE_HISTORY_KEY, appendDeliveryDate, parseDeliveryDateHistory } from "./delivery-history";
 import { getOrCreateConversation } from "@/lib/whatsapp/transport";
 import { runOcr } from "@/lib/ocr";
 
@@ -95,7 +96,20 @@ export async function handleErpWebhook(payload: ErpWebhookPayload) {
   const existing = await db.query.contact.findFirst({
     where: and(eq(contactTable.companyId, company.id), eq(contactTable.phone, phone)),
   });
-  const mergedAttrs = { ...attrs(existing?.attributes), ...(payload.attributes ?? {}) };
+  const prevAttrs = attrs(existing?.attributes);
+  const mergedAttrs: Record<string, unknown> = { ...prevAttrs, ...(payload.attributes ?? {}) };
+  // Record an ERP-arranged delivery/service date into the durable history the
+  // first time it appears or whenever it changes (the customer's own preferred
+  // dates are recorded by the engine's setContactAttr). Guarded on change so the
+  // many ERP events that merely carry the same date don't pile up duplicates.
+  const erpDate = payload.attributes?.delivery_date_1?.trim();
+  if (erpDate && erpDate !== prevAttrs.delivery_date_1) {
+    mergedAttrs[DELIVERY_DATE_HISTORY_KEY] = appendDeliveryDate(
+      parseDeliveryDateHistory((existing?.attributes as Record<string, unknown> | null)?.[DELIVERY_DATE_HISTORY_KEY]),
+      erpDate,
+      "erp"
+    );
+  }
   const contact = existing
     ? (
         await db
