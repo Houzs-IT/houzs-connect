@@ -18,7 +18,6 @@ import { and, asc, eq } from "drizzle-orm";
 import type { DB } from "@/db/client";
 import { bypassReadCache } from "@/db/fresh";
 import { company, member } from "@/db/schema";
-import { isAdminRole } from "@/lib/permissions";
 
 export interface CompanyChoice {
   id: string;
@@ -41,10 +40,8 @@ export function isSuperAdmin(role: string): boolean {
 }
 
 export async function companyChoices(db: DB, me: Who): Promise<CompanyChoice[]> {
-  // Only owners, admins and Super Admins switch company (CONNECT-0003); everyone
-  // else works in the company they signed in to, so the switcher stays hidden
-  // (it needs two choices) and switchCompany refuses any other id.
-  const switcher = isAdminRole(me.role);
+  // Staff switch only between companies ticked for them; with one, the switcher
+  // stays hidden (it needs two choices) (CONNECT-0003).
   const [companies, rows] = await Promise.all([
     db.query.company.findMany({
       columns: { id: true, name: true, erpCompanyId: true, code: true },
@@ -62,7 +59,7 @@ export async function companyChoices(db: DB, me: Who): Promise<CompanyChoice[]> 
     .filter(
       (c) =>
         c.id === me.companyId ||
-        (switcher && memberOf.has(c.id)) ||
+        memberOf.has(c.id) ||
         (isSuperAdmin(me.role) && c.erpCompanyId == null)
     )
     .map((c) => ({
