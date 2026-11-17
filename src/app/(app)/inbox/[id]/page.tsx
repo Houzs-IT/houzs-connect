@@ -84,7 +84,7 @@ export default async function ConversationPage({
     notFound();
   }
   // "HOUZS · 011-6155 6133" when the inbox spans companies; just the number when
-  // the company alone has several (8822 service, 6133 logistics); nothing when
+  // the company alone has several (8822 delivery, 6133 after-sales service); nothing when
   // there is only one number and the chip would say nothing new.
   const ownScope = scopes.find((sc) => sc.companyId === convo.channel.companyId);
   const lineCount = (await scopeChannels(db, scopes)).length;

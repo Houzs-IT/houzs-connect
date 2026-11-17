@@ -27,8 +27,11 @@ import { THECONTS_FLOWS } from "./theconts";
  * the same automation names, so the ERP keeps firing the same names: the
  * dispatcher (automation/dispatch.ts → resolveErpCompany) sends a 2990 order to
  * 2990's copy once that copy is enabled. The service flows (Service Case
- * Received, Service Arrangement) are NOT in 2990's set — after-sales stays on
- * the one shared service line, 8822, under Houzs Century.
+ * Received, Service Arrangement, Service Case Status Update) are NOT in 2990's
+ * set — after-sales runs only under Houzs Century (2990's service cases route
+ * through it too). In prod these flows send from Houzs's 6133 after-sales line
+ * (rebound there 2026-11-17); a fresh seed still binds them to the company
+ * default (8822), so a new environment rebinds them to 6133 the same way.
  *
  * A Meta template body is fixed text, so the brand is baked into it: 2990 has
  * its own approved copy of every Houzs-branded template (`<name>_2990`, the same

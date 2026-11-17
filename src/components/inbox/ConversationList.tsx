@@ -45,7 +45,7 @@ export type ConversationListItem = {
   /** The thread belongs to another company than the signed-in one; opening it
    *  goes through /inbox/open/[id], which switches company first. */
   foreign?: boolean;
-  /** The business number the customer wrote to (8822 service, 6133 logistics…). */
+  /** The business number the customer wrote to (8822 delivery, 6133 after-sales service…). */
   channelPhone?: string | null;
 };
 

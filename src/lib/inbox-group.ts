@@ -134,7 +134,7 @@ export async function unifiedConversationWhere(db: DB, scopes: InboxScope[]): Pr
 }
 
 /** The WhatsApp numbers behind the scopes — more than one and the rail labels
- *  each row with the number it came in on (Houzs: 8822 service, 6133 logistics). */
+ *  each row with the number it came in on (Houzs: 8822 delivery, 6133 after-sales service). */
 export async function scopeChannels(db: DB, scopes: InboxScope[]) {
   if (!scopes.length) return [];
   return db.query.channel.findMany({
