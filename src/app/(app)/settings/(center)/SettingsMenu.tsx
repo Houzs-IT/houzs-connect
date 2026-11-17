@@ -1,6 +1,6 @@
 import { count, eq } from "drizzle-orm";
 import { getDb } from "@/db/client";
-import { autoReply, channel, company, contactField, department, member, quickReply, tag } from "@/db/schema";
+import { autoAssign, autoReply, channel, company, contactField, department, member, quickReply, tag } from "@/db/schema";
 import { SecondaryMenu } from "@/components/shell/SecondaryMenu";
 import { getCurrentMember } from "@/lib/current-member";
 import { fmt } from "@/lib/i18n/dict";
@@ -14,12 +14,13 @@ export async function SettingsMenu() {
   if (!me) return null;
   const db = getDb();
   const n = (q: Promise<{ n: number }[]>) => q.then((r) => r[0]?.n ?? 0).catch(() => 0);
-  const [co, people, companies, depts, ar, qr, tags, fields, numbers] = await Promise.all([
+  const [co, people, companies, depts, ar, aa, qr, tags, fields, numbers] = await Promise.all([
     db.query.company.findFirst({ columns: { name: true }, where: eq(company.id, me.companyId) }),
     n(db.select({ n: count() }).from(member).where(eq(member.companyId, me.companyId))),
     n(db.select({ n: count() }).from(company).where(eq(company.active, true))),
     n(db.select({ n: count() }).from(department).where(eq(department.companyId, me.companyId))),
     db.query.autoReply.findFirst({ columns: { welcomeEnabled: true }, where: eq(autoReply.companyId, me.companyId) }).catch(() => undefined),
+    db.query.autoAssign.findFirst({ columns: { enabled: true }, where: eq(autoAssign.companyId, me.companyId) }).catch(() => undefined),
     n(db.select({ n: count() }).from(quickReply).where(eq(quickReply.companyId, me.companyId))),
     n(db.select({ n: count() }).from(tag).where(eq(tag.companyId, me.companyId))),
     n(db.select({ n: count() }).from(contactField).where(eq(contactField.companyId, me.companyId))),
@@ -49,6 +50,7 @@ export async function SettingsMenu() {
             { href: "/settings/team", label: L.team, sub: fmt(L.nPeople, { p: people, c: companies }), icon: "⊖", tone: "purple" },
             { href: "/settings/departments", label: L.departments, sub: fmt(L.nDepts, { n: depts }), icon: "▤", tone: "cyan" },
             { href: "/settings/auto-replies", label: L.autoReplies, sub: ar?.welcomeEnabled ? L.welcomeOn : L.welcomeOff, icon: "↺", tone: "cyan" },
+            { href: "/settings/auto-assign", label: L.autoAssign, sub: aa?.enabled ? L.autoAssignOn : L.autoAssignOff, icon: "⇥", tone: "cyan" },
             { href: "/settings/library", label: L.library, sub: `${qr} · ${tags} · ${fields}`, icon: "#", tone: "orange" },
             { href: "/settings/developers", label: L.developers, sub: "API", icon: "‹›", tone: "blue" },
           ],
