@@ -212,14 +212,21 @@ export async function resolutionStats(
   // Fetch the window's closures and average in JS so the business-hours clock
   // (which SQL can't express) applies — same clock as first-reply / avg-reply.
   // Capped like the reply walk; closures per window are bounded by throughput.
+  // Bind the window bounds as ISO strings, NOT Date objects: this is a raw
+  // db.execute, so Drizzle sends each param straight to postgres.js with no
+  // column-type encoder. Under our pooler config (prepare:false, fetch_types:
+  // false — see db/pg.ts) postgres.js has no serializer for a bare Date and
+  // throws "Received an instance of Date" at Bind, 500-ing the whole Support
+  // tab. A string is cast to timestamptz server-side. (db.select() paths are
+  // unaffected — they encode the Date via the column type before postgres.js.)
   const rows = (await db.execute(sql`
     select c.created_at, c.closed_at
     from connect.conversation c
     join connect.contact ct on ct.id = c.contact_id
     where ct.company_id = ${companyId}
       and c.closed_at is not null
-      and c.closed_at >= ${from}
-      ${to ? sql`and c.closed_at < ${to}` : sql``}
+      and c.closed_at >= ${from.toISOString()}
+      ${to ? sql`and c.closed_at < ${to.toISOString()}` : sql``}
     limit ${REPLY_SAMPLE}
   `)) as unknown as { created_at: string | Date; closed_at: string | Date }[];
   if (!rows.length) return { avgSec: null, n: 0 };
