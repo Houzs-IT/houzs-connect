@@ -84,7 +84,7 @@ export default async function ConversationPage({
     notFound();
   }
   // "HOUZS · 011-6155 6133" when the inbox spans companies; just the number when
-  // the company alone has several (8822 service, 6133 logistics); nothing when
+  // the company alone has several (8822 delivery, 6133 after-sales service); nothing when
   // there is only one number and the chip would say nothing new.
   const ownScope = scopes.find((sc) => sc.companyId === convo.channel.companyId);
   const lineCount = (await scopeChannels(db, scopes)).length;
@@ -140,6 +140,22 @@ export default async function ConversationPage({
 
   const name = displayName(convo.contact.name, convo.contact.phone);
   const contactAttrs = attrs(convo.contact.attributes);
+
+  // Every delivery date proposed in this conversation, for the panel: the ERP's
+  // originally arranged date, then each date the customer submitted through the
+  // "New Delivery Date" / service form. The form overwrites amended_delivery_date
+  // on the contact, so the per-submission history survives only on the messages.
+  const proposedDates: { date: string; at: string; source: "erp" | "customer" }[] = [];
+  if (contactAttrs.delivery_date_1) {
+    proposedDates.push({ date: contactAttrs.delivery_date_1, at: "", source: "erp" });
+  }
+  for (const m of messages) {
+    const p = m.interactivePayload as { kind?: string; fields?: Record<string, string> } | null;
+    if (p?.kind === "flow_reply" && p.fields) {
+      const d = p.fields.amended_delivery_date ?? p.fields.delivery_date;
+      if (d) proposedDates.push({ date: d, at: stamp(m.createdAt), source: "customer" });
+    }
+  }
 
   // Who sent each outbound message. `members` is already the company's full
   // roster for the assignment picker, so attribution costs no extra query — and
@@ -381,6 +397,7 @@ export default async function ConversationPage({
         email={convo.contact.email ?? ""}
         starred={contactAttrs.starred === "1"}
         firstReply={firstReply}
+        proposedDates={proposedDates}
         payments={payments.map((p) => ({
           id: p.id,
           amount: p.amount,

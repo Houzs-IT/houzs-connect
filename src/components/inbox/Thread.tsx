@@ -126,6 +126,23 @@ type Buttons = { kind?: string; buttons?: { id: string; label: string }[]; reply
 
 const MEDIA_TYPES = ["IMAGE", "DOCUMENT", "AUDIO", "VIDEO"];
 
+/**
+ * The fields of a WhatsApp Flow (form) submission, else null. The webhook stores
+ * them as { kind: "flow_reply", fields } (api/webhooks/whatsapp/route.ts); the
+ * message body is only the "[form submitted]" placeholder, so the bubble shows
+ * these instead.
+ */
+function flowReplyFields(payload: unknown): Record<string, string> | null {
+  const p = payload as { kind?: string; fields?: Record<string, string> } | null;
+  return p && p.kind === "flow_reply" && p.fields && Object.keys(p.fields).length > 0 ? p.fields : null;
+}
+
+/** A form field key as a label: "amended_delivery_date" -> "Amended delivery date". */
+function prettyFieldKey(key: string): string {
+  const spaced = key.replace(/[_-]+/g, " ").trim();
+  return spaced ? spaced.charAt(0).toUpperCase() + spaced.slice(1) : key;
+}
+
 export async function Thread({
   items,
   conversationId,
@@ -224,6 +241,9 @@ export async function Thread({
         const out = m.direction === "OUT";
         const payload = (m.interactivePayload as Buttons | null) ?? null;
         const buttons = payload?.buttons ?? [];
+        // A WhatsApp Flow submission: show what the customer actually filled in
+        // rather than the "[form submitted]" placeholder the body carries.
+        const flowFields = flowReplyFields(m.interactivePayload);
         // A picture or file: the inbound webhook stores { mediaId, mimeType },
         // an attachment we sent stores { kind: "media", mediaId, fileName }.
         const media = (m.type === "IMAGE" || m.type === "DOCUMENT" || m.type === "AUDIO" || m.type === "VIDEO") && typeof (payload as { mediaId?: unknown } | null)?.mediaId === "string"
@@ -234,7 +254,8 @@ export async function Thread({
           : null;
         // The body of a media message is its caption plus a placeholder
         // ("[attachment]" in, "[image] name.jpg" out) — show the caption only.
-        const text = media ? mediaCaption(m.body) : m.body;
+        // A form submission renders its fields below instead of the placeholder.
+        const text = flowFields ? null : media ? mediaCaption(m.body) : m.body;
         // A quote the page did not load (older than the thread window) still
         // says it is a reply, just without the text.
         const quotedId = payload?.replyTo;
@@ -274,6 +295,25 @@ export async function Thread({
                         goneLabel={s.mediaGone}
                         openLabel={s.mediaOpen}
                       />
+                    </div>
+                  )}
+                  {flowFields && (
+                    <div className="flex flex-col gap-1.5">
+                      <div className="flex items-center gap-1.5 text-[11px] font-semibold text-[var(--color-accent-ink)]">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                          <path d="M14 2v6h6M9 13h6M9 17h3" />
+                        </svg>
+                        {s.formSubmitted}
+                      </div>
+                      <dl className="flex flex-col gap-1.5 rounded-[8px] bg-[color-mix(in_srgb,var(--color-surface-2)_75%,transparent)] px-2.5 py-2">
+                        {Object.entries(flowFields).map(([k, v]) => (
+                          <div key={k} className="flex flex-col gap-px">
+                            <dt className="text-[10.5px] text-[var(--color-faint)]">{prettyFieldKey(k)}</dt>
+                            <dd className="whitespace-pre-wrap text-[12.5px] font-medium text-[var(--color-ink)]">{v}</dd>
+                          </div>
+                        ))}
+                      </dl>
                     </div>
                   )}
                   {text && <p className="whitespace-pre-wrap">{text}</p>}
