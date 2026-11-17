@@ -26,6 +26,7 @@ import { getDict } from "@/lib/i18n/server";
 import { SLA_MINUTES } from "@/lib/sla";
 import { getAutomationEvents, getAutomationProgress } from "@/lib/automation/progress";
 import { DELIVERY_DATE_HISTORY_KEY, parseDeliveryDateHistory } from "@/lib/automation/delivery-history";
+import { BUILT_IN_FIELDS, interpolate } from "@/lib/automation/vars";
 
 /**
  * How much of the thread is rendered. WhatsApp threads with a customer run for
@@ -170,6 +171,24 @@ export default async function ConversationPage({
       }
     }
   }
+
+  // Variables the composer offers when sending a template manually: the built-ins
+  // plus this contact's populated fields, each resolved to this contact's value —
+  // so the operator picks a variable (as in the template editor) and the live
+  // preview shows what the customer will read. interpolate() returns "{key}" for
+  // an empty field, so those are dropped and only variables that resolve are kept.
+  const varCtx = {
+    full_name: name,
+    phone: convo.contact.phone,
+    email: convo.contact.email,
+    source: convo.contact.source,
+    sourceId: convo.contact.sourceId,
+    sourceUrl: convo.contact.sourceUrl,
+    attributes: convo.contact.attributes,
+  };
+  const templateVars = [...BUILT_IN_FIELDS, ...fields.map((f) => ({ key: f.key, name: f.name }))]
+    .map((f) => ({ label: f.name, value: interpolate(`{${f.key}}`, varCtx) }))
+    .filter((tv) => tv.value.trim() !== "" && !tv.value.startsWith("{"));
 
   // Who sent each outbound message. `members` is already the company's full
   // roster for the assignment picker, so attribution costs no extra query — and
@@ -387,6 +406,7 @@ export default async function ConversationPage({
           // impure function during render and freeze the answer at render time,
           // so a composer left open past the deadline would still invite a reply.
           windowExpiresAt={convo.windowExpiresAt?.toISOString() ?? null}
+          templateVars={templateVars}
         />
       </div>
 
