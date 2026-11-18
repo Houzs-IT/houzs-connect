@@ -31,6 +31,13 @@ async function run(db: DB): Promise<void> {
     CREATE UNIQUE INDEX IF NOT EXISTS "auto_assign_company_key"
     ON "connect"."auto_assign" ("company_id")
   `);
+  // Optional department scope, added after the table shipped. Safe to ALTER here:
+  // this table is only ever read/written behind this ensure, so the column always
+  // exists before any query references it.
+  await db.execute(sql`
+    ALTER TABLE "connect"."auto_assign"
+    ADD COLUMN IF NOT EXISTS "department_id" text
+  `);
 }
 
 export async function ensureAutoAssignTable(db: DB): Promise<void> {

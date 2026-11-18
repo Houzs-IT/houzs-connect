@@ -23,12 +23,16 @@ function Toggle({ on, onChange, disabled, label }: { on: boolean; onChange: (v: 
 
 export function AutoAssignForm({
   enabled,
+  departmentId,
+  departments,
   canEdit,
   online,
   total,
   lastSaved,
 }: {
   enabled: boolean;
+  departmentId: string | null;
+  departments: { id: string; name: string }[];
   canEdit: boolean;
   online: number;
   total: number;
@@ -37,22 +41,36 @@ export function AutoAssignForm({
   const { t } = useShell();
   const L = t.set;
   const [on, setOn] = useState(enabled);
+  const [dept, setDept] = useState(departmentId ?? "");
   const [result, setResult] = useState<{ ok: boolean; text: string } | null>(null);
   const [pending, start] = useTransition();
 
-  const toggle = (next: boolean) => {
+  // Persist the switch and the department scope together: either changing one
+  // sends the current value of both, so they never drift apart.
+  const save = (nextOn: boolean, nextDept: string, rollback: () => void) => {
     if (!canEdit || pending) return;
-    setOn(next);
     setResult(null);
     start(async () => {
-      const r = await saveAutoAssign(next);
+      const r = await saveAutoAssign(nextOn, nextDept || null);
       if (r.ok) {
         setResult({ ok: true, text: L.arSaved });
       } else {
-        setOn(!next); // roll back the switch if the save was refused
+        rollback();
         setResult({ ok: false, text: r.error ?? "It could not be saved." });
       }
     });
+  };
+
+  const toggle = (next: boolean) => {
+    const prev = on;
+    setOn(next);
+    save(next, dept, () => setOn(prev));
+  };
+
+  const changeDept = (next: string) => {
+    const prev = dept;
+    setDept(next);
+    save(on, next, () => setDept(prev));
   };
 
   return (
@@ -82,6 +100,26 @@ export function AutoAssignForm({
             ) : (
               <span className="text-[12px] text-[var(--color-faint)]">{L.aaOff}</span>
             )}
+          </div>
+          <div className="mt-4 flex flex-col gap-1.5">
+            <label htmlFor="aa-dept" className="text-[12px] font-semibold text-[var(--color-ink)]">
+              {L.aaDept}
+            </label>
+            <select
+              id="aa-dept"
+              value={dept}
+              disabled={!canEdit || pending}
+              onChange={(e) => changeDept(e.target.value)}
+              className="w-full max-w-[280px] rounded-[9px] border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-[13px] text-[var(--color-ink)] disabled:opacity-50"
+            >
+              <option value="">{L.aaDeptAll}</option>
+              {departments.map((d) => (
+                <option key={d.id} value={d.id}>
+                  {d.name}
+                </option>
+              ))}
+            </select>
+            <p className="text-[12px] text-[var(--color-faint)]">{L.aaDeptHint}</p>
           </div>
         </div>
       </section>
