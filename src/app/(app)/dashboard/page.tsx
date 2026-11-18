@@ -3,7 +3,7 @@ import Link from "next/link";
 import { CompanySwitcher, LangToggle } from "@/components/shell/TopbarControls";
 import { HouzsConnectMarkThemed } from "@/components/brand/HouzsConnectLogo";
 import { getDb } from "@/db/client";
-import { companyChoices, isOwnerOrAdmin } from "@/lib/companies";
+import { companyChoices, isSuperAdmin } from "@/lib/companies";
 import { getCurrentMember } from "@/lib/current-member";
 import { fmt } from "@/lib/i18n/dict";
 import { getDict, getLang } from "@/lib/i18n/server";
@@ -140,7 +140,7 @@ export default async function DashboardPage({
                 <Presence companyId={companyId} s={s} />
               </Suspense>
             </span>
-            <CompanySwitcher companies={await companyChoices(getDb(), me)} canCreateCompany={isOwnerOrAdmin(me.role)} className="hidden md:block" />
+            <CompanySwitcher companies={await companyChoices(getDb(), me)} canCreateCompany={isSuperAdmin(me.role)} className="hidden md:block" />
             <LangToggle pill />
             <a
               href={`/dashboard/export?period=${w.days}`}

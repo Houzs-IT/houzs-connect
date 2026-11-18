@@ -6,7 +6,7 @@ import { initials, tint } from "@/lib/format";
 import { PersonAvatar } from "./PersonAvatar";
 import { HouzsConnectMark } from "./brand/HouzsConnectMark";
 import { useShell } from "./shell/ShellProvider";
-import { IT_SUPPORT_NAV, NAV, SETTINGS_NAV, isActive, type NavItem } from "./shell/nav";
+import { IT_SUPPORT_NAV, SETTINGS_NAV, isActive, navFor, type NavItem } from "./shell/nav";
 import { useItUnread, useRememberPage } from "./it-support/useItSupportShell";
 
 /**
@@ -65,6 +65,8 @@ export function Sidebar({
   live,
   me,
   itSupport,
+  logo,
+  modules,
 }: {
   unread?: number;
   /** IT Support is connected on this Worker: show its tile and unread count. */
@@ -73,6 +75,10 @@ export function Sidebar({
   internalUnread?: number;
   live?: boolean;
   me: { name: string; photo?: string | null };
+  /** Another company's logo for the rail (lib/company-brand.ts); null shows Houzs Connect's own mark. */
+  logo: string | null;
+  /** The modules this person may open (lib/full-access.ts myModules). */
+  modules: readonly string[];
 }) {
   const path = usePathname();
   const { t } = useShell();
@@ -102,13 +108,20 @@ export function Sidebar({
         aria-label="Houzs Connect"
         className="mb-3.5 grid h-10 w-10 place-items-center rounded-[8px]"
       >
-        {/* Straight on the rail, no chip. The rail is deep ink in both themes
-            (globals.css: left untouched by dark mode), so the white variant. */}
-        <HouzsConnectMark size={36} variant="white" title="Houzs Connect" />
+        {/* The company being worked in (lib/company-brand.ts): Houzs Connect's own
+            mark, straight on the deep-ink rail, or that company's logo on a white chip. */}
+        {logo ? (
+          <span className="grid h-9 w-9 place-items-center rounded-[8px] bg-white shadow-[var(--shadow-logo)]">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={logo} alt="" className="h-[24px] w-[24px] object-contain" />
+          </span>
+        ) : (
+          <HouzsConnectMark size={36} variant="white" title="Houzs Connect" />
+        )}
       </Link>
 
       <nav className="flex flex-col items-center gap-1">
-        {NAV.map((item) => tile(item, item.key === "inbox" ? unread : item.key === "internal" ? internalUnread : undefined))}
+        {navFor(modules).map((item) => tile(item, item.key === "inbox" ? unread : item.key === "internal" ? internalUnread : undefined))}
       </nav>
 
       <div className="mt-auto flex flex-col items-center gap-2.5">
