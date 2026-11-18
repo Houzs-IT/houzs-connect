@@ -3,8 +3,9 @@ import { buildTemplateSendGraph } from "./shared";
 
 /**
  * The "send one approved template" WS-A flows (decision B): reminders, driver
- * info, delivery-completed. Each fires by name (trigger WEBHOOK) and sends a
- * single button-less template via the send_template node, then ends.
+ * info, delivery-completed, service-case-received, overdue-order. Each fires by
+ * name (trigger WEBHOOK) and sends a single button-less template via the
+ * send_template node, then ends.
  *
  * Bodies below mirror the APPROVED templates on the Connect Templates page
  * (chat.houzscentury.com/templates) and are the DEMO/inbox preview; the real
@@ -23,6 +24,8 @@ function templateFlow(opts: {
   templateName: string;
   params: string[];
   message: string;
+  /** Optional contact tag applied after the send (add_tag node). */
+  tag?: string;
 }): SeedFlow {
   return {
     key: opts.key,
@@ -32,7 +35,12 @@ function templateFlow(opts: {
     triggerConfig: { source: "erp", event: opts.event },
     forms: [],
     build: () =>
-      buildTemplateSendGraph({ templateName: opts.templateName, params: opts.params, message: opts.message }),
+      buildTemplateSendGraph({
+        templateName: opts.templateName,
+        params: opts.params,
+        message: opts.message,
+        tag: opts.tag,
+      }),
   };
 }
 
@@ -104,4 +112,63 @@ export const deliveryCompletedFlow = templateFlow({
   templateName: "delivery_completed_thanks",
   params: ["{full_name}", "{ref_1}"],
   message: `Hi {full_name}, This is a confirmation that your order {ref_1} was successfully delivered today. Thank you for your understanding and for purchasing our products. We sincerely appreciate your support.`,
+});
+
+// Overdue Order — a one-way heads-up when a Sales Order's delivery will run LATE
+// because of a production delay. The operator sends it by name from the Delivery
+// Planning board's Send Message menu; it apologises and gives a reason. No
+// buttons — distinct from Postpone, which commits a proposed date and opens a
+// Confirm / Amend conversation.
+//
+// Template `overdue_order_status_update` has FOUR positional params:
+//   {{1}} full_name, {{2}} order ref, {{3}} amend reason — the ERP injects
+//   `amend_date_reason` (the DP "amend reason" column) on the trigger — and {{4}} a
+//   FIXED timeframe string. The template keeps the {{4}} slot, so the send must
+//   still supply it; it is a literal here ("in next 2 weeks"), not a token. If
+//   the amend reason is not injected, {{3}} sends the literal "{amend_date_reason}".
+export const overdueOrderFlow = templateFlow({
+  key: "overdue_order",
+  name: "Overdue Order",
+  description:
+    "Production-delay heads-up for a late order (one-way): overdue_order_status_update, full_name + order ref + amend reason; {{4}} fixed 'in next 2 weeks'. No buttons.",
+  event: "overdue_order",
+  templateName: "overdue_order_status_update",
+  params: ["{full_name}", "{ref_1}", "{amend_date_reason}", "in next 2 weeks"],
+  message: `Hi {full_name}, this is the Customer Service Team from Houzs Century.
+
+We sincerely apologize for the delay with your order *{ref_1}*.
+Due to *{amend_date_reason}*, your order requires additional time to ensure everything meets our standards. Our team is actively working on your items, and we expect to deliver your order within the next delivery timeframe *in next 2 weeks*. Our logistics team will contact you shortly to confirm the exact date and time. Thank you for your patience and for giving us the opportunity to make this right.
+
+Thank you for your patience and understanding! 🙏`,
+});
+
+// After-sales (ASSR) acknowledgement — the FIRST message a customer gets when a
+// Service Case is created in the ERP, before any date is arranged (that later
+// confirm/amend conversation is the separate Service Arrangement flow). The ERP
+// fires this by name on create and injects full_name, ref_1 (the SO/order ref)
+// and assr_no (the ASSR case number).
+//
+// Template `hc_service_case_received` has THREE positional params:
+//   {{1}} full_name, {{2}} ref_1 (order ref), {{3}} assr_no (ASSR case number).
+// All three MUST be sent — with only two, {{3}} went out as the literal "{{3}}"
+// and Meta rejected the whole send (seen live 2026-11-03, ASSR/2611-008).
+// Button-less, one-shot: reassure, then wait for a human — no callback. Tags the
+// contact "service" on send so the inbox can filter service-case customers.
+export const serviceCaseReceivedFlow = templateFlow({
+  key: "service_case_received",
+  name: "Service Case Received",
+  description:
+    "After-sales acknowledgement sent when an ASSR (service case) is created: hc_service_case_received, full_name + order ref + ASSR case no. Tags the contact service.",
+  event: "service_case_received",
+  templateName: "hc_service_case_received",
+  params: ["{full_name}", "{ref_1}", "{assr_no}"],
+  tag: "service",
+  message: `Hi {full_name} 👋 This is Houzs Century.
+
+We have received your service request for order *{ref_1}*.
+Your service case number is *{assr_no}* — please keep this for any follow-up.
+
+Our after-sales team is now arranging it and will contact you with the next update.
+
+Thank you for your patience. 🙏`,
 });

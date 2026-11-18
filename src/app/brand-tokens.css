@@ -1,0 +1,21 @@
+/* Houzs Connect brand tokens (logo scheme 6a) */
+:root {
+  --hc-ink: #11140f;            /* Houzs Venture (center) / Hookka / primary text */
+  --hc-dream-crafter: #6b665c;
+  --hc-hookka: #11140f;
+  --hc-carres: #f59a23;
+  --hc-2990: #ee7d1f;
+  --hc-the-conts: #f2b705;
+  --hc-houzs-century: #c99700;
+
+  --hc-dream-crafter-dark: #bdb8ad; /* white variant, dark mode */
+
+  --hc-wordmark-accent: #8a6a00;      /* "CONNECT" on light bg */
+  --hc-wordmark-accent-dark: #f2b705; /* "CONNECT" on dark bg */
+}
+
+/* Wordmark — load Archivo 600/800 from Google Fonts:
+   <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;800&display=swap" rel="stylesheet"> */
+.hc-wordmark-main { font-family: var(--font-archivo), Archivo, sans-serif; font-weight: 800; letter-spacing: .18em; line-height: 1; color: var(--hc-ink); }
+.hc-wordmark-sub  { font-family: var(--font-archivo), Archivo, sans-serif; font-weight: 600; letter-spacing: .52em; line-height: 1; color: var(--hc-wordmark-accent); }
+/* sub font-size ≈ 0.46 × main font-size */

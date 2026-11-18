@@ -1,13 +1,14 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { fmt, type Dict } from "@/lib/i18n/dict";
+import { CONTACTS_COLS_COOKIE, fmt, type Dict } from "@/lib/i18n/dict";
 import { initials, tint } from "@/lib/format";
 import { useShell } from "@/components/shell/ShellProvider";
-import { IconClose, IconDots, IconSearch } from "@/components/icons";
+import { IconClose, IconSearch } from "@/components/icons";
+import { RowMenu } from "@/components/RowMenu";
 import { ColumnsList, DataCount, DataHead, DataMenus, WrapButton, useColumnLayout, useDataTable, type DataColumn, type DataRow } from "@/components/DataTable";
-import { bulkBlockContacts, bulkTagContacts, mergeContacts, setContactBlocked } from "./actions";
+import { bulkBlockContacts, bulkTagContacts, mergeContacts, setContactBlocked, setContactCols } from "./actions";
 import { DeleteContactButton } from "./DeleteContactButton";
 import { SearchableSelect } from "@/components/SearchableSelect";
 
@@ -42,30 +43,23 @@ export type DupPair = {
 const OPTIONAL = ["email", "source", "sourceId", "sourceUrl", "company", "remarks", "created", "blocked"] as const;
 type OptCol = (typeof OPTIONAL)[number];
 
-// Extra columns are a per-browser preference (useSyncExternalStore: the server
-// renders the default set, the browser switches on hydration).
-const COLS_KEY = "hc_contacts_cols";
-const colListeners = new Set<() => void>();
-let colCache: { raw: string | null; cols: OptCol[] } = { raw: null, cols: [] };
-function readCols(): OptCol[] {
-  let raw: string | null = null;
-  try {
-    raw = localStorage.getItem(COLS_KEY);
-  } catch {}
-  if (raw === colCache.raw) return colCache.cols;
-  let cols: OptCol[] = [];
-  try {
-    cols = (JSON.parse(raw ?? "[]") as string[]).filter((c): c is OptCol => (OPTIONAL as readonly string[]).includes(c));
-  } catch {}
-  colCache = { raw, cols };
-  return cols;
-}
+// Extra columns are a per-person preference. The value is the OptCol keys joined
+// by commas — simple tokens, no encoding. It is held server-seeded (the page
+// reads it from the member's saved prefs, falling back to the cookie) so the
+// first paint already has the right columns — no jump on hydration. A change is
+// written to BOTH the cookie (instant on this browser) and the member's prefs
+// (so it follows them to another device).
 const NO_COLS: OptCol[] = [];
-function writeCols(cols: OptCol[]) {
+const YEAR = 60 * 60 * 24 * 365;
+export function parseCols(raw: string | null): OptCol[] {
+  if (!raw) return NO_COLS;
+  const cols = raw.split(",").filter((c): c is OptCol => (OPTIONAL as readonly string[]).includes(c));
+  return cols.length ? cols : NO_COLS;
+}
+function writeColsCookie(cols: OptCol[]) {
   try {
-    localStorage.setItem(COLS_KEY, JSON.stringify(cols));
+    document.cookie = `${CONTACTS_COLS_COOKIE}=${cols.join(",")}; path=/; max-age=${YEAR}; samesite=lax`;
   } catch {}
-  colListeners.forEach((l) => l());
 }
 
 function useOutside(open: boolean, close: () => void) {
@@ -140,6 +134,7 @@ export function ContactsView({
   stateOptions,
   duplicates,
   activeId,
+  initialColsRaw,
 }: {
   rows: ContactRow[];
   total: number;
@@ -153,20 +148,25 @@ export function ContactsView({
   stateOptions: string[];
   duplicates: DupPair[];
   activeId: string | null;
+  /** The `hc_contacts_cols` cookie, read server-side, so the first paint already
+   *  has this browser's chosen columns (no hydration jump). */
+  initialColsRaw: string;
 }) {
   const { t } = useShell();
   const s = t.contacts;
   const router = useRouter();
   const path = usePathname();
   const params = useSearchParams();
-  const extra = useSyncExternalStore(
-    (l) => {
-      colListeners.add(l);
-      return () => colListeners.delete(l);
-    },
-    readCols,
-    () => NO_COLS
-  );
+  // Seeded from the server (member prefs → cookie), so the first client render
+  // matches the server HTML — no hydration jump, even on a new device where the
+  // cookie is empty but the saved prefs are not.
+  const initialCols = useMemo(() => parseCols(initialColsRaw), [initialColsRaw]);
+  const [extra, setExtra] = useState<OptCol[]>(initialCols);
+  const applyCols = (cols: OptCol[]) => {
+    setExtra(cols);
+    writeColsCookie(cols); // instant on this browser
+    void setContactCols(cols); // follows the person to other devices
+  };
 
   const [query, setQuery] = useState(q);
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -212,24 +212,31 @@ export function ContactsView({
     router.refresh();
   }
 
-  function exportSelected() {
+  async function exportSelected() {
     const pick = rows.filter((r) => selected.has(r.id));
-    const cell = (v: unknown) => {
-      const x = v == null ? "" : String(v);
-      return /[",\n]/.test(x) ? `"${x.replace(/"/g, '""')}"` : x;
-    };
-    const lines = [
-      ["Name", "Phone", "Email", "Order", "Sales", "Tags", "Source"].join(","),
-      ...pick.map((r) =>
-        [r.name, r.phone, r.email, r.orderRef, r.sales, r.tags.map((x) => x.name).join(" "), r.source].map(cell).join(",")
-      ),
+    if (pick.length === 0) return;
+    // SheetJS is heavy; load it only when someone actually exports (same
+    // dynamic import the .xlsx IMPORT uses). A real .xlsx, not a CSV, because
+    // Excel is what the office opens it in.
+    const XLSX = await import("xlsx");
+    const header = ["Name", "Phone", "Email", "Order", "Sales", "Tags", "Source"];
+    const aoa = [
+      header,
+      ...pick.map((r) => [
+        r.name,
+        r.phone,
+        r.email ?? "",
+        r.orderRef ?? "",
+        r.sales ?? "",
+        r.tags.map((x) => x.name).join(" "),
+        r.source ?? "",
+      ]),
     ];
-    const url = URL.createObjectURL(new Blob(["﻿" + lines.join("\r\n")], { type: "text/csv;charset=utf-8" }));
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `contacts-${pick.length}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
+    const ws = XLSX.utils.aoa_to_sheet(aoa);
+    ws["!cols"] = [{ wch: 22 }, { wch: 16 }, { wch: 24 }, { wch: 16 }, { wch: 12 }, { wch: 20 }, { wch: 14 }];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Contacts");
+    XLSX.writeFile(wb, `contacts-${pick.length}.xlsx`);
   }
 
   const colLabel: Record<OptCol, string> = {
@@ -355,7 +362,7 @@ export function ContactsView({
                   <input
                     type="checkbox"
                     checked={extra.includes(c)}
-                    onChange={() => writeCols(extra.includes(c) ? extra.filter((x) => x !== c) : [...extra, c])}
+                    onChange={() => applyCols(extra.includes(c) ? extra.filter((x) => x !== c) : [...extra, c])}
                     className="accent-[var(--color-accent)]"
                   />
                   {colLabel[c]}
@@ -394,7 +401,7 @@ export function ContactsView({
             <button type="button" onClick={() => setBulk(bulk === "campaign" ? null : "campaign")} className="rounded-[6px] px-2.5 py-1 hover:bg-white/10">
               {s.addToCampaign}
             </button>
-            <button type="button" onClick={exportSelected} className="rounded-[6px] px-2.5 py-1 hover:bg-white/10">
+            <button type="button" onClick={() => void exportSelected()} className="rounded-[6px] px-2.5 py-1 hover:bg-white/10">
               {s.export}
             </button>
             <button
@@ -505,7 +512,7 @@ export function ContactsView({
                     })}
                     {cw.fixed && <td className="p-0" />}
                     <td className="px-2" onClick={(e) => e.stopPropagation()}>
-                      <RowMenu row={r} onMerge={() => setMergeKeep(r)} />
+                      <ContactRowMenu row={r} onMerge={() => setMergeKeep(r)} />
                     </td>
                   </tr>
                 );
@@ -559,23 +566,13 @@ export function ContactsView({
 }
 
 /** Row ⋯ menu: Block / Unblock, Merge…, Delete. */
-function RowMenu({ row, onMerge }: { row: ContactRow; onMerge: () => void }) {
+function ContactRowMenu({ row, onMerge }: { row: ContactRow; onMerge: () => void }) {
   const { t } = useShell();
   const s = t.contacts;
-  const [open, setOpen] = useState(false);
-  const ref = useOutside(open, () => setOpen(false));
   return (
-    <div ref={ref} className="relative">
-      <button
-        type="button"
-        aria-label="Actions"
-        onClick={() => setOpen((v) => !v)}
-        className="grid h-7 w-7 place-items-center rounded-[6px] text-[var(--color-muted)] hover:bg-[var(--color-surface-dim)]"
-      >
-        <IconDots width={15} height={15} />
-      </button>
-      {open && (
-        <div className="absolute right-0 z-30 mt-1 w-44 rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)] py-1 shadow-[var(--shadow-popover)]">
+    <RowMenu label="Actions">
+      {(close) => (
+        <>
           <form action={setContactBlocked}>
             <input type="hidden" name="contactId" value={row.id} />
             <input type="hidden" name="blocked" value={row.blocked ? "0" : "1"} />
@@ -586,7 +583,7 @@ function RowMenu({ row, onMerge }: { row: ContactRow; onMerge: () => void }) {
           <button
             type="button"
             onClick={() => {
-              setOpen(false);
+              close();
               onMerge();
             }}
             className="w-full px-3 py-2 text-left text-[13px] text-[var(--color-ink)] hover:bg-[var(--color-surface-2)]"
@@ -596,9 +593,9 @@ function RowMenu({ row, onMerge }: { row: ContactRow; onMerge: () => void }) {
           <div className="px-1.5 py-1">
             <DeleteContactButton contactId={row.id} name={row.name} />
           </div>
-        </div>
+        </>
       )}
-    </div>
+    </RowMenu>
   );
 }
 

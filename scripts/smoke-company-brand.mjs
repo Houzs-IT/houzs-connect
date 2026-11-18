@@ -38,8 +38,9 @@ assert(brandForCompany("Some New Co").key === "houzs", "an unknown company shows
 assert(brandForCompany(null).key === "houzs", "no company shows Houzs");
 assert(themeCss("houzs") === "", "Houzs keeps the colours in globals.css");
 assert(themeCss("2990").includes("--color-accent:#a6471e"), "2990 lays its rust colours over :root");
-assert(themeCss("hookka").startsWith(":root{") && themeCss("hookka").includes("--color-accent:"), "Hookka lays its colours over :root");
-assert(themeCss("conts").includes("--color-rail:"), "The Conts colours the rail too");
+assert(themeCss("hookka").startsWith(":root{--color-rail"), "the rail takes the company's colours in both themes");
+assert(/:root:not\(\[data-theme="dark"\]\)\{[^}]*--color-accent:#3f3f46/.test(themeCss("hookka")), "accents only in light mode");
+assert(!/^:root\{[^}]*--color-accent:/.test(themeCss("conts")), "dark mode keeps its own accent shades");
 
 // Sign-in landing.
 const houzs = { id: "h", companyName: "Houzs Century" };

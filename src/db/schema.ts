@@ -175,6 +175,20 @@ export const memberPhoto = connect.table("member_photo", {
   updatedBy: text("updated_by"),
 });
 
+/**
+ * Per-person UI preferences that should follow the person across devices —
+ * keyed by lower-cased email, like member_photo, so one person's choice holds in
+ * every company they belong to. Today: the contacts table's optional columns
+ * (comma-joined keys). Self-applied at runtime (db/ensure-member-pref.ts); a
+ * deploy before its migration must not break the contacts page.
+ */
+export const memberPref = connect.table("member_pref", {
+  email: text("email").primaryKey(),
+  /** Comma-joined optional contact-column keys (see ContactsView). */
+  contactsCols: text("contacts_cols"),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
 export const department = connect.table(
   "department",
   {
@@ -694,6 +708,25 @@ export const templateBinding = connect.table(
 );
 
 /**
+ * A manual override of which company a WhatsApp template belongs to, for the
+ * Templates page's company scoping and filter. `templateOwner()` guesses the
+ * brand from a template's wording, but a Houzs template that never names
+ * "Houzs" falls through to SHARED; this row pins the right owner. Global — a
+ * template is one shared-WABA asset — and keyed by template NAME across its
+ * language variants. `owner` is a company code (HOUZS, 2990, HOOKKA, THECONTS)
+ * or SHARED. Self-applied by db/ensure-template-owner.ts.
+ */
+export const templateOwnerOverride = connect.table("template_owner", {
+  templateName: text("template_name").primaryKey(),
+  owner: text("owner").notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .notNull()
+    .defaultNow()
+    .$onUpdate(() => new Date()),
+  updatedBy: text("updated_by"),
+});
+
+/**
  * A template's header file (image / PDF), kept so every send can attach it:
  * Meta refuses a send of a media-header template that carries no header.
  * Keyed by the template itself (WABA + name + language), not by company — a
@@ -813,6 +846,27 @@ export const autoReply = connect.table(
   (t) => ({ companyKey: uniqueIndex("auto_reply_company_key").on(t.companyId) })
 );
 
+/**
+ * Per-company auto-assignment switch. One row per company; OFF (or no row) means
+ * nothing is auto-assigned, so the feature is inert until someone enables it.
+ * Ensured at runtime (db/ensure-auto-assign.ts) like auto_reply — a standalone
+ * table rather than a `company` column, so a deploy before its migration cannot
+ * break the reads sign-in depends on. Per-department scoping rides with the
+ * dept-routing follow-up; v1 is a company-wide switch.
+ */
+export const autoAssign = connect.table(
+  "auto_assign",
+  {
+    id: id(),
+    companyId: text("company_id").notNull(),
+    enabled: boolean("enabled").notNull().default(false),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedBy: text("updated_by"),
+  },
+  // NON-partial: a settings save upserts on company_id (42P10 otherwise).
+  (t) => ({ companyKey: uniqueIndex("auto_assign_company_key").on(t.companyId) })
+);
+
 export const webhookEvent = connect.table(
   "webhook_event",
   {
@@ -824,6 +878,39 @@ export const webhookEvent = connect.table(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({ sourceIdx: index("webhook_event_source_idx").on(t.source) })
+);
+
+/**
+ * Who did what on a shared inbox — an accountability trail distinct from the
+ * message history: assignments, tag changes, status changes, watchers added,
+ * contacts merged / blocked. Written best-effort by lib/activity.ts (a logging
+ * failure must never break the action it records). A standalone table, like
+ * member_photo: a deploy that lands before its migration (0027) must not break
+ * the reads sign-in depends on, and the reader guards for its absence.
+ */
+export const activityLog = connect.table(
+  "activity_log",
+  {
+    id: id(),
+    companyId: text("company_id").notNull(),
+    /** The member who did it; null for automation / system actions. */
+    actorMemberId: text("actor_member_id"),
+    /** "conversation" | "contact". */
+    entityType: text("entity_type").notNull(),
+    entityId: text("entity_id").notNull(),
+    /** e.g. assigned, unassigned, queued, status, tag_added, tag_removed,
+     *  watcher_added, watcher_removed, merged, blocked, unblocked. */
+    action: text("action").notNull(),
+    /** Human-facing specifics: { to, tag, status, into, … }. */
+    detail: jsonb("detail"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    // The company feed, newest first.
+    companyIdx: index("activity_log_company_idx").on(t.companyId, t.createdAt),
+    // One entity's own history.
+    entityIdx: index("activity_log_entity_idx").on(t.entityType, t.entityId),
+  })
 );
 
 // ─────────────────────────── Relations (for db.query nested reads) ───────────────────────────

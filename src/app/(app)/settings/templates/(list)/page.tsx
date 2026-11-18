@@ -1,4 +1,6 @@
+import { asc } from "drizzle-orm";
 import { getDb } from "@/db/client";
+import { company as companyTable } from "@/db/schema";
 import { headerKey, storedHeaders } from "@/lib/whatsapp/templateMedia";
 import Link from "next/link";
 import { DataTable, type DataColumn, type DataRow } from "@/components/DataTable";
@@ -18,6 +20,8 @@ import {
   type TemplateStatus,
 } from "@/lib/whatsapp/templates";
 import { bindingKey } from "@/lib/whatsapp/templateBindings";
+import { SHARED_OWNER, templateOwner, visibleOwners, type TemplateOwner } from "@/lib/whatsapp/templateCompany";
+import { loadTemplateOwnerOverrides } from "@/lib/whatsapp/templateOwnerStore";
 import { loadBindings, loadFieldsAndSample, loadTemplateList, needsMapping } from "@/app/(app)/templates/data";
 import { StarterSetButton } from "@/app/(app)/templates/StarterSetButton";
 import { TemplateSide } from "@/app/(app)/templates/TemplateSide";
@@ -43,6 +47,8 @@ const STATUS_TONE: Record<string, string> = {
   DISABLED: "bg-[var(--color-surface-2)] text-[var(--color-muted)]",
 };
 const ICON_TONES = ["blue", "green", "orange", "purple", "pink", "cyan"];
+// Company filter / column order: the companies first, brand-free last.
+const OWNER_ORDER: TemplateOwner[] = ["HOUZS", "2990", "HOOKKA", "THECONTS", SHARED_OWNER];
 
 export default async function TemplatesPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const me = await getCurrentMember();
@@ -50,6 +56,7 @@ export default async function TemplatesPage({ searchParams }: { searchParams: Pr
   const t = await getDict();
   const L = t.tf;
   const sp = await searchParams;
+  const fCo = one(sp.company);
   const fCat = one(sp.category);
   const fLang = one(sp.language);
   const fStatus = one(sp.status);
@@ -57,14 +64,35 @@ export default async function TemplatesPage({ searchParams }: { searchParams: Pr
   const tool = one(sp.tool);
   const q = one(sp.q).trim().toLowerCase();
 
-  const [{ configured, templates: all, error }, bindings, { fields, sample }] = await Promise.all([
+  const [{ configured, templates: all, error }, bindings, { fields, sample }, companies, ownerOverrides] = await Promise.all([
     loadTemplateList(),
     loadBindings(me.companyId),
     loadFieldsAndSample(me.companyId),
+    getDb().query.company.findMany({ columns: { id: true, code: true, name: true }, orderBy: asc(companyTable.createdAt) }),
+    loadTemplateOwnerOverrides(),
   ]);
 
-  const templates = all.filter(
+  // Whose template each one is: a manual override if one was set, otherwise the
+  // brand guessed from its wording (`_2990` suffix, brand name). Every company's
+  // templates share one WhatsApp Business Account, so Meta's list mixes them.
+  // Labels are the company names the switcher shows; brand-free = shared.
+  const detectedOwner = (x: (typeof all)[number]) => templateOwner(x);
+  const ownerOf = new Map(all.map((x) => [x.id, ownerOverrides.get(x.name) ?? detectedOwner(x)]));
+  const ownerLabel = (o: TemplateOwner) =>
+    o === SHARED_OWNER ? L.companyShared : (companies.find((c) => c.code === o)?.name ?? o);
+
+  // Scope the whole list to the brands this member works with — every company's
+  // templates live on one shared WhatsApp account, so without this a member of
+  // one brand sees (and is nagged to map {{n}} in) every other brand's
+  // templates. HOUZS + 2990 are managed together; The Conts and Hookka each see
+  // only their own. An unrecognised company (null) sees everything, as before.
+  const myCode = companies.find((c) => c.id === me.companyId)?.code ?? null;
+  const visible = visibleOwners(myCode);
+  const scoped = visible ? all.filter((x) => visible.has(ownerOf.get(x.id) ?? SHARED_OWNER)) : all;
+
+  const templates = scoped.filter(
     (x) =>
+      (!fCo || ownerOf.get(x.id) === fCo) &&
       (!fCat || x.category === fCat) &&
       (!fLang || x.language === fLang) &&
       (!fStatus || x.status === fStatus) &&
@@ -99,14 +127,18 @@ export default async function TemplatesPage({ searchParams }: { searchParams: Pr
     bindings: bindings.map.get(bindingKey(x.name, x.language))?.bindings ?? [],
     editBlocked: editBlockedReason(x.status as TemplateStatus),
   }));
-  const unmapped = all.filter((x) => needsMapping(x, bindings.map));
+  const unmapped = scoped.filter((x) => needsMapping(x, bindings.map));
+  // `?t` is an explicit pick (a tapped row). Without it the desktop sidebar
+  // still previews the first row, but the mobile slide-over must stay shut —
+  // it only opens on a real selection, never over the list on load.
+  const explicitSelect = Boolean(one(sp.t));
   const selectedId = one(sp.t) || rows[0]?.id || "";
   const selected = rows.find((r) => r.id === selectedId) ?? null;
   const selStats = selected ? analytics?.stats.get(selected.id) : undefined;
 
   const keep = (extra: Record<string, string>) => {
     const p = new URLSearchParams();
-    for (const [k, v] of Object.entries({ category: fCat, language: fLang, status: fStatus, mapping: fMap, q, ...extra })) {
+    for (const [k, v] of Object.entries({ company: fCo, category: fCat, language: fLang, status: fStatus, mapping: fMap, q, ...extra })) {
       if (v) p.set(k, v);
     }
     return `/settings/templates${p.size ? `?${p}` : ""}`;
@@ -114,6 +146,18 @@ export default async function TemplatesPage({ searchParams }: { searchParams: Pr
 
   const opts = (vals: string[], labels?: Record<string, string>) =>
     [...new Set(vals)].sort().map((v) => ({ value: v, label: labels?.[v] ?? v }));
+  const scopedOwners = new Set(scoped.map((x) => ownerOf.get(x.id) ?? SHARED_OWNER));
+  const ownerOpts = OWNER_ORDER.filter((o) => scopedOwners.has(o)).map((o) => ({
+    value: o,
+    label: ownerLabel(o),
+  }));
+
+  // The side panel's company picker: every owner is assignable (you can move a
+  // template to a brand you don't normally see), plus the detected fallback for
+  // the selected template so the "Auto" option can name it.
+  const ownerPickOptions = OWNER_ORDER.map((o) => ({ value: o, label: ownerLabel(o) }));
+  const selectedOverride = selected ? (ownerOverrides.get(selected.name) ?? null) : null;
+  const selectedDetectedLabel = selected ? ownerLabel(templateOwner(selected)) : "";
 
   // The rows the server filters above (pills, mapping, `q`) let through; the
   // table sorts them and narrows them further by its header funnels.
@@ -137,6 +181,8 @@ export default async function TemplatesPage({ searchParams }: { searchParams: Pr
     const reason = r.rejectedReason && r.rejectedReason !== "NONE" ? r.rejectedReason : null;
     const varsLabel =
       slots.length === 0 ? L.noVars : missing > 0 ? L.needsMapping : L.allMappedShort;
+    const owner = ownerOf.get(r.id) ?? SHARED_OWNER;
+    const companyLabel = ownerLabel(owner);
     return {
       id: r.id,
       href,
@@ -161,8 +207,20 @@ export default async function TemplatesPage({ searchParams }: { searchParams: Pr
               <Link href={href} scroll={false} className="block truncate text-[13.5px] font-semibold text-[var(--color-ink)]">
                 {r.name}
               </Link>
-              <span className="block truncate text-[11.5px] text-[var(--color-faint)]">
-                {r.language} · {r.header || r.body}
+              <span className="flex min-w-0 items-center gap-1.5 text-[11.5px] text-[var(--color-faint)]">
+                {/* Whose template this is — every company shares one WhatsApp account. */}
+                <span
+                  className={`shrink-0 whitespace-nowrap rounded-full border px-1.5 text-[10.5px] leading-[16px] font-medium ${
+                    owner === SHARED_OWNER
+                      ? "border-dashed border-[var(--color-border)]"
+                      : "border-[var(--color-border)] bg-[var(--color-surface-2)] text-[var(--color-ink)]"
+                  }`}
+                >
+                  {companyLabel}
+                </span>
+                <span className="truncate">
+                  {r.language} · {r.header || r.body}
+                </span>
               </span>
             </span>
           </span>
@@ -308,6 +366,7 @@ export default async function TemplatesPage({ searchParams }: { searchParams: Pr
             <>
               <div className="flex flex-wrap items-center gap-2">
                 <form className="flex h-[36px] w-full max-w-[280px] items-center gap-2 rounded-[8px] border border-[var(--color-border)] bg-[var(--color-surface)] px-3 focus-within:border-[var(--color-accent)]">
+                  {fCo && <input type="hidden" name="company" value={fCo} />}
                   {fCat && <input type="hidden" name="category" value={fCat} />}
                   {fLang && <input type="hidden" name="language" value={fLang} />}
                   {fStatus && <input type="hidden" name="status" value={fStatus} />}
@@ -320,9 +379,10 @@ export default async function TemplatesPage({ searchParams }: { searchParams: Pr
                     className="w-full bg-transparent text-[13px] outline-none placeholder:text-[var(--color-faint)]"
                   />
                 </form>
-                <FilterPill param="category" label={L.category} anyLabel={L.any} options={opts(all.map((x) => x.category))} />
-                <FilterPill param="language" label={L.language} anyLabel={L.any} options={opts(all.map((x) => x.language))} />
-                <FilterPill param="status" label={L.status} anyLabel={L.any} options={opts(all.map((x) => x.status), L.statusL)} />
+                <FilterPill param="company" label={L.company} anyLabel={L.any} options={ownerOpts} />
+                <FilterPill param="category" label={L.category} anyLabel={L.any} options={opts(scoped.map((x) => x.category))} />
+                <FilterPill param="language" label={L.language} anyLabel={L.any} options={opts(scoped.map((x) => x.language))} />
+                <FilterPill param="status" label={L.status} anyLabel={L.any} options={opts(scoped.map((x) => x.status), L.statusL)} />
               </div>
 
               <DataTable
@@ -331,7 +391,7 @@ export default async function TemplatesPage({ searchParams }: { searchParams: Pr
                 search={false}
                 minWidth={760}
                 stateKey="templates"
-                empty={all.length ? L.noMatch : L.none}
+                empty={scoped.length ? L.noMatch : L.none}
               />
             </>
           )}
@@ -347,12 +407,50 @@ export default async function TemplatesPage({ searchParams }: { searchParams: Pr
               stats={selStats?.ok ? selStats.counts : null}
               statsOff={!!selStats && !selStats.ok}
               days={days}
+              ownerOverride={selectedOverride}
+              ownerOptions={ownerPickOptions}
+              detectedLabel={selectedDetectedLabel}
             />
           ) : (
             <p className="p-5 text-[12.5px] text-[var(--color-faint)]">{L.selectHint}</p>
           )}
         </aside>
       </div>
+
+      {/* Below xl the side panel is hidden, so a tapped template would show
+          nothing. Give it a slide-over there instead — same panel, over a
+          backdrop that closes it (back to the list, selection cleared). */}
+      {selected && explicitSelect && (
+        <div className="fixed inset-0 z-50 flex xl:hidden" role="dialog" aria-modal="true">
+          <Link href={keep({})} aria-label={L.close} className="flex-1 bg-black/40" />
+          <div className="flex w-full max-w-[380px] flex-col bg-[var(--color-surface)] shadow-[var(--shadow-primary)]">
+            <div className="flex items-center justify-between gap-2 border-b border-[var(--color-border)] px-4 py-2.5">
+              <span className="min-w-0 truncate text-[13px] font-semibold text-[var(--color-ink)]">{selected.name}</span>
+              <Link
+                href={keep({})}
+                aria-label={L.close}
+                className="grid h-7 w-7 shrink-0 place-items-center rounded-full text-[16px] leading-none text-[var(--color-muted)] hover:bg-[var(--color-surface-2)]"
+              >
+                ✕
+              </Link>
+            </div>
+            <div className="min-h-0 flex-1 overflow-y-auto">
+              <TemplateSide
+                key={`drawer-${selected.id}-${JSON.stringify(selected.bindings)}`}
+                template={selected}
+                fields={fields}
+                sample={sample}
+                stats={selStats?.ok ? selStats.counts : null}
+                statsOff={!!selStats && !selStats.ok}
+                days={days}
+                ownerOverride={selectedOverride}
+                ownerOptions={ownerPickOptions}
+                detectedLabel={selectedDetectedLabel}
+              />
+            </div>
+          </div>
+        </div>
+      )}
     </PageChrome>
   );
 }

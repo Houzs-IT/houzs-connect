@@ -88,6 +88,7 @@ export async function ContactPanel({
   email,
   starred,
   firstReply,
+  proposedDates,
   payments,
   automation,
 }: {
@@ -109,6 +110,9 @@ export async function ContactPanel({
   email: string;
   starred: boolean;
   firstReply: FirstReply;
+  /** Delivery dates proposed in this conversation — the ERP's arranged date and
+   *  each date the customer submitted through the form, oldest first. */
+  proposedDates: { date: string; at: string; source: "erp" | "customer" }[];
   payments: Payment[];
   automation: AutomationProgress | null;
 }) {
@@ -368,6 +372,23 @@ export async function ContactPanel({
         </section>
       ) : (
         <p className="text-[12.5px] text-[var(--color-faint)]">{s.noOrder}</p>
+      )}
+
+      {proposedDates.length > 0 && (
+        <section>
+          <div className={`mb-2 ${EYEBROW}`}>{s.proposedDates}</div>
+          <ul className="flex flex-col divide-y divide-[var(--color-border-subtle)] rounded-[10px] border border-[var(--color-border)]">
+            {proposedDates.map((d, i) => (
+              <li key={`${d.date}-${i}`} className="flex items-baseline justify-between gap-2 px-3 py-2">
+                <span className="text-[13px] font-medium text-[var(--color-ink)]">{d.date}</span>
+                <span className="shrink-0 text-[11px] text-[var(--color-faint)]">
+                  {d.source === "erp" ? s.dateArranged : s.dateCustomer}
+                  {d.at ? ` · ${d.at}` : ""}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </section>
       )}
 
       <section>

@@ -9,8 +9,9 @@
 // except where it counts. Showing all four at once invites doing them out of
 // order and then wondering why nothing sends.
 
+import { numberLogoSrc } from "@/lib/whatsapp/number-logo";
 import Link from "next/link";
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import { formatPhone } from "@/lib/format";
 import { ActionConfirm } from "@/components/ActionConfirm";
 import { SearchableSelect } from "@/components/SearchableSelect";
@@ -27,6 +28,7 @@ import {
 import type { CodeMethod, WabaNumber } from "@/lib/whatsapp/numbers";
 import { nextStep } from "@/lib/whatsapp/numbers";
 import { ProfileEditor } from "./ProfileEditor";
+import { loadBusinessProfile } from "./profile-actions";
 
 const inputCls =
   "rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] px-3 py-2 text-[13px] text-[var(--color-ink)] outline-none focus:border-[var(--color-accent)]";
@@ -630,6 +632,18 @@ function NumberCard({
   // something to do; the business profile is open on a working number.
   const [settingsOpen, setSettingsOpen] = useState(!assignment);
   const [profileOpen, setProfileOpen] = useState(connected);
+  // The number's real WhatsApp photo, the same one the profile section shows.
+  const [photo, setPhoto] = useState<string | null>(null);
+  useEffect(() => {
+    if (!connected) return;
+    let live = true;
+    loadBusinessProfile(n.id)
+      .then((r) => live && setPhoto(r.profile?.profilePictureUrl ?? null))
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, [connected, n.id]);
   const chip = (on: boolean, danger = false) =>
     `flex h-[34px] items-center gap-1.5 rounded-[8px] border px-3 text-[12.5px] font-semibold transition-colors ${
       danger
@@ -660,9 +674,20 @@ function NumberCard({
       }`}
     >
       <div className="flex flex-wrap items-center gap-3 border-b border-[var(--color-border-subtle)] px-4 py-3.5">
-        <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full border border-[var(--color-border)] bg-white">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/logo-hc-mark.png" alt="" className="h-5 w-5 object-contain" />
+        <span className="grid h-10 w-10 shrink-0 place-items-center overflow-hidden rounded-full border border-[var(--color-border)] bg-white">
+          {/* The number's own WhatsApp photo first; without one, Houzs's mark only for Houzs, else the company initial. */}
+          {photo ? (
+            // Meta-hosted and short-lived; shown, never stored.
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={photo} alt="" className="h-full w-full object-cover" />
+          ) : numberLogoSrc(assignment?.companySlug) ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={numberLogoSrc(assignment?.companySlug)!} alt="" className="h-5 w-5 object-contain" />
+          ) : (
+            <span className="text-[15px] font-semibold text-[var(--color-muted)]">
+              {assignment?.companyName.trim().charAt(0).toUpperCase() || "?"}
+            </span>
+          )}
         </span>
         <div className="min-w-0 flex-1 leading-tight">
           <div className="text-[16px] font-semibold tabular-nums text-[var(--color-ink)]">{formatPhone(n.displayPhoneNumber)}</div>
@@ -772,7 +797,7 @@ function NumberCard({
         )}
 
       {/* Meta only keeps a business profile for a registered number. */}
-      {connected && profileOpen && <ProfileEditor n={n} />}
+      {connected && profileOpen && <ProfileEditor n={n} onPhoto={setPhoto} />}
 
       {settingsOpen && (
         <>

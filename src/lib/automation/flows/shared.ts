@@ -174,29 +174,35 @@ export function buildTemplateSendGraph(opts: {
   templateName: string;
   params: string[];
   message: string;
+  /** When set, add an add_tag node after the send (before end) that tags the
+   *  contact — e.g. "service" so the inbox can filter service-case customers. */
+  tag?: string;
 }): FlowGraph {
-  return {
-    nodes: [
-      { id: "trigger", type: "trigger", data: {}, x: 40, y: 120 },
-      {
-        id: "send",
-        type: "send_template",
-        x: 240,
-        y: 120,
-        data: {
-          templateName: opts.templateName,
-          templateLang: "en",
-          templateParams: opts.params,
-          message: opts.message,
-        },
+  const nodes: FlowNode[] = [
+    { id: "trigger", type: "trigger", data: {}, x: 40, y: 120 },
+    {
+      id: "send",
+      type: "send_template",
+      x: 240,
+      y: 120,
+      data: {
+        templateName: opts.templateName,
+        templateLang: "en",
+        templateParams: opts.params,
+        message: opts.message,
       },
-      { id: "done", type: "end", x: 460, y: 120, data: {} },
-    ],
-    edges: [
-      { from: "trigger", to: "send" },
-      { from: "send", to: "done" },
-    ],
-  };
+    },
+  ];
+  const edges: FlowEdge[] = [{ from: "trigger", to: "send" }];
+  if (opts.tag) {
+    nodes.push({ id: "tag", type: "add_tag", x: 460, y: 120, data: { tag: opts.tag } });
+    nodes.push({ id: "done", type: "end", x: 680, y: 120, data: {} });
+    edges.push({ from: "send", to: "tag" }, { from: "tag", to: "done" });
+  } else {
+    nodes.push({ id: "done", type: "end", x: 460, y: 120, data: {} });
+    edges.push({ from: "send", to: "done" });
+  }
+  return { nodes, edges };
 }
 
 /**

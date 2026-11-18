@@ -110,13 +110,21 @@ const THEMES: Partial<Record<BrandKey, Record<string, string>>> = {
   },
 };
 
-/** The CSS that puts a company's colours on the page; empty for Houzs's own. */
+/**
+ * The CSS that puts a company's colours on the page; empty for Houzs's own. The
+ * rail (deep ink in both themes) takes them always; accents and brand tints only
+ * in light mode, so dark mode keeps its own readable shades (globals.css
+ * :root[data-theme="dark"]).
+ */
 export function themeCss(key: BrandKey): string {
   const vars = THEMES[key];
   if (!vars) return "";
-  return `:root{${Object.entries(vars)
-    .map(([k, v]) => `${k}:${v}`)
-    .join(";")}}`;
+  const decl = (rail: boolean) =>
+    Object.entries(vars)
+      .filter(([k]) => k.includes("rail") === rail)
+      .map(([k, v]) => `${k}:${v}`)
+      .join(";");
+  return `:root{${decl(true)}}:root:not([data-theme="dark"]){${decl(false)}}`;
 }
 
 /**

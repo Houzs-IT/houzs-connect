@@ -12,7 +12,9 @@ export async function GET(req: Request) {
 
 // What the browser may set on a new request. Who is reporting (name, email,
 // phone, department) and the browser are filled in here, never taken from it.
-const FIELDS = ["title", "description", "type", "priority", "occurred_at", "page_url"] as const;
+// `module` is the part of Connect it is about (lib/it-support/module.ts); the
+// hub's Reports group requests by it.
+const FIELDS = ["title", "description", "type", "priority", "occurred_at", "page_url", "module"] as const;
 
 /** POST /api/it-support/tickets (multipart: the fields above + `files`) — report a problem. */
 export async function POST(req: Request) {

@@ -1,8 +1,8 @@
 import Link from "next/link";
 import type { Dict } from "@/lib/i18n/dict";
 
-/** Message history | Webhook deliveries — the centred tabs in the Logs top bar. */
-export function LogsTabs({ L, on }: { L: Dict["logs"]; on: "messages" | "webhooks" }) {
+/** Message history | Activity | Webhook deliveries — the centred Logs tabs. */
+export function LogsTabs({ L, on }: { L: Dict["logs"]; on: "messages" | "activity" | "webhooks" }) {
   const tab = (href: string, label: string, active: boolean) => (
     <Link
       href={href}
@@ -18,6 +18,7 @@ export function LogsTabs({ L, on }: { L: Dict["logs"]; on: "messages" | "webhook
   return (
     <div className="flex rounded-[10px] border border-[var(--color-border)] bg-[var(--color-surface-2)] p-1">
       {tab("/logs", L.messageHistory, on === "messages")}
+      {tab("/logs/activity", L.activity, on === "activity")}
       {tab("/logs/webhooks", L.webhooks, on === "webhooks")}
     </div>
   );

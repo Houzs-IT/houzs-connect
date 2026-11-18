@@ -4,6 +4,7 @@ import { receiptAiState } from "@/lib/receipt-vision";
 import { Skel } from "@/components/skeleton";
 import { Donut } from "./charts";
 import {
+  agentsReport,
   connectedAccounts,
   conversationIdsFor,
   conversationStatus,
@@ -68,6 +69,8 @@ export async function ReplyRateCards({ companyId, w, s }: Props) {
   const pts = rate != null && prevRate != null ? rate - prevRate : null;
   const firstDelta =
     cur.avgFirst != null && prev.avgFirst != null ? cur.avgFirst - prev.avgFirst : null;
+  const replyDelta =
+    cur.avgReply != null && prev.avgReply != null ? cur.avgReply - prev.avgReply : null;
 
   return (
     <>
@@ -97,10 +100,30 @@ export async function ReplyRateCards({ companyId, w, s }: Props) {
         }
         foot={
           <>
-            {fmt(s.measured, { n: cur.answered })}
+            {fmt(s.measured, { n: cur.answeredHuman })}
+            {cur.businessHours ? ` · ${s.bizHours}` : ""}
             {firstDelta != null && Math.round(firstDelta) !== 0 && (
               // Faster is better: a negative change is the good one.
               <DeltaChip text={humanDuration(Math.abs(firstDelta))} up={firstDelta > 0} />
+            )}
+          </>
+        }
+      />
+      <MetricCard
+        label={s.avgReplyAll}
+        value={cur.avgReply == null ? "—" : humanDuration(cur.avgReply)}
+        tint="#e7f2e4"
+        glyph={
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+          </svg>
+        }
+        foot={
+          <>
+            {s.avgReplyHint}
+            {replyDelta != null && Math.round(replyDelta) !== 0 && (
+              // Faster is better: a negative change is the good one.
+              <DeltaChip text={humanDuration(Math.abs(replyDelta))} up={replyDelta > 0} />
             )}
           </>
         }
@@ -112,7 +135,7 @@ export async function ReplyRateCards({ companyId, w, s }: Props) {
 export function ReplyRateSkeleton() {
   return (
     <>
-      {[0, 1].map((i) => (
+      {[0, 1, 2].map((i) => (
         <section key={i} className="rounded-[18px] border border-[var(--color-border-subtle)] bg-[var(--color-surface)] px-6 py-6">
           <Skel className="h-[12px] w-24" />
           <Skel className="mt-4 h-[44px] w-40" />
@@ -383,6 +406,78 @@ export async function TeamCard({ companyId, w, s }: Props) {
           ))}
         </ul>
       )}
+    </Card>
+  );
+}
+
+/**
+ * Per-agent reply-time table on the Overview — the full agentsReport (first-reply
+ * avg, all-reply avg, assigned/open/closed, on-time vs the 30-min SLA), the same
+ * data the Support tab shows, surfaced here so the headline reply numbers break
+ * down by agent without leaving Overview. Full width; scrolls horizontally on a
+ * phone. Reply-time attribution is by the conversation's current assignee
+ * (assignedAgentId), matching the rest of the dashboard.
+ */
+export async function AgentsCard({ companyId, w, s }: Props) {
+  const [report, people] = await Promise.all([agentsReport(companyId, w), companyPresence(companyId)]);
+  const online = new Set(people.filter((p) => p.online).map((p) => p.id));
+  const photos = await photoSrcs(report.list.map((a) => a.id));
+  const cols = "grid-cols-[minmax(0,2.2fr)_repeat(3,minmax(0,0.8fr))_repeat(2,minmax(0,1.2fr))]";
+  return (
+    <Card pad="p-0" className="overflow-hidden">
+      <div className="flex flex-wrap items-center gap-4 px-[22px] py-[18px]">
+        <span className={`flex-1 ${EYEBROW}`}>{s.agentsReport}</span>
+        <Link href="?tab=support" className="text-[12px] font-semibold text-[var(--color-accent)] hover:underline">
+          {s.seeAll} ↗
+        </Link>
+      </div>
+      <div className="overflow-x-auto">
+        <div className="min-w-[760px]">
+          <div className={`grid ${cols} gap-2 border-y border-[var(--color-border-subtle)] bg-[var(--color-surface-2)] px-[22px] py-2.5 text-[11px] font-semibold uppercase tracking-[0.06em] text-[var(--color-faint)]`}>
+            <span>{s.colName}</span>
+            <span>{s.colAssigned}</span>
+            <span>{s.colOpen}</span>
+            <span>{s.colClosed}</span>
+            <span>{s.colFirst}</span>
+            <span>{s.colAvg}</span>
+          </div>
+          {report.list.length === 0 ? (
+            <div className="px-[22px] py-4">
+              <Empty>{s.noData}</Empty>
+            </div>
+          ) : (
+            report.list.slice(0, 8).map((a) => (
+              <div
+                key={a.id}
+                className={`grid ${cols} items-center gap-2 border-b border-[var(--color-border-subtle)] px-[22px] py-[11px] text-[12.5px] tabular-nums hover:bg-[var(--color-surface-2)]`}
+              >
+                <span className="flex min-w-0 items-center gap-2.5">
+                  <span className="relative">
+                    <Avatar name={a.name} photo={photos.get(a.id)} />
+                    <span
+                      className={`absolute -bottom-px -right-px h-[9px] w-[9px] rounded-full border-2 border-white ${
+                        online.has(a.id) ? "bg-[var(--color-success)]" : "bg-[var(--color-border-strong)]"
+                      }`}
+                    />
+                  </span>
+                  <span className="min-w-0">
+                    <span className="block truncate font-medium text-[var(--color-ink)]">{a.name}</span>
+                    {a.dept && <span className="block text-[11px] text-[var(--color-faint)]">{a.dept}</span>}
+                  </span>
+                </span>
+                <span>{a.assigned}</span>
+                <span className="font-semibold">{a.open}</span>
+                <span>{a.closed}</span>
+                <span className="flex items-center gap-1.5">
+                  {a.first == null ? "—" : humanDuration(a.first)}
+                  {a.onTime != null && <Badge tone={a.onTime ? "success" : "danger"}>{a.onTime ? s.onTime : s.late}</Badge>}
+                </span>
+                <span>{a.avg == null ? "—" : humanDuration(a.avg)}</span>
+              </div>
+            ))
+          )}
+        </div>
+      </div>
     </Card>
   );
 }

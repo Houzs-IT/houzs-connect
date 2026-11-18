@@ -116,6 +116,7 @@ const subscribeNarrow = (fn: () => void) => {
 export function Composer({
   conversationId,
   windowExpiresAt = null,
+  templateVars = [],
 }: {
   conversationId: string;
   /**
@@ -128,6 +129,13 @@ export function Composer({
    * template path stays available.
    */
   windowExpiresAt?: string | null;
+  /**
+   * Variables the operator can drop into a template parameter instead of typing
+   * the value by hand — the built-ins (Full Name, Phone…) and this contact's
+   * populated fields, each already resolved to this contact's value so the
+   * preview shows exactly what the customer will read.
+   */
+  templateVars?: { label: string; value: string }[];
 }) {
   // Re-checked on a timer rather than read once: a composer sitting open across
   // the deadline must stop inviting a reply the moment it passes.
@@ -656,17 +664,43 @@ export function Composer({
               {chosen.placeholders > 0 && (
                 <div className="mb-2 space-y-1.5">
                   {params.map((v, i) => (
-                    <input
-                      key={i}
-                      value={v}
-                      onChange={(e) => {
-                        const next = [...params];
-                        next[i] = e.target.value;
-                        setParams(next);
-                      }}
-                      placeholder={`Value for {{${i + 1}}}`}
-                      className="w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] px-2.5 py-1.5 text-[12.5px] outline-none focus:border-[var(--color-accent)]"
-                    />
+                    <div key={i} className="flex gap-1.5">
+                      <input
+                        value={v}
+                        onChange={(e) => {
+                          const next = [...params];
+                          next[i] = e.target.value;
+                          setParams(next);
+                        }}
+                        placeholder={`Value for {{${i + 1}}}`}
+                        className="min-w-0 flex-1 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] px-2.5 py-1.5 text-[12.5px] outline-none focus:border-[var(--color-accent)]"
+                      />
+                      {templateVars.length > 0 && (
+                        <select
+                          // Picking a variable fills this parameter with the
+                          // contact's resolved value; resets to the prompt so it
+                          // can be used again. Free text still works alongside it.
+                          value=""
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            if (!val) return;
+                            const next = [...params];
+                            next[i] = val;
+                            setParams(next);
+                          }}
+                          aria-label={`Insert variable for {{${i + 1}}}`}
+                          title="Insert a contact variable"
+                          className="w-[116px] shrink-0 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] px-1.5 text-[12px] text-[var(--color-muted)] outline-none focus:border-[var(--color-accent)]"
+                        >
+                          <option value="">+ Variable</option>
+                          {templateVars.map((tv) => (
+                            <option key={tv.label} value={tv.value}>
+                              {tv.label}
+                            </option>
+                          ))}
+                        </select>
+                      )}
+                    </div>
                   ))}
                 </div>
               )}

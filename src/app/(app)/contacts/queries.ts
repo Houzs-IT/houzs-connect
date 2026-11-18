@@ -59,7 +59,9 @@ export function contactsWhere(companyId: string, f: ContactFilters): SQL | undef
       or(
         ilike(contact.name, like),
         ilike(contact.email, like),
-        sql`${attr("ref_1")} ilike ${like}`,
+        // Any order reference: the SO number (ref_1, ref_2, …) and the separate
+        // "Ref No." (ref_no_1, …) — every attribute whose key starts with `ref`.
+        sql`exists (select 1 from jsonb_each_text(${contact.attributes}) kv where kv.key like 'ref%' and kv.value ilike ${like})`,
         f.digits ? sql`${contact.phone} like ${`%${f.digits}%`}` : undefined
       )
     );

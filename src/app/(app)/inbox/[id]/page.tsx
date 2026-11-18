@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { and, asc, desc, eq } from "drizzle-orm";
 import { getDb } from "@/db/client";
 import { contactField, conversation, department, dripCampaign, member, note, payment, tag } from "@/db/schema";
@@ -19,11 +19,14 @@ import { PersonAvatar } from "@/components/PersonAvatar";
 import { ensureConversationMemberTable } from "@/db/ensure-conversation-member";
 import { ensureDripTables } from "@/db/ensure-drip";
 import { isLive } from "@/lib/whatsapp/cloud-api";
-import { attrs, displayName, initials, stamp, tint, waIdentifier } from "@/lib/format";
+import { attrs, displayName, formatPhone, initials, stamp, tint, waIdentifier } from "@/lib/format";
+import { getInboxScopes, scopeChannels, scopeLabel } from "@/lib/inbox-group";
 import { bypassReadCache } from "@/db/fresh";
 import { getDict } from "@/lib/i18n/server";
 import { SLA_MINUTES } from "@/lib/sla";
 import { getAutomationEvents, getAutomationProgress } from "@/lib/automation/progress";
+import { DELIVERY_DATE_HISTORY_KEY, parseDeliveryDateHistory } from "@/lib/automation/delivery-history";
+import { BUILT_IN_FIELDS, interpolate } from "@/lib/automation/vars";
 
 /**
  * How much of the thread is rendered. WhatsApp threads with a customer run for
@@ -57,6 +60,9 @@ export default async function ConversationPage({
     where: and(eq(conversation.id, id), bypassReadCache()),
     with: {
       contact: true,
+      // The number the customer wrote to — shown in the header so an agent in a
+      // unified inbox knows which line (and which brand) they are answering on.
+      channel: { columns: { phone: true, companyId: true } },
       assignedAgent: true,
       assignedDepartment: true,
       tagLinks: { with: { tag: true } },
@@ -70,7 +76,26 @@ export default async function ConversationPage({
   // A conversation id is guessable and the list page's visibility filter does
   // not protect this route — without the company check any signed-in member
   // could read another tenant's thread, phone number and order attributes.
-  if (!convo || convo.contact.companyId !== me.companyId) notFound();
+  if (!convo) notFound();
+  const scopes = await getInboxScopes();
+  if (convo.contact.companyId !== me.companyId) {
+    // Another company of this person's unified inbox (a bookmarked link, or the
+    // rail of the company they just left): switch into it, then come back here.
+    // Anything else is another tenant's thread and stays a 404.
+    if (scopes.some((sc) => sc.companyId === convo.contact.companyId)) redirect(`/inbox/open/${convo.id}`);
+    notFound();
+  }
+  // "HOUZS · 011-6155 6133" when the inbox spans companies; just the number when
+  // the company alone has several (8822 delivery, 6133 after-sales service); nothing when
+  // there is only one number and the chip would say nothing new.
+  const ownScope = scopes.find((sc) => sc.companyId === convo.channel.companyId);
+  const lineCount = (await scopeChannels(db, scopes)).length;
+  const origin =
+    scopes.length > 1 && ownScope
+      ? `${scopeLabel(ownScope)} · ${formatPhone(convo.channel.phone)}`
+      : lineCount > 1
+        ? formatPhone(convo.channel.phone)
+        : null;
 
   // Live drips the agent can enrol this contact into, for the conversation menu.
   await ensureDripTables(db).catch(() => {});
@@ -117,6 +142,53 @@ export default async function ConversationPage({
 
   const name = displayName(convo.contact.name, convo.contact.phone);
   const contactAttrs = attrs(convo.contact.attributes);
+
+  // Every delivery/service date proposed in this conversation, for the panel.
+  // Prefer the durable record on the contact (delivery_date_history, written by
+  // the ERP webhook + the engine's setContactAttr); fall back to deriving it from
+  // the ERP's current date + the form-submission messages for conversations that
+  // predate the record.
+  const storedDates = parseDeliveryDateHistory(
+    (convo.contact.attributes as Record<string, unknown> | null)?.[DELIVERY_DATE_HISTORY_KEY]
+  );
+  let proposedDates: { date: string; at: string; source: "erp" | "customer" }[];
+  if (storedDates.length > 0) {
+    proposedDates = storedDates.map((e) => ({
+      date: e.date,
+      at: e.at ? stamp(new Date(e.at)) : "",
+      source: e.source === "erp" ? "erp" : "customer",
+    }));
+  } else {
+    proposedDates = [];
+    if (contactAttrs.delivery_date_1) {
+      proposedDates.push({ date: contactAttrs.delivery_date_1, at: "", source: "erp" });
+    }
+    for (const m of messages) {
+      const p = m.interactivePayload as { kind?: string; fields?: Record<string, string> } | null;
+      if (p?.kind === "flow_reply" && p.fields) {
+        const d = p.fields.amended_delivery_date ?? p.fields.delivery_date;
+        if (d) proposedDates.push({ date: d, at: stamp(m.createdAt), source: "customer" });
+      }
+    }
+  }
+
+  // Variables the composer offers when sending a template manually: the built-ins
+  // plus this contact's populated fields, each resolved to this contact's value —
+  // so the operator picks a variable (as in the template editor) and the live
+  // preview shows what the customer will read. interpolate() returns "{key}" for
+  // an empty field, so those are dropped and only variables that resolve are kept.
+  const varCtx = {
+    full_name: name,
+    phone: convo.contact.phone,
+    email: convo.contact.email,
+    source: convo.contact.source,
+    sourceId: convo.contact.sourceId,
+    sourceUrl: convo.contact.sourceUrl,
+    attributes: convo.contact.attributes,
+  };
+  const templateVars = [...BUILT_IN_FIELDS, ...fields.map((f) => ({ key: f.key, name: f.name }))]
+    .map((f) => ({ label: f.name, value: interpolate(`{${f.key}}`, varCtx) }))
+    .filter((tv) => tv.value.trim() !== "" && !tv.value.startsWith("{"));
 
   // Who sent each outbound message. `members` is already the company's full
   // roster for the assignment picker, so attribution costs no extra query — and
@@ -234,6 +306,11 @@ export default async function ConversationPage({
               <span className={`hidden whitespace-nowrap rounded-full px-[7px] py-px text-[10px] font-semibold uppercase tracking-[0.06em] md:inline ${statusTone[convo.status] ?? statusTone.CLOSED}`}>
                 {s.statusLabel[convo.status] ?? convo.status}
               </span>
+              {origin && (
+                <span className="shrink-0 whitespace-nowrap rounded-[4px] border border-[var(--color-border)] bg-[var(--color-surface-2)] px-1.5 py-px text-[10px] font-semibold tabular-nums text-[var(--color-muted)]">
+                  {origin}
+                </span>
+              )}
             </div>
             {/* Phone: the window as a line of text. Desktop: number · order. */}
             <div className="md:hidden">
@@ -329,6 +406,7 @@ export default async function ConversationPage({
           // impure function during render and freeze the answer at render time,
           // so a composer left open past the deadline would still invite a reply.
           windowExpiresAt={convo.windowExpiresAt?.toISOString() ?? null}
+          templateVars={templateVars}
         />
       </div>
 
@@ -353,6 +431,7 @@ export default async function ConversationPage({
         email={convo.contact.email ?? ""}
         starred={contactAttrs.starred === "1"}
         firstReply={firstReply}
+        proposedDates={proposedDates}
         payments={payments.map((p) => ({
           id: p.id,
           amount: p.amount,

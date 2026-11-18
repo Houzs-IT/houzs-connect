@@ -16,7 +16,9 @@ import {
 import { attrs } from "@/lib/format";
 import { SLA_MINUTES } from "@/lib/sla";
 import { companyPresence } from "@/lib/presence";
-import type { PeriodWindow } from "./util";
+import { ensureConversationClosedAt } from "@/db/ensure-conversation-closed-at";
+import { loadBusinessHours, elapsedSeconds, hasBusinessHours } from "@/lib/business-hours";
+import { klDayKey, type PeriodWindow } from "./util";
 
 /*
   Dashboard reads. Every query is scoped to ONE company: `conversation` and
@@ -38,30 +40,40 @@ const REPLY_SAMPLE = 20_000;
 export type ReplyStats = {
   /** Conversations where the customer wrote in the window. */
   asked: number;
-  /** …of which got a reply after it. */
+  /** …of which got ANY reply after it (bot or human) — the reply rate. */
   answered: number;
-  /** Average first-reply wait in seconds (answered only). */
+  /** …of which got a HUMAN reply — the sample behind the first-reply average. */
+  answeredHuman: number;
+  /** Average first-reply wait in seconds, to the first HUMAN reply. */
   avgFirst: number | null;
-  /** Average of every customer-message → next-reply gap, in seconds. */
+  /** Average of every customer-message → next-human-reply gap, in seconds. */
   avgReply: number | null;
-  /** Per assigned agent: first-reply and all-reply averages. */
+  /** Per assigned agent: first-reply and all-reply averages (human-only). */
   byAgent: Map<string, { first: number[]; all: number[] }>;
+  /** True when timing was measured in business-open hours (company has hours set). */
+  businessHours: boolean;
 };
 
 /**
  * Measured, not estimated: walks the window's messages in order. For each
- * conversation the first inbound starts the clock and the first outbound after
- * it stops it — automation replies count, as the customer saw them. Every later
- * "customer wrote → we answered" gap feeds the overall reply average.
+ * conversation the first inbound starts the clock and the first HUMAN outbound
+ * (isBot=false) stops it — bot / automation / flow sends (the category menu, an
+ * auto-reply) do NOT, so the figure is time-to-a-person, not time-to-a-machine.
+ * Every "customer wrote → next human reply" gap feeds the overall reply average.
+ * The reply RATE (asked / answered) still counts ANY reply, bot or human.
+ * Timing is in business-open seconds when the company has hours configured
+ * (reused from the auto-reply settings), else plain wall-clock.
  */
 export async function replyStats(companyId: string, from: Date, to?: Date): Promise<ReplyStats> {
   const db = getDb();
+  const cfg = await loadBusinessHours(db, companyId);
   const rows = await db
     .select({
       conversationId: message.conversationId,
       direction: message.direction,
       createdAt: message.createdAt,
       agentId: conversation.assignedAgentId,
+      isBot: message.isBot,
     })
     .from(message)
     .innerJoin(conversation, eq(conversation.id, message.conversationId))
@@ -77,32 +89,43 @@ export async function replyStats(companyId: string, from: Date, to?: Date): Prom
     .limit(REPLY_SAMPLE);
 
   const firstIn = new Map<string, number>();
-  const answeredFirst = new Set<string>();
-  const pendingIn = new Map<string, number>();
+  const answeredAny = new Set<string>(); // got ANY reply — the reply RATE (bot or human)
+  const answeredHuman = new Set<string>(); // got a HUMAN first reply — the FRT timing
+  const pendingIn = new Map<string, number>(); // earliest inbound awaiting a HUMAN reply
   const firsts: number[] = [];
   const alls: number[] = [];
   const byAgent = new Map<string, { first: number[]; all: number[] }>();
-  const agentOf = new Map<string, string | null>();
 
   for (const r of rows) {
     const at = r.createdAt.getTime();
-    agentOf.set(r.conversationId, r.agentId);
     if (r.direction === "IN") {
       if (!firstIn.has(r.conversationId)) firstIn.set(r.conversationId, at);
       if (!pendingIn.has(r.conversationId)) pendingIn.set(r.conversationId, at);
       continue;
     }
+    // Reply RATE counts ANY outbound after the customer wrote (bot or human) — so
+    // a bot-handled chat still counts as answered. Timing below is human-only.
+    if (firstIn.has(r.conversationId)) answeredAny.add(r.conversationId);
+    // TIMING is human-only: a bot / automation / flow send (the category menu, an
+    // auto-reply, a template push) must NOT stop the clock. The menu fires on
+    // NEW_INCOMING_MESSAGE and goes out within seconds, so counting it would
+    // collapse AVG FIRST REPLY to ~0 (time-to-menu, not time-to-human). `isBot`
+    // is the reliable signal — since HC-0232 a bot send can also carry a
+    // sentByMemberId (the staff who pressed Send in the ERP), so that is NOT it.
+    if (r.isBot) continue;
     const waiting = pendingIn.get(r.conversationId);
     if (waiting == null) continue;
     pendingIn.delete(r.conversationId);
-    const gap = (at - waiting) / 1000;
+    // elapsedSeconds = business-open seconds when the company has hours set, else
+    // wall-clock — so an overnight gap counts only the in-hours part.
+    const gap = elapsedSeconds(waiting, at, cfg);
     alls.push(gap);
     const agent = r.agentId;
     const bucket = agent ? (byAgent.get(agent) ?? { first: [], all: [] }) : null;
     bucket?.all.push(gap);
-    if (!answeredFirst.has(r.conversationId)) {
-      answeredFirst.add(r.conversationId);
-      const f = (at - (firstIn.get(r.conversationId) ?? at)) / 1000;
+    if (!answeredHuman.has(r.conversationId)) {
+      answeredHuman.add(r.conversationId);
+      const f = elapsedSeconds(firstIn.get(r.conversationId) ?? at, at, cfg);
       firsts.push(f);
       bucket?.first.push(f);
     }
@@ -112,11 +135,106 @@ export async function replyStats(companyId: string, from: Date, to?: Date): Prom
   const avg = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null);
   return {
     asked: firstIn.size,
-    answered: answeredFirst.size,
+    answered: answeredAny.size,
+    answeredHuman: answeredHuman.size,
     avgFirst: avg(firsts),
     avgReply: avg(alls),
     byAgent,
+    businessHours: hasBusinessHours(cfg),
   };
+}
+
+/**
+ * Average first-reply time per Malaysian calendar day, aligned to w.buckets, in
+ * MINUTES (0 for a day with no measured first reply). Same measurement as
+ * replyStats (first inbound -> first outbound, automations included), bucketed
+ * by the day of the customer's first message so the dashboard can show the
+ * trend, not just one headline number. Its own message walk so replyStats — the
+ * load-bearing FRT query — stays untouched.
+ */
+export async function firstReplySeries(companyId: string, w: PeriodWindow): Promise<number[]> {
+  const db = getDb();
+  const cfg = await loadBusinessHours(db, companyId);
+  const rows = await db
+    .select({
+      conversationId: message.conversationId,
+      direction: message.direction,
+      createdAt: message.createdAt,
+      isBot: message.isBot,
+    })
+    .from(message)
+    .innerJoin(conversation, eq(conversation.id, message.conversationId))
+    .innerJoin(contact, eq(contact.id, conversation.contactId))
+    .where(and(eq(contact.companyId, companyId), gte(message.createdAt, w.since)))
+    .orderBy(asc(message.createdAt))
+    .limit(REPLY_SAMPLE);
+
+  const firstIn = new Map<string, number>();
+  const answered = new Set<string>();
+  const byDay = new Map<string, number[]>(); // KL day -> first-reply seconds
+  for (const r of rows) {
+    const at = r.createdAt.getTime();
+    if (r.direction === "IN") {
+      if (!firstIn.has(r.conversationId)) firstIn.set(r.conversationId, at);
+      continue;
+    }
+    // Human-only + same clock as the headline FRT: skip bot/menu/auto-reply sends.
+    if (r.isBot) continue;
+    const start = firstIn.get(r.conversationId);
+    if (start == null || answered.has(r.conversationId)) continue;
+    answered.add(r.conversationId);
+    const day = klDayKey(new Date(start)); // bucket by the customer's first message day
+    (byDay.get(day) ?? byDay.set(day, []).get(day)!).push(elapsedSeconds(start, at, cfg));
+  }
+
+  return w.buckets.map((b) => {
+    const xs = byDay.get(b.key);
+    if (!xs || xs.length === 0) return 0;
+    return xs.reduce((a, s) => a + s, 0) / xs.length / 60; // seconds -> minutes
+  });
+}
+
+/**
+ * Resolution time (conversation created -> closed) over closures in the window.
+ * Reads `closed_at` (ensure-conversation-closed-at.ts; raw SQL, not in the
+ * Drizzle schema). Forward-only: conversations closed before that column existed
+ * have NULL closed_at and are not counted, so a bulk import of already-"CLOSED"
+ * rows (which carry no closed_at) never pollutes this average.
+ */
+export async function resolutionStats(
+  companyId: string,
+  from: Date,
+  to?: Date
+): Promise<{ avgSec: number | null; n: number }> {
+  const db = getDb();
+  await ensureConversationClosedAt(db);
+  const cfg = await loadBusinessHours(db, companyId);
+  // Fetch the window's closures and average in JS so the business-hours clock
+  // (which SQL can't express) applies — same clock as first-reply / avg-reply.
+  // Capped like the reply walk; closures per window are bounded by throughput.
+  // Bind the window bounds as ISO strings, NOT Date objects: this is a raw
+  // db.execute, so Drizzle sends each param straight to postgres.js with no
+  // column-type encoder. Under our pooler config (prepare:false, fetch_types:
+  // false — see db/pg.ts) postgres.js has no serializer for a bare Date and
+  // throws "Received an instance of Date" at Bind, 500-ing the whole Support
+  // tab. A string is cast to timestamptz server-side. (db.select() paths are
+  // unaffected — they encode the Date via the column type before postgres.js.)
+  const rows = (await db.execute(sql`
+    select c.created_at, c.closed_at
+    from connect.conversation c
+    join connect.contact ct on ct.id = c.contact_id
+    where ct.company_id = ${companyId}
+      and c.closed_at is not null
+      and c.closed_at >= ${from.toISOString()}
+      ${to ? sql`and c.closed_at < ${to.toISOString()}` : sql``}
+    limit ${REPLY_SAMPLE}
+  `)) as unknown as { created_at: string | Date; closed_at: string | Date }[];
+  if (!rows.length) return { avgSec: null, n: 0 };
+  let sum = 0;
+  for (const r of rows) {
+    sum += elapsedSeconds(new Date(r.created_at).getTime(), new Date(r.closed_at).getTime(), cfg);
+  }
+  return { avgSec: sum / rows.length, n: rows.length };
 }
 
 // ─────────────────────────── Message volume ───────────────────────────
@@ -174,6 +292,8 @@ export async function messagesByAgent(companyId: string, w: PeriodWindow) {
         eq(contact.companyId, companyId),
         eq(message.direction, "OUT"),
         isNotNull(message.sentByMemberId),
+        // ERP-started bot sends now carry the staff member who pressed Send (HC-0232).
+        eq(message.isBot, false),
         gte(message.createdAt, w.since)
       )
     )

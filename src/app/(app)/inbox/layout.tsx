@@ -10,6 +10,7 @@ import { LiveRefresh } from "@/components/inbox/LiveRefresh";
 import { InboxPanes, InboxTopbarSlot } from "@/components/inbox/InboxPanes";
 import { ServiceMenu } from "@/components/inbox/ServiceMenu";
 import { SecondaryMenuSkeleton } from "@/components/shell/SecondaryMenu";
+import { getInboxScopes, scopeChannels } from "@/lib/inbox-group";
 import { fetchConversations } from "./actions";
 
 /**
@@ -29,12 +30,15 @@ async function ConversationRail() {
   const me = await getCurrentMember();
   if (!me) return null;
 
-  const { items, hasMore } = await fetchConversations(0);
+  const [{ items, hasMore }, scopes] = await Promise.all([fetchConversations(0), getInboxScopes()]);
+  const channels = await scopeChannels(getDb(), scopes);
   return (
     <ConversationList
       items={items}
       hasMore={hasMore}
-      me={{ id: me.id, departmentId: me.departmentId }}
+      // In a unified inbox the person is a different member row in each company.
+      me={{ id: me.id, departmentId: me.departmentId, memberIds: scopes.map((s) => s.memberId) }}
+      showOrigin={channels.length > 1}
     />
   );
 }

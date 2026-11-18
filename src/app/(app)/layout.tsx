@@ -4,11 +4,12 @@ import { and, eq, gt, ne } from "drizzle-orm";
 import { Sidebar } from "@/components/Sidebar";
 import { MobileTabBar } from "@/components/shell/MobileTabBar";
 import { ShellProvider } from "@/components/shell/ShellProvider";
+import { CommandPalette } from "@/components/shell/CommandPalette";
 import { PresencePing } from "@/components/shell/PresencePing";
 import { NotifyPoller } from "@/components/shell/NotifyPoller";
 import { UpdateBanner } from "@/components/shell/UpdateBanner";
 import { touchPresence } from "@/lib/presence";
-import { getLang, getMenuCollapsed, getPanelCollapsed } from "@/lib/i18n/server";
+import { getDensityCompact, getLang, getMenuCollapsed, getPanelCollapsed, getTheme } from "@/lib/i18n/server";
 import { getDb } from "@/db/client";
 import { ensureContactColumns } from "@/db/ensure";
 import { ensureChannelColumns } from "@/db/ensure-channel";
@@ -93,10 +94,11 @@ export default async function AppLayout({
   // as the first child of the row; every page renders its own column
   // (PageChrome), so the two simply sit side by side.
   return (
-    <ShellProvider lang={await getLang()} menuCollapsed={await getMenuCollapsed()} panelCollapsed={await getPanelCollapsed()}>
+    <ShellProvider lang={await getLang()} menuCollapsed={await getMenuCollapsed()} panelCollapsed={await getPanelCollapsed()} densityCompact={await getDensityCompact()} theme={await getTheme()}>
       <PresencePing />
       <NotifyPoller />
       <UpdateBanner />
+      <CommandPalette />
       {/* On :root, so dialogs and menus rendered outside the shell take the colours too. */}
       {theme ? <style>{theme}</style> : null}
       <div data-shell className="flex h-dvh flex-col overflow-hidden">
@@ -106,7 +108,7 @@ export default async function AppLayout({
           </div>
         ) : null}
         <div className="flex min-h-0 flex-1">
-          <Sidebar unread={unread} internalUnread={internalUnread} live={live} itSupport={itSupport} logo={brand.mark} modules={modules} me={{ name: me.name, photo: await getMyPhotoSrc() }} />
+          <Sidebar unread={unread} internalUnread={internalUnread} live={live} itSupport={itSupport} logo={brand.key === "houzs" ? null : brand.mark} modules={modules} me={{ name: me.name, photo: await getMyPhotoSrc() }} />
           <div className="flex min-w-0 flex-1">{children}</div>
         </div>
         <MobileTabBar unread={unread} internalUnread={internalUnread} itSupport={itSupport} modules={modules} />

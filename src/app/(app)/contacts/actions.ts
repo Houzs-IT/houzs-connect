@@ -18,6 +18,8 @@ import {
   tag,
 } from "@/db/schema";
 import { getCurrentMember } from "@/lib/current-member";
+import { logActivity } from "@/lib/activity";
+import { saveMemberContactCols } from "@/lib/member-prefs";
 import { attrs } from "@/lib/format";
 import {
   CHUNK_ROWS,
@@ -32,7 +34,18 @@ import {
 async function ctx() {
   const me = await getCurrentMember();
   if (!me) return null;
-  return { db: getDb(), companyId: me.companyId };
+  return { db: getDb(), companyId: me.companyId, actorId: me.id };
+}
+
+/**
+ * Persist this person's contacts columns so the choice follows them across
+ * devices. The cookie already made it stick on this browser; this is the
+ * cross-device half. Best-effort inside saveMemberContactCols.
+ */
+export async function setContactCols(cols: string[]): Promise<void> {
+  const me = await getCurrentMember();
+  if (!me?.email) return;
+  await saveMemberContactCols(getDb(), me.email, cols.join(","));
 }
 
 /**
@@ -121,6 +134,13 @@ export async function setContactBlocked(formData: FormData): Promise<void> {
     .update(contact)
     .set({ blocked })
     .where(and(eq(contact.id, id), eq(contact.companyId, c.companyId)));
+  await logActivity(c.db, {
+    companyId: c.companyId,
+    actorMemberId: c.actorId,
+    entityType: "contact",
+    entityId: id,
+    action: blocked ? "blocked" : "unblocked",
+  });
   revalidatePath("/contacts");
   revalidatePath("/inbox");
 }
@@ -294,6 +314,15 @@ export async function mergeContacts(formData: FormData) {
       .where(eq(contact.id, keepId));
 
     await tx.delete(contact).where(eq(contact.id, mergeId));
+  });
+
+  await logActivity(c.db, {
+    companyId: c.companyId,
+    actorMemberId: c.actorId,
+    entityType: "contact",
+    entityId: keepId,
+    action: "merged",
+    detail: { into: keep.name ?? keep.phone, from: loser.name ?? loser.phone },
   });
 
   revalidatePath("/contacts");

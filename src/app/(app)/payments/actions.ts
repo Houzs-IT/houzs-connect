@@ -6,6 +6,7 @@ import { getDb } from "@/db/client";
 import { contact, conversation, payment } from "@/db/schema";
 import { getCurrentMember } from "@/lib/current-member";
 import { can } from "@/lib/permissions";
+import { onPaymentVerified } from "@/lib/sync/erp-payments";
 
 /** The member, and the payment must belong to a contact in their company. */
 async function authorize(paymentId: string) {
@@ -53,6 +54,8 @@ export async function reviewPayment(
   const auth = await authorize(paymentId);
   if (!auth) return { ok: false };
   await auth.db.update(payment).set({ status }).where(eq(payment.id, paymentId));
+  // Confirming is the point a payment flows into the ERP (onto its Sales Order).
+  if (status === "VERIFIED") await onPaymentVerified(auth.db, paymentId);
   revalidatePath("/payments");
   return { ok: true };
 }
@@ -114,6 +117,10 @@ export async function recordPayment(input: {
       status: input.confirmed ? "VERIFIED" : "PENDING",
     })
     .returning({ id: payment.id });
+  // A hand-recorded payment confirmed on the spot also pushes to the ERP. It has
+  // no slip image, so the push records a BLOCKED state ("no slip") for a human —
+  // visible in the Payments module rather than silently dropped.
+  if (input.confirmed) await onPaymentVerified(db, row.id);
   revalidatePath("/payments");
   return { ok: true, id: row.id };
 }

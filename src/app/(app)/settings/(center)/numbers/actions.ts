@@ -43,6 +43,8 @@ async function requireAdmin(): Promise<boolean> {
 export interface NumberAssignment {
   companyId: string;
   companyName: string;
+  /** The company's slug, used to pick its logo. */
+  companySlug: string | null;
   /** Reached only through the default sender setting, not written on a channel. */
   legacy: boolean;
 }
@@ -106,12 +108,13 @@ export async function fetchNumbers(): Promise<NumbersView> {
   const [routing, companies] = await Promise.all([
     loadRoutingTable(db),
     db.query.company.findMany({
-      columns: { id: true, name: true },
+      columns: { id: true, name: true, slug: true },
       where: and(eq(company.active, true), bypassReadCache()),
       orderBy: asc(company.createdAt),
     }),
   ]);
   const nameOf = new Map(companies.map((c) => [c.id, c.name]));
+  const slugOf = new Map(companies.map((c) => [c.id, c.slug]));
   const assignments: Record<string, NumberAssignment | null> = {};
   for (const n of res.data) {
     const hit = channelForNumber(routing, n.id);
@@ -119,6 +122,7 @@ export async function fetchNumbers(): Promise<NumbersView> {
       ? {
           companyId: hit.channel.companyId,
           companyName: nameOf.get(hit.channel.companyId) ?? "an inactive company",
+          companySlug: slugOf.get(hit.channel.companyId) ?? null,
           legacy: hit.legacy,
         }
       : null;
@@ -328,12 +332,13 @@ async function demoNumbers(): Promise<NumbersView> {
   const [channels, companies] = await Promise.all([
     db.query.channel.findMany({ orderBy: [desc(channel.isDefault), asc(channel.displayName)] }),
     db.query.company.findMany({
-      columns: { id: true, name: true },
+      columns: { id: true, name: true, slug: true },
       where: eq(company.active, true),
       orderBy: asc(company.createdAt),
     }),
   ]);
   const nameOf = new Map(companies.map((c) => [c.id, c.name]));
+  const slugOf = new Map(companies.map((c) => [c.id, c.slug]));
   const numbers = channels.map((ch, i) => ({
     id: ch.phoneNumberId ?? ch.id,
     displayPhoneNumber: ch.phone,
@@ -350,7 +355,7 @@ async function demoNumbers(): Promise<NumbersView> {
   }));
   const assignments: Record<string, NumberAssignment | null> = {};
   channels.forEach((ch, i) => {
-    assignments[numbers[i].id] = { companyId: ch.companyId, companyName: nameOf.get(ch.companyId) ?? "", legacy: false };
+    assignments[numbers[i].id] = { companyId: ch.companyId, companyName: nameOf.get(ch.companyId) ?? "", companySlug: slugOf.get(ch.companyId) ?? null, legacy: false };
   });
   return { configured: true, permitted: true, numbers, activeId: numbers[0]?.id ?? null, managerUrl: null, assignments, companies };
 }

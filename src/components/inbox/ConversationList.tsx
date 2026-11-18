@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ComponentProps } from "react";
 import Link from "next/link";
 import { useParams, useSearchParams } from "next/navigation";
 import { initials, listTime, previewText, shortDay, tint } from "@/lib/format";
@@ -10,7 +10,7 @@ import { IconClose, IconSearch } from "@/components/icons";
 import { SearchableSelect } from "@/components/SearchableSelect";
 import { useShell } from "@/components/shell/ShellProvider";
 import { SlaTimer, isOverdue } from "./SlaTimer";
-import { fetchConversations } from "@/app/(app)/inbox/actions";
+import { fetchConversations, searchConversations } from "@/app/(app)/inbox/actions";
 import { NewConversation } from "./NewConversation";
 
 export type ConversationListItem = {
@@ -39,6 +39,14 @@ export type ConversationListItem = {
   lastType: string | null;
   /** A flow is waiting on this customer (automation_run `waiting`). */
   botActive: boolean;
+  /** Unified inbox: the thread's company as a short label (HOUZS, 2990) — set
+   *  only when the rail spans several companies (lib/inbox-group.ts). */
+  companyLabel?: string | null;
+  /** The thread belongs to another company than the signed-in one; opening it
+   *  goes through /inbox/open/[id], which switches company first. */
+  foreign?: boolean;
+  /** The business number the customer wrote to (8822 delivery, 6133 after-sales service…). */
+  channelPhone?: string | null;
 };
 
 type Tab = "all" | "unread" | "dept" | "sla";
@@ -63,6 +71,76 @@ const NO_FILTERS: Filters = {
   deptId: "",
   msgType: "",
 };
+
+/**
+ * Saved views — named filter presets, remembered per browser in localStorage.
+ * They are applied on demand (from the filter popover), never on load, so there
+ * is no SSR/hydration concern: the server snapshot is simply an empty list and
+ * the browser fills it in after mount.
+ */
+export type SavedView = { name: string; filters: Filters };
+const VIEWS_KEY = "hc_inbox_views";
+const NO_VIEWS: SavedView[] = [];
+const viewListeners = new Set<() => void>();
+let viewsCache: { raw: string | null; views: SavedView[] } = { raw: null, views: NO_VIEWS };
+function readViews(): SavedView[] {
+  let raw: string | null = null;
+  try {
+    raw = localStorage.getItem(VIEWS_KEY);
+  } catch {}
+  if (raw === viewsCache.raw) return viewsCache.views;
+  let views: SavedView[] = NO_VIEWS;
+  try {
+    const parsed = JSON.parse(raw ?? "[]") as unknown;
+    if (Array.isArray(parsed)) {
+      views = parsed.filter(
+        (v): v is SavedView => !!v && typeof v.name === "string" && !!v.filters
+      );
+    }
+  } catch {}
+  viewsCache = { raw, views };
+  return views;
+}
+function writeViews(views: SavedView[]) {
+  try {
+    localStorage.setItem(VIEWS_KEY, JSON.stringify(views));
+  } catch {}
+  viewListeners.forEach((l) => l());
+}
+function subscribeViews(l: () => void) {
+  viewListeners.add(l);
+  return () => viewListeners.delete(l);
+}
+
+/**
+ * The search text, held in sessionStorage and read through useSyncExternalStore
+ * — like the saved views above, and for the same reason there is no hydration
+ * concern: the server snapshot is an empty string and the browser fills it in.
+ * Opening a thread can tear the rail down (the phone master–detail swaps panes),
+ * and a half-typed search should survive that. Going through the store rather
+ * than restoring into useState in an effect also avoids a set-state-in-effect.
+ * It is sessionStorage, not localStorage, so a new tab starts clean.
+ */
+const SEARCH_KEY = "hc_inbox_search";
+const searchListeners = new Set<() => void>();
+function readSearch(): string {
+  try {
+    return sessionStorage.getItem(SEARCH_KEY) ?? "";
+  } catch {
+    return "";
+  }
+}
+function writeSearch(v: string) {
+  try {
+    sessionStorage.setItem(SEARCH_KEY, v);
+  } catch {}
+  searchListeners.forEach((l) => l());
+}
+function subscribeSearch(l: () => void) {
+  searchListeners.add(l);
+  return () => searchListeners.delete(l);
+}
+
 function activeFilterCount(f: Filters) {
   return (
     Number(f.starred) +
@@ -74,31 +152,6 @@ function activeFilterCount(f: Filters) {
     Number(!!f.deptId) +
     Number(!!f.msgType)
   );
-}
-
-/**
- * Row density is a per-browser preference. Read through useSyncExternalStore so
- * the server (which has no localStorage) renders "expanded" and the browser
- * switches on hydration without a set-state-in-effect.
- */
-const DENSITY_KEY = "hc_inbox_density";
-const densityListeners = new Set<() => void>();
-function readCompact(): boolean {
-  try {
-    return localStorage.getItem(DENSITY_KEY) === "compact";
-  } catch {
-    return false;
-  }
-}
-function writeCompact(v: boolean) {
-  try {
-    localStorage.setItem(DENSITY_KEY, v ? "compact" : "expanded");
-  } catch {}
-  densityListeners.forEach((l) => l());
-}
-function subscribeDensity(l: () => void) {
-  densityListeners.add(l);
-  return () => densityListeners.delete(l);
 }
 
 /** Ticks every 30s — enough to move a row into "SLA overdue" on time. */
@@ -115,12 +168,19 @@ export function ConversationList({
   items,
   hasMore,
   me,
+  showOrigin = false,
 }: {
   items: ConversationListItem[];
   hasMore: boolean;
-  me: { id: string; departmentId: string | null };
+  /** `memberIds`: the person's member row in every company the rail spans — in a
+   *  unified inbox they are a different member in each, and "Mine" / "Watching"
+   *  must count all of them. Defaults to just `id`. */
+  me: { id: string; departmentId: string | null; memberIds?: string[] };
+  /** The rail spans more than one number, so each row says which it came in on. */
+  showOrigin?: boolean;
 }) {
-  const { t } = useShell();
+  const { t, compact, setCompact } = useShell();
+  const myIds = useMemo(() => new Set(me.memberIds?.length ? me.memberIds : [me.id]), [me.id, me.memberIds]);
   const s = t.service;
   const params = useParams();
   const search = useSearchParams();
@@ -132,10 +192,22 @@ export function ConversationList({
 
   const [tab, setTab] = useState<Tab>("all");
   const [dept, setDept] = useState<string | null>(null);
-  const [q, setQ] = useState("");
-  const compact = useSyncExternalStore(subscribeDensity, readCompact, () => false);
+  const q = useSyncExternalStore(subscribeSearch, readSearch, () => "");
+  const setQ = writeSearch;
   const [filters, setFilters] = useState<Filters>(NO_FILTERS);
   const [filterOpen, setFilterOpen] = useState(false);
+  const savedViews = useSyncExternalStore(subscribeViews, readViews, () => NO_VIEWS);
+  const applyView = (v: SavedView) => {
+    setFilters(v.filters);
+    setFilterOpen(false);
+  };
+  const saveView = (name: string) => {
+    const n = name.trim();
+    if (!n) return;
+    // Replacing a same-named view updates it rather than duplicating.
+    writeViews([...savedViews.filter((v) => v.name !== n), { name: n, filters }]);
+  };
+  const deleteView = (name: string) => writeViews(savedViews.filter((v) => v.name !== name));
   const [older, setOlder] = useState<ConversationListItem[]>([]);
   const [loading, setLoading] = useState(false);
   // null until the rail has paged once, so the server's answer stands until
@@ -144,7 +216,57 @@ export function ConversationList({
   const [moreAfterPaging, setMoreAfterPaging] = useState<boolean | null>(null);
   const now = useNow();
 
-  const toggleDensity = () => writeCompact(!compact);
+  // ── Whole-book search (server) ──────────────────────────────────────────
+  // The rail only holds a page, so filtering it cannot find an older/closed
+  // conversation by order number. A non-empty query hits the server, which
+  // searches EVERY conversation by name / phone / SO number / message text.
+  const [serverHits, setServerHits] = useState<ConversationListItem[] | null>(null);
+  const [searching, setSearching] = useState(false);
+  const [searchFailed, setSearchFailed] = useState(false);
+  const [truncated, setTruncated] = useState(false);
+  const searchSeq = useRef(0);
+  const runSearch = useCallback(async (term: string) => {
+    const seq = ++searchSeq.current;
+    setSearching(true);
+    setSearchFailed(false);
+    try {
+      const res = await searchConversations(term);
+      if (seq !== searchSeq.current) return; // a newer keystroke already won
+      setServerHits(res.items);
+      setTruncated(res.truncated);
+    } catch {
+      if (seq !== searchSeq.current) return;
+      setServerHits([]);
+      setTruncated(false);
+      setSearchFailed(true); // "search failed" ≠ "no results" — say so honestly
+    } finally {
+      if (seq === searchSeq.current) setSearching(false);
+    }
+  }, []);
+  useEffect(() => {
+    const term = q.trim();
+    // All state changes run in the timer callback (never synchronously in the
+    // effect body): typing clears to the live list after a tick, a real term
+    // searches after a debounce.
+    const id = setTimeout(
+      () => {
+        if (!term) {
+          searchSeq.current++; // drop any in-flight result
+          setServerHits(null);
+          setSearching(false);
+          setSearchFailed(false);
+          setTruncated(false);
+        } else {
+          void runSearch(term);
+        }
+      },
+      term ? 250 : 0
+    );
+    return () => clearTimeout(id);
+  }, [q, runSearch]);
+  const searchActive = q.trim().length > 0;
+
+  const toggleDensity = () => setCompact(!compact);
 
   const all = useMemo(() => {
     // Offset paging can hand back a row twice: a conversation moves up the
@@ -180,21 +302,18 @@ export function ConversationList({
     if (statusParam) {
       if (c.status !== statusParam) return false;
     } else if (c.status === "CLOSED") return false;
-    if (view === "mine" && c.agentId !== me.id) return false;
+    if (view === "mine" && !(c.agentId && myIds.has(c.agentId))) return false;
     if (view === "unassigned" && c.agentId) return false;
-    if (view === "watching" && !c.watcherIds.includes(me.id)) return false;
+    if (view === "watching" && !c.watcherIds.some((id) => myIds.has(id))) return false;
     if (tagParam && !c.tags.some((tg) => tg.id === tagParam)) return false;
     return true;
   });
 
-  // ── Search + popover filters ──────────────────────────────────────────
-  const needle = q.trim().toLowerCase();
-  const refined = scoped.filter((c) => {
-    if (
-      needle &&
-      !`${c.name} ${c.phone} ${c.orderRef ?? ""}`.toLowerCase().includes(needle)
-    )
-      return false;
+  // ── Popover filters (starred / unread / bot / tag / agent / dept / type) ──
+  // Text search is no longer a client filter over loaded rows — it is the
+  // server search above. These are the funnel-popover filters, applied to the
+  // loaded rail and (when a search is active) to the server hits.
+  const passesFilters = (c: ConversationListItem) => {
     if (filters.starred && !c.starred) return false;
     if (filters.unread && c.unread === 0) return false;
     if (filters.bot && !c.botActive) return false;
@@ -204,7 +323,8 @@ export function ConversationList({
     if (filters.deptId && c.departmentId !== filters.deptId) return false;
     if (filters.msgType && c.lastType !== filters.msgType) return false;
     return true;
-  });
+  };
+  const refined = scoped.filter(passesFilters);
 
   // Departments present in what is loaded, for the tab's chip bar.
   const depts = useMemo(() => {
@@ -230,6 +350,9 @@ export function ConversationList({
 
   let rows =
     tab === "sla" ? overdue : tab === "dept" ? inDept : tab === "unread" ? unread : refined;
+  // A search replaces the tab list with whole-book hits (still subject to the
+  // funnel filters), so order-number lookups find threads that were never paged.
+  if (searchActive) rows = (serverHits ?? []).filter(passesFilters);
   if (filters.sort === "oldest") {
     rows = [...rows].sort((a, b) => (a.lastAt ?? "").localeCompare(b.lastAt ?? ""));
   } else if (filters.sort === "wait") {
@@ -261,6 +384,17 @@ export function ConversationList({
             placeholder={s.search}
             className="w-full min-w-0 bg-transparent text-[13px] text-[var(--color-ink)] outline-none placeholder:text-[var(--color-faint)]"
           />
+          {q && (
+            <button
+              type="button"
+              onClick={() => setQ("")}
+              title={s.clearSearch}
+              aria-label={s.clearSearch}
+              className="grid h-[18px] w-[18px] shrink-0 place-items-center rounded-full text-[var(--color-faint)] transition-colors hover:bg-[var(--color-surface)] hover:text-[var(--color-ink)]"
+            >
+              <IconClose width={13} height={13} />
+            </button>
+          )}
         </label>
         <button
           type="button"
@@ -304,10 +438,15 @@ export function ConversationList({
           onChange={setFilters}
           matching={refined.length}
           onClose={() => setFilterOpen(false)}
+          views={savedViews}
+          onApplyView={applyView}
+          onSaveView={saveView}
+          onDeleteView={deleteView}
         />
       )}
 
-      {/* All · Unread · Dept · Overdue */}
+      {/* All · Unread · Dept · Overdue — hidden while searching the whole book */}
+      {!searchActive && (
       <div className="flex items-end gap-3 border-b border-[var(--color-border)] px-3 pt-2.5">
         {tabs.map((tb) => {
           const on = tab === tb.key;
@@ -338,8 +477,9 @@ export function ConversationList({
           );
         })}
       </div>
+      )}
 
-      {tab === "dept" && depts.length > 0 && (
+      {!searchActive && tab === "dept" && depts.length > 0 && (
         <div className="flex flex-wrap gap-1.5 border-b border-[var(--color-border-subtle)] px-3 py-2">
           {depts.map((d) => {
             const on = d.id === deptPick;
@@ -362,14 +502,39 @@ export function ConversationList({
       )}
 
       <div className="scroll-thin min-h-0 flex-1 overflow-y-auto">
-        {rows.length === 0 && (
+        {/* Search states — "failed" is told apart from "no results" so an agent
+            on weak wifi does not read a connectivity error as "doesn't exist". */}
+        {searchActive && searchFailed && (
+          <div className="p-6 text-center">
+            <p className="text-[13px] text-[var(--color-danger)]">{s.searchFailed}</p>
+            <button
+              type="button"
+              onClick={() => runSearch(q.trim())}
+              className="mt-2 text-[12.5px] font-semibold text-[var(--color-accent)] hover:underline"
+            >
+              {s.retry}
+            </button>
+          </div>
+        )}
+        {searchActive && !searchFailed && searching && rows.length === 0 && (
+          <p className="p-6 text-center text-[13px] text-[var(--color-faint)]">{s.searching}</p>
+        )}
+        {searchActive && !searchFailed && !searching && rows.length === 0 && (
+          <p className="p-6 text-center text-[13px] text-[var(--color-faint)]">
+            {fmt(s.noMatches, { q: q.trim() })}
+          </p>
+        )}
+        {!searchActive && rows.length === 0 && (
           <p className="p-6 text-center text-[13px] text-[var(--color-faint)]">{s.noConvos}</p>
         )}
         {rows.map((c) => (
           <Row
             key={c.id}
             c={c}
-            href={`/inbox/${c.id}${qs ? `?${qs}` : ""}`}
+            // Another company's thread opens through the switch route, which
+            // re-signs the session into that company and lands on the thread.
+            href={`/inbox/${c.foreign ? "open/" : ""}${c.id}${qs ? `?${qs}` : ""}`}
+            origin={showOrigin ? originLabel(c) : null}
             active={c.id === activeId}
             overdue={isOverdue(c.waitingSince, now)}
             compact={compact}
@@ -378,7 +543,13 @@ export function ConversationList({
           />
         ))}
 
-        {canLoadMore && (
+        {searchActive && truncated && rows.length > 0 && (
+          <p className="px-3 py-2.5 text-center text-[10.5px] text-[var(--color-faint)]">
+            {fmt(s.searchTruncated, { n: rows.length })}
+          </p>
+        )}
+
+        {!searchActive && canLoadMore && (
           <div className="p-3">
             <button
               type="button"
@@ -388,9 +559,9 @@ export function ConversationList({
             >
               {loading ? s.loading : s.loadMore}
             </button>
-            {/* The filters above only ever see what is loaded, so an empty
-                result is not proof the conversation does not exist. */}
-            {(needle || nFilters > 0) && (
+            {/* The funnel filters above only see what is loaded; an empty result
+                is not proof. (Text search is whole-book, so it is exempt.) */}
+            {nFilters > 0 && (
               <p className="mt-1.5 text-center text-[10.5px] text-[var(--color-faint)]">
                 {fmt(s.searchingLoaded, { n: all.length })}
               </p>
@@ -403,9 +574,40 @@ export function ConversationList({
   );
 }
 
+/** "8822", or "2990 · 7788" when the rail spans companies — the last digits are
+ *  how the team already names its numbers. */
+function originLabel(c: ConversationListItem): string | null {
+  const tail = c.channelPhone ? c.channelPhone.replace(/\D/g, "").slice(-4) : "";
+  const parts = [c.companyLabel, tail].filter(Boolean);
+  return parts.length ? parts.join(" · ") : null;
+}
+
+/** The origin chip on a row: which company / number the customer wrote to. */
+function OriginChip({ label, full }: { label: string; full: string | null | undefined }) {
+  return (
+    <span
+      title={full ?? undefined}
+      className="shrink-0 whitespace-nowrap rounded-[4px] border border-[var(--color-border)] bg-[var(--color-surface-2)] px-1 text-[9.5px] font-semibold tabular-nums leading-[15px] text-[var(--color-muted)]"
+    >
+      {label}
+    </span>
+  );
+}
+
+/**
+ * The row's link. Another company's thread is a plain <a>: opening it switches
+ * the session cookie, and a full navigation is what makes the whole shell — top
+ * bar, menu, counts — re-render as that company. A client <Link> would keep the
+ * old company's layout on screen until the next refresh.
+ */
+function RowLink({ hard, ...props }: { hard: boolean } & ComponentProps<"a"> & { href: string }) {
+  return hard ? <a {...props} /> : <Link {...props} />;
+}
+
 function Row({
   c,
   href,
+  origin,
   active,
   overdue,
   compact,
@@ -414,6 +616,7 @@ function Row({
 }: {
   c: ConversationListItem;
   href: string;
+  origin: string | null;
   active: boolean;
   overdue: boolean;
   compact: boolean;
@@ -435,7 +638,8 @@ function Row({
   if (compact) {
     const tag1 = c.tags[0];
     return (
-      <Link
+      <RowLink
+        hard={!!c.foreign}
         href={href}
         aria-current={active ? "page" : undefined}
         className={`relative flex gap-2.5 border-b border-[var(--color-border-subtle)] px-3.5 py-2 transition-colors ${bg}`}
@@ -447,6 +651,7 @@ function Row({
             <span className={`min-w-0 flex-1 truncate text-[13px] text-[var(--color-ink)] ${unread ? "font-bold" : "font-semibold"}`}>
               {c.name}
             </span>
+            {origin && <OriginChip label={origin} full={c.channelPhone} />}
             {unread && <UnreadBadge n={c.unread} small />}
             <span className={`shrink-0 text-[10.5px] ${timeCls}`}>{time}</span>
           </div>
@@ -465,12 +670,13 @@ function Row({
             )}
           </div>
         </div>
-      </Link>
+      </RowLink>
     );
   }
 
   return (
-    <Link
+    <RowLink
+      hard={!!c.foreign}
       href={href}
       aria-current={active ? "page" : undefined}
       className={`relative flex gap-2.5 border-b border-[var(--color-border-subtle)] px-3.5 py-[11px] transition-colors ${bg}`}
@@ -482,6 +688,7 @@ function Row({
           <span className={`min-w-0 flex-1 truncate text-[13.5px] text-[var(--color-ink)] ${unread ? "font-bold" : "font-semibold"}`}>
             {c.name}
           </span>
+          {origin && <OriginChip label={origin} full={c.channelPhone} />}
           <span className={`shrink-0 text-[11px] ${timeCls}`}>{time}</span>
         </div>
         <div className="flex items-center gap-2">
@@ -524,7 +731,7 @@ function Row({
           )}
         </div>
       </div>
-    </Link>
+    </RowLink>
   );
 }
 
@@ -569,15 +776,30 @@ function FilterPopover({
   onChange,
   matching,
   onClose,
+  views,
+  onApplyView,
+  onSaveView,
+  onDeleteView,
 }: {
   items: ConversationListItem[];
   value: Filters;
   onChange: (f: Filters) => void;
   matching: number;
   onClose: () => void;
+  views: SavedView[];
+  onApplyView: (v: SavedView) => void;
+  onSaveView: (name: string) => void;
+  onDeleteView: (name: string) => void;
 }) {
   const { t } = useShell();
   const s = t.service;
+  const [viewName, setViewName] = useState("");
+  const hasActive = activeFilterCount(value) > 0;
+  const commitView = () => {
+    if (!viewName.trim() || !hasActive) return;
+    onSaveView(viewName);
+    setViewName("");
+  };
 
   const opts = useMemo(() => {
     const tags = new Map<string, { id: string; name: string; color: string }>();
@@ -626,6 +848,55 @@ function FilterPopover({
         </div>
 
         <div className="scroll-thin flex min-h-0 flex-1 flex-col gap-3.5 overflow-y-auto px-3.5 py-3">
+          {/* Saved views — named filter presets (per browser). */}
+          <div className="flex flex-col gap-[7px]">
+            <span className="text-[10.5px] font-semibold uppercase tracking-[0.14em] text-[var(--color-faint)]">
+              {s.savedViews}
+            </span>
+            {views.length > 0 && (
+              <div className="flex flex-wrap gap-1.5">
+                {views.map((v) => (
+                  <span
+                    key={v.name}
+                    className="flex items-center gap-1 rounded-full border border-[var(--color-border)] bg-[var(--color-surface-2)] py-1 pl-2.5 pr-1 text-[12px] text-[var(--color-muted)]"
+                  >
+                    <button type="button" onClick={() => onApplyView(v)} className="max-w-[160px] truncate font-medium hover:text-[var(--color-ink)]">
+                      {v.name}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => onDeleteView(v.name)}
+                      aria-label={`${s.deleteView}: ${v.name}`}
+                      className="grid h-4 w-4 shrink-0 place-items-center rounded-full text-[var(--color-faint)] hover:bg-[var(--color-surface-dim)] hover:text-[var(--color-danger)]"
+                    >
+                      <IconClose width={11} height={11} />
+                    </button>
+                  </span>
+                ))}
+              </div>
+            )}
+            <div className="flex gap-1.5">
+              <input
+                value={viewName}
+                onChange={(e) => setViewName(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && commitView()}
+                placeholder={s.saveViewPh}
+                maxLength={30}
+                className={`${selectCls} flex-1`}
+              />
+              <button
+                type="button"
+                onClick={commitView}
+                disabled={!viewName.trim() || !hasActive}
+                title={hasActive ? undefined : s.saveViewHint}
+                className="shrink-0 rounded-[8px] border border-[var(--color-border)] bg-[var(--color-surface)] px-3 text-[12.5px] font-semibold text-[var(--color-ink)] hover:bg-[var(--color-surface-2)] disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                {s.saveView}
+              </button>
+            </div>
+            {!hasActive && <span className="text-[11px] text-[var(--color-faint)]">{s.saveViewHint}</span>}
+          </div>
+
           <div className="flex flex-col gap-[7px]">
             <span className="text-[10.5px] font-semibold uppercase tracking-[0.14em] text-[var(--color-faint)]">
               {s.quickFilters}

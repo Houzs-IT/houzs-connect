@@ -18,6 +18,19 @@ import { createPortal } from "react-dom";
  * a click — always on the client, never during hydration. The `typeof` guard is
  * belt and braces for a caller that renders one open on first paint.
  */
+/**
+ * Opt-in `fit` (set by the Automations list only): on a phone the dialog may not
+ * be wider than the screen, the overlay scrolls when the screen is short (a
+ * keyboard is up), and the footer buttons stack at full width. Without it the
+ * dialogs are exactly what they were.
+ *
+ * Why they overflowed: the overlay was a one-cell grid, and a grid track sizes to
+ * its item, so `w-[460px] max-w-full` could never resolve `max-w-full` against
+ * the screen and the dialog ran off the right edge below 460px.
+ */
+const OVERLAY = "fixed inset-0 z-50 grid place-items-center bg-[color-mix(in_srgb,var(--color-ink)_38%,transparent)] p-6";
+const OVERLAY_FIT = "fixed inset-0 z-50 flex overflow-y-auto bg-[color-mix(in_srgb,var(--color-ink)_38%,transparent)] p-3 sm:p-6";
+
 function Portal({ children }: { children: React.ReactNode }) {
   if (typeof document === "undefined") return null;
   return createPortal(children, document.body);
@@ -43,6 +56,7 @@ export function ActionConfirm({
   busyLabel,
   busy = false,
   danger = false,
+  fit = false,
   onCancel,
   onConfirm,
   children,
@@ -55,6 +69,8 @@ export function ActionConfirm({
   busy?: boolean;
   /** Paint the confirm button as destructive (delete, unpublish). */
   danger?: boolean;
+  /** Responsive dialog for narrow screens (see OVERLAY_FIT). Off by default. */
+  fit?: boolean;
   onCancel: () => void;
   onConfirm: () => void;
   children: React.ReactNode;
@@ -77,17 +93,17 @@ export function ActionConfirm({
     <div
       role="presentation"
       onClick={onCancel}
-      className="fixed inset-0 z-50 grid place-items-center bg-[color-mix(in_srgb,var(--color-ink)_38%,transparent)] p-6"
+      className={fit ? OVERLAY_FIT : OVERLAY}
     >
       <div
         role="dialog"
         aria-modal="true"
         aria-label={title}
         onClick={(e) => e.stopPropagation()}
-        className="flex max-h-[85vh] w-[460px] max-w-full flex-col overflow-hidden rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] shadow-card"
+        className={`${fit ? "m-auto max-h-[85dvh]" : "max-h-[85vh]"} flex w-[460px] max-w-full flex-col overflow-hidden rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] shadow-card`}
       >
         <div className="flex items-start justify-between gap-3 border-b border-[var(--color-border)] px-5 py-4">
-          <h2 className="text-[14px] font-semibold text-[var(--color-ink)]">{title}</h2>
+          <h2 className={`${fit ? "min-w-0 break-words " : ""}text-[14px] font-semibold text-[var(--color-ink)]`}>{title}</h2>
           <button
             type="button"
             onClick={onCancel}
@@ -102,12 +118,12 @@ export function ActionConfirm({
           {children}
         </div>
 
-        <div className="flex justify-end gap-2 border-t border-[var(--color-border)] px-5 py-4">
+        <div className={`flex gap-2 border-t border-[var(--color-border)] px-5 py-4 ${fit ? "flex-col-reverse sm:flex-row sm:justify-end" : "justify-end"}`}>
           <button
             type="button"
             onClick={onCancel}
             disabled={busy}
-            className="rounded-lg border border-[var(--color-border)] px-3 py-1.5 text-[12.5px] text-[var(--color-ink)] hover:bg-[var(--color-surface-2)] disabled:opacity-60"
+            className={`rounded-lg border border-[var(--color-border)] px-3 py-1.5 text-[12.5px] text-[var(--color-ink)] hover:bg-[var(--color-surface-2)] disabled:opacity-60${fit ? " max-sm:min-h-11" : ""}`}
           >
             Cancel
           </button>
@@ -117,8 +133,8 @@ export function ActionConfirm({
             disabled={busy}
             className={
               danger
-                ? "rounded-lg bg-[var(--color-danger)] px-3 py-1.5 text-[12.5px] font-medium text-white disabled:opacity-60"
-                : "rounded-lg bg-[var(--color-accent)] px-3 py-1.5 text-[12.5px] font-medium text-white disabled:opacity-60"
+                ? `rounded-lg bg-[var(--color-danger)] px-3 py-1.5 text-[12.5px] font-medium text-white disabled:opacity-60${fit ? " max-sm:min-h-11" : ""}`
+                : `rounded-lg bg-[var(--color-accent)] px-3 py-1.5 text-[12.5px] font-medium text-white disabled:opacity-60${fit ? " max-sm:min-h-11" : ""}`
             }
           >
             {busy ? (busyLabel ?? `${confirmLabel}…`) : confirmLabel}
@@ -142,6 +158,7 @@ export function ActionDialog({
   onClose,
   children,
   width = "w-[520px]",
+  fit = false,
 }: {
   open: boolean;
   title: string;
@@ -149,6 +166,8 @@ export function ActionDialog({
   onClose: () => void;
   children: React.ReactNode;
   width?: string;
+  /** Responsive dialog for narrow screens (see OVERLAY_FIT). Off by default. */
+  fit?: boolean;
 }) {
   useEffect(() => {
     if (!open) return;
@@ -166,7 +185,7 @@ export function ActionDialog({
       <div
         role="presentation"
         onClick={onClose}
-        className="fixed inset-0 z-50 grid place-items-center bg-[color-mix(in_srgb,var(--color-ink)_38%,transparent)] p-6"
+        className={fit ? OVERLAY_FIT : OVERLAY}
       >
         <div
           role="dialog"
@@ -176,11 +195,11 @@ export function ActionDialog({
           // max-h-[85vh] rather than max-h-full: the dialog should breathe
           // inside the viewport instead of running edge to edge, and the body
           // only scrolls once the content genuinely exceeds that.
-          className={`flex max-h-[85vh] ${width} max-w-full flex-col overflow-hidden rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] shadow-card`}
+          className={`${fit ? "m-auto max-h-[85dvh]" : "max-h-[85vh]"} flex ${width} max-w-full flex-col overflow-hidden rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] shadow-card`}
         >
           <div className="flex items-start justify-between gap-3 border-b border-[var(--color-border)] px-5 py-4">
             <div className="min-w-0">
-              <h2 className="text-[14px] font-semibold text-[var(--color-ink)]">{title}</h2>
+              <h2 className={`${fit ? "break-words " : ""}text-[14px] font-semibold text-[var(--color-ink)]`}>{title}</h2>
               {subtitle && (
                 <p className="mt-1 text-[11.5px] leading-relaxed text-[var(--color-faint)]">
                   {subtitle}

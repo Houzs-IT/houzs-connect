@@ -58,6 +58,11 @@ jobs:
       - name: Org-sync planner smoke test (pure, no DB)
         run: node scripts/smoke-org-sync.mjs
 
+      # The Connect -> ERP payment push: body built for /api/connect/payments and
+      # how the response is read (recorded / needs_manual / retry / block).
+      - name: Payment push core smoke test (pure, no DB)
+        run: node scripts/smoke-payment-push.mjs
+
       # Several WhatsApp numbers on one account: a delivery lands in the company
       # that owns the receiving number, and an unassigned number is refused.
       - name: Multi-number routing smoke test (pure, no DB)
@@ -67,6 +72,11 @@ jobs:
       # or garbage amount must be 0 (resume next tick), never a hang.
       - name: Delay timing smoke test (pure, no DB)
         run: node scripts/smoke-delay.mjs
+
+      # Bill-back: each company pays for its own numbers, and whatever no company
+      # holds is reported, so the bill always reconciles to what Meta charged.
+      - name: WhatsApp spend smoke test (pure, no network)
+        run: node scripts/smoke-spend.mjs
 
       - name: Business profile validation smoke test (pure, no DB)
         run: node scripts/smoke-business-profile.mjs

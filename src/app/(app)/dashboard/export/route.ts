@@ -1,5 +1,5 @@
 import { getCurrentMember } from "@/lib/current-member";
-import { agentsReport, conversationStatus, messageVolume, replyStats, supportStats } from "../queries";
+import { agentsReport, conversationStatus, messageVolume, replyStats, resolutionStats, supportStats } from "../queries";
 import { parsePeriod, periodWindow } from "../util";
 
 /**
@@ -11,12 +11,13 @@ export async function GET(req: Request) {
   const me = await getCurrentMember();
   if (!me) return new Response("Unauthorized", { status: 401 });
   const w = periodWindow(parsePeriod(new URL(req.url).searchParams.get("period") ?? undefined));
-  const [replies, vol, status, support, agents] = await Promise.all([
+  const [replies, vol, status, support, agents, res] = await Promise.all([
     replyStats(me.companyId, w.since),
     messageVolume(me.companyId, w),
     conversationStatus(me.companyId, w),
     supportStats(me.companyId, w),
     agentsReport(me.companyId, w),
+    resolutionStats(me.companyId, w.since),
   ]);
 
   const cell = (v: unknown) => {
@@ -35,6 +36,8 @@ export async function GET(req: Request) {
     row("Reply rate %", replies.asked ? ((replies.answered / replies.asked) * 100).toFixed(1) : ""),
     row("Avg first reply (s)", secs(replies.avgFirst)),
     row("Avg reply (s)", secs(replies.avgReply)),
+    row("Avg resolution (s)", secs(res.avgSec)),
+    row("Conversations resolved (closed this period)", res.n),
     row("Messages inbound", vol.total.inbound),
     row("Messages outbound", vol.total.outbound),
     row("Conversations started", support.cur.total),

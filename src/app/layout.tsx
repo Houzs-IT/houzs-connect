@@ -1,7 +1,8 @@
-import type { Metadata } from "next";
-import { IBM_Plex_Sans, IBM_Plex_Mono } from "next/font/google";
-import { getLang } from "@/lib/i18n/server";
+import type { Metadata, Viewport } from "next";
+import localFont from "next/font/local";
+import { getLang, getTheme } from "@/lib/i18n/server";
 import "./globals.css";
+import "./brand-tokens.css";
 
 /*
   Houzs brand type — one face with the Houzs ERP.
@@ -26,41 +27,72 @@ import "./globals.css";
   synthesising; next/font cannot declare that, so Connect uses `font-bold` (700)
   at the one site that wanted 800 — visually the same result, no fake bold.
 
-  next/font/google downloads at BUILD time and serves from /_next/static/media,
-  so nothing is fetched from a font CDN at runtime. That is what keeps this
-  legal under the Worker's CSP — a remote font URL would be blocked.
+  All faces are self-hosted from ./fonts (Google's latin files, OFL) through
+  next/font/local and served from /_next/static/media, so nothing is fetched
+  from a font CDN at build or run time. next/font/google crashed CI builds
+  ("Cannot read properties of null (reading '1')", PR #195, 14-16 Nov) when
+  Google answered with a font URL it could not parse; a remote font URL at
+  runtime would also be blocked by the Worker's CSP.
 
   CJK (中文) falls through by glyph coverage to whatever "Noto Sans SC" resolves
   to locally, then to the OS face. The ERP self-hosts ~120 Noto SC range chunks;
   Connect deliberately does not bundle them (see globals.css --font-sans).
 */
-const plexSans = IBM_Plex_Sans({
-  subsets: ["latin"],
-  weight: ["400", "500", "600", "700"],
+// Plex Sans: Google's latin variable file (covers 400-700).
+const plexSans = localFont({
+  src: "./fonts/plex-sans-latin.woff2",
+  weight: "400 700",
   variable: "--font-plex-sans",
   display: "swap",
 });
-const plexMono = IBM_Plex_Mono({
-  subsets: ["latin"],
-  weight: ["400", "500", "600"],
+const plexMono = localFont({
+  src: [
+    { path: "./fonts/plex-mono-400-latin.woff2", weight: "400" },
+    { path: "./fonts/plex-mono-500-latin.woff2", weight: "500" },
+    { path: "./fonts/plex-mono-600-latin.woff2", weight: "600" },
+  ],
   variable: "--font-plex-mono",
+  adjustFontFallback: false, // the only choices are Arial / Times metrics; a mono run should fall back to the CSS monospace stack
+  display: "swap",
+});
+// The Houzs Connect wordmark (logo scheme 6a): Archivo 800 "HOUZS" / 600
+// "CONNECT". Google's latin variable file, covers 600-800.
+const archivo = localFont({
+  src: "./fonts/archivo-latin.woff2",
+  weight: "600 800",
+  variable: "--font-archivo",
   display: "swap",
 });
 
 export const metadata: Metadata = {
-  title: "Houzs Century Chat",
+  title: "Houzs Connect",
   description:
     "Houzs Century internal WhatsApp communication & automation platform.",
+  // Logo scheme 6a. Files live in /public; see /site.webmanifest for the PWA
+  // icons. The app icon / favicon does not follow the theme (white-bg mark).
+  icons: {
+    icon: [
+      { url: "/favicon.ico", sizes: "48x48" },
+      { url: "/favicon.svg", type: "image/svg+xml" },
+    ],
+    apple: "/apple-touch-icon.png",
+  },
+  manifest: "/site.webmanifest",
+};
+
+export const viewport: Viewport = {
+  themeColor: "#11140f",
 };
 
 export default async function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
-  const lang = await getLang();
+  const [lang, theme] = await Promise.all([getLang(), getTheme()]);
   return (
     <html
       lang={lang === "zh" ? "zh-CN" : "en"}
-      className={`${plexSans.variable} ${plexMono.variable} h-full antialiased`}
+      data-theme={theme}
+      className={`${plexSans.variable} ${plexMono.variable} ${archivo.variable} h-full antialiased`}
     >
       <body className="min-h-full">{children}</body>
     </html>

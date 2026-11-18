@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, inArray } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import { getDb } from "@/db/client";
 import {
   automation as automationTable,
@@ -15,6 +15,13 @@ import { attrs } from "@/lib/format";
 import { ensureAutomationRunColumns } from "@/db/ensure-automation-run";
 import { removeRepliedEnrollments } from "@/lib/drip";
 import { startRun, resumeRun, supersedeRuns } from "./engine";
+import {
+  DATE_PROPOSAL_AUTOMATIONS,
+  DELIVERY_DATE_HISTORY_KEY,
+  appendDeliveryDate,
+  lastEntryMatches,
+  parseDeliveryDateHistory,
+} from "./delivery-history";
 import { getOrCreateConversation } from "@/lib/whatsapp/transport";
 import { runOcr } from "@/lib/ocr";
 
@@ -33,6 +40,52 @@ async function resolveCompany(companySlug?: string) {
     : await db.query.company.findFirst({ orderBy: asc(companyTable.createdAt) });
 }
 
+/** The ERP company an order belongs to: its `company_code` ("HOUZS" / "2990"),
+ *  else the doc_no prefix of ref_1 ("2990-SO-…" is 2990's). Null = unknown. */
+export function orderCompanyCode(attributes?: Record<string, string>): string | null {
+  const code = attributes?.company_code?.trim().toUpperCase();
+  if (code) return code;
+  if (attributes?.ref_1?.trim().startsWith("2990-")) return "2990";
+  return null;
+}
+
+/**
+ * Which Connect company an ERP send runs under.
+ *
+ * An explicit `companySlug` wins. Without one — the ERP's delivery-planning
+ * blasts send none, from either ERP company — the send goes to the order's own
+ * company (orderCompanyCode) when that company runs the named automation itself
+ * and has it ENABLED: so a 2990 order's "New Delivery Follow-up" runs 2990's
+ * copy, from 2990's own number with its `_2990` templates, while a Houzs order
+ * keeps running Houzs's. Until the order's company has that automation enabled
+ * (and for everything else: contact syncs, service flows, unknown orders) it
+ * falls back to the first company, Houzs Century — exactly the old behaviour,
+ * so each 2990 flow switches over only when its owner publishes it.
+ */
+export async function resolveErpCompany(payload: ErpWebhookPayload) {
+  if (payload.companySlug) return resolveCompany(payload.companySlug);
+  const fallback = await resolveCompany();
+  const code = orderCompanyCode(payload.attributes);
+  if (!code || !payload.automation || !fallback || code === fallback.code) return fallback;
+
+  const db = getDb();
+  const own = await db.query.company.findFirst({
+    where: eq(companyTable.code, code),
+    orderBy: asc(companyTable.createdAt),
+  });
+  if (!own || own.id === fallback.id) return fallback;
+  const runsIt = await db.query.automation.findFirst({
+    where: and(
+      eq(automationTable.companyId, own.id),
+      eq(automationTable.name, payload.automation),
+      eq(automationTable.enabled, true),
+      eq(automationTable.triggerType, "WEBHOOK")
+    ),
+    columns: { id: true },
+  });
+  return runsIt ? own : fallback;
+}
+
 /**
  * ERP → Houzs Connect. Upserts the contact (with order attributes) and fires the
  * matching WEBHOOK-triggered automation, which sends the first WhatsApp message.
@@ -40,7 +93,7 @@ async function resolveCompany(companySlug?: string) {
  */
 export async function handleErpWebhook(payload: ErpWebhookPayload) {
   const db = getDb();
-  const company = await resolveCompany(payload.companySlug);
+  const company = await resolveErpCompany(payload);
   if (!company) return { ok: false, error: "no company" as const };
 
   const phone = payload.phone.replace(/[^\d]/g, "");
@@ -49,7 +102,23 @@ export async function handleErpWebhook(payload: ErpWebhookPayload) {
   const existing = await db.query.contact.findFirst({
     where: and(eq(contactTable.companyId, company.id), eq(contactTable.phone, phone)),
   });
-  const mergedAttrs = { ...attrs(existing?.attributes), ...(payload.attributes ?? {}) };
+  const prevAttrs = attrs(existing?.attributes);
+  const mergedAttrs: Record<string, unknown> = { ...prevAttrs, ...(payload.attributes ?? {}) };
+  // Record an ERP-proposed delivery/service date into the durable history, but
+  // ONLY when this webhook is an opener that actually asks the customer to
+  // confirm/amend a date (DATE_PROPOSAL_AUTOMATIONS). Reminders, driver events
+  // and the periodic `__erp_contact_sync__` carry the current date along too, and
+  // recording those would fill the history with dates the customer was never
+  // asked about. Deduped against the last entry so a repeat opener is a no-op.
+  const erpDate = payload.attributes?.delivery_date_1?.trim();
+  if (erpDate && DATE_PROPOSAL_AUTOMATIONS.has(payload.automation ?? "")) {
+    const history = parseDeliveryDateHistory(
+      (existing?.attributes as Record<string, unknown> | null)?.[DELIVERY_DATE_HISTORY_KEY]
+    );
+    if (!lastEntryMatches(history, erpDate, "erp")) {
+      mergedAttrs[DELIVERY_DATE_HISTORY_KEY] = appendDeliveryDate(history, erpDate, "erp");
+    }
+  }
   const contact = existing
     ? (
         await db
@@ -121,17 +190,29 @@ export async function handleErpWebhook(payload: ErpWebhookPayload) {
   // skip while a run is active — it retires whatever earlier run of the same
   // automation is still waiting on this customer, or that run would answer
   // the new send's taps as well (supersedeRuns has the live case).
+  // Who pressed "Send Now" in the ERP (attributes.sent_by_email), matched to a
+  // Connect staff member by email, so a failed send alerts them (HC-0232).
+  // Absent or unknown email (older ERP builds, Sheet) = no sender, as before.
+  const senderEmail = payload.attributes?.sent_by_email?.trim().toLowerCase();
+  const sender = senderEmail
+    ? await db.query.member.findFirst({
+        where: and(eq(memberTable.companyId, company.id), sql`lower(${memberTable.email}) = ${senderEmail}`),
+        columns: { id: true },
+      })
+    : undefined;
+  const sentByMemberId = sender?.id ?? null;
+
   const runs: string[] = [];
   for (const a of webhookAutomations) {
     await supersedeRuns(a.id, contact.id, "new ERP send");
-    const run = await startRun(a.id, contact.id);
+    const run = await startRun(a.id, contact.id, { sentByMemberId });
     if (run) runs.push(run.id);
   }
   // ACTION_CALLBACK: pass the matched callback id so a multi-entry flow starts
   // from the trigger node configured for exactly this callback.
   for (const a of callbackAutomations) {
     await supersedeRuns(a.id, contact.id, "new ERP send");
-    const run = await startRun(a.id, contact.id, { callbackId: callbackKey ?? undefined });
+    const run = await startRun(a.id, contact.id, { callbackId: callbackKey ?? undefined, sentByMemberId });
     if (run) runs.push(run.id);
   }
 

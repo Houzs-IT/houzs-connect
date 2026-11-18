@@ -82,7 +82,7 @@ METHOD — exactly three:
 3. CASH receipt → method "Cash".
 
 amount = the charged TOTAL / CARD TOTAL / AMOUNT / JUMLAH / SALE AMOUNT ("RM 4,600.00" → 4600). For EPP it is the full financed total, NOT the monthly repayment.
-paid_at = the receipt's own printed date ("DATE 22/06/26 14:03" → "2026-06-22"). It is often days in the past; never use today's date.
+paid_at = the receipt's own printed transaction date, as YYYY-MM-DD. Malaysian slips write the date DAY-FIRST (DD/MM/YYYY or DD/MM/YY): "03/11/2026" is 3 November 2026 (2026-11-03), NOT 11 March; "22/06/26 14:03" → "2026-06-22". Two-digit years are 20YY. The date is the one printed on the slip (often a few days ago) and is never in the future — if a reading would land after today, you swapped day and month, so re-read it day-first. If the slip shows no date at all, return null (never substitute today's date).
 When something is smudged or two readings are equally plausible, give your best reading and say what is unsure in "uncertain".`;
 
 export type ReceiptReading = {
@@ -103,6 +103,12 @@ export type ReceiptReading = {
 export type ReceiptResult = { status: "read"; reading: ReceiptReading } | { status: "unavailable"; error: string };
 
 const IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp", "image/gif"]);
+
+/** Today in the showroom's timezone (YYYY-MM-DD), given to the reader so it can
+ *  disambiguate a day-first slip date and never return a future date. */
+function todayKL(): string {
+  return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kuala_Lumpur", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+}
 
 function toBase64(bytes: ArrayBuffer): string {
   const view = new Uint8Array(bytes);
@@ -208,7 +214,7 @@ export async function readReceipt(bytes: ArrayBuffer, mimeType: string): Promise
       model: MODEL,
       max_tokens: 2048,
       output_config: { effort: "low", format: jsonSchemaOutputFormat(SCHEMA) },
-      messages: [{ role: "user", content: [file, { type: "text", text: PROMPT }] }],
+      messages: [{ role: "user", content: [file, { type: "text", text: `${PROMPT}\n\nFor reference, today is ${todayKL()} (Asia/Kuala_Lumpur); the slip's date is on or before today.` }] }],
     });
     if (response.stop_reason === "refusal") return { status: "unavailable", error: "declined" };
     const out = response.parsed_output;

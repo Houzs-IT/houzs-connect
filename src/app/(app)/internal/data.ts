@@ -4,6 +4,7 @@ import { getDb } from "@/db/client";
 import { ensureInternalTables } from "@/db/ensure-internal";
 import { autoJoinDepartmentChannels } from "@/lib/internal-auto-join";
 import { photoSrcs } from "@/lib/member-photo";
+import type { InternalAttachment } from "@/lib/internal-media";
 import { SLA_MINUTES } from "@/lib/sla";
 
 /*
@@ -303,6 +304,8 @@ export type ChatMessage = {
   replies: number;
   lastReplyAt: Date | null;
   replyAuthors: string[];
+  /** Images and files on this message (migration 0025); empty when none. */
+  attachments: InternalAttachment[];
 };
 
 const MESSAGE_SELECT = sql`
@@ -313,7 +316,14 @@ const MESSAGE_SELECT = sql`
   (select i.body from connect.message i where i.conversation_id = cv.id and i.direction = 'IN' order by i.created_at desc limit 1) as c_last,
   (select max(i.created_at) from connect.message i where i.conversation_id = cv.id and i.direction = 'IN') as c_last_in,
   (select max(o.created_at) from connect.message o where o.conversation_id = cv.id and o.direction = 'OUT') as c_last_out,
-  (select t.name from connect.conversation_tag x join connect.tag t on t.id = x.tag_id where x.conversation_id = cv.id limit 1) as c_tag
+  (select t.name from connect.conversation_tag x join connect.tag t on t.id = x.tag_id where x.conversation_id = cv.id limit 1) as c_tag,
+  (select coalesce(
+      json_agg(json_build_object(
+        'id', att.id, 'kind', att.kind, 'name', att.name, 'mime', att.mime,
+        'size', att.size, 'width', att.width, 'height', att.height
+      ) order by att.created_at),
+      '[]'::json)
+    from connect.internal_attachment att where att.message_id = m.id) as attachments
 `;
 const MESSAGE_JOINS = sql`
   left join connect.member a on a.id = m.author_member_id
@@ -358,6 +368,7 @@ function toMessage(r: Row): ChatMessage {
     replies: Number(r.replies ?? 0),
     lastReplyAt: r.last_reply_at ? new Date(r.last_reply_at as string) : null,
     replyAuthors: (r.reply_authors as string[] | null) ?? [],
+    attachments: (r.attachments as InternalAttachment[] | null) ?? [],
   };
 }
 

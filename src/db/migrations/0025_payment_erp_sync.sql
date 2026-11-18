@@ -1,0 +1,18 @@
+-- Connect -> ERP payment push: per-payment sync state.
+--
+-- When an admin confirms a payment (status -> VERIFIED) Connect POSTs it to the
+-- ERP (POST /api/connect/payments). The outcome of that push is kept here so a
+-- payment is pushed once and its state (sending / in the ERP / needs a human) is
+-- visible in the Payments module and sweepable by the cron retry.
+--
+-- erp_sync is a jsonb bag: { status: 'PENDING'|'SYNCED'|'BLOCKED', attempts,
+-- lastAttemptAt, syncedAt, erpPaymentRef, soNo, erpStatus, reason }.
+--
+-- Kept OUT of db/schema.ts ON PURPOSE (like connect.member.division): Drizzle
+-- selects every schema column on every read, so a column the Drizzle schema knew
+-- before the live DB grew it would 500 every payments read on a deploy that lands
+-- before this migration. Only src/lib/sync/erp-payments.ts touches it, via raw SQL.
+--
+-- The app ALSO self-applies this at runtime (ensurePaymentErpColumns in
+-- src/lib/sync/erp-payments.ts), because prod does not run db:migrate. Idempotent.
+ALTER TABLE "connect"."payment" ADD COLUMN IF NOT EXISTS "erp_sync" jsonb;

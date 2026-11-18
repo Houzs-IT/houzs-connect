@@ -14,8 +14,10 @@ import { getOrCreateConversation, recordInbound } from "@/lib/whatsapp/transport
 import { handleInboundMessage } from "@/lib/automation/dispatch";
 import { loadRoutingTable, pickInboundChannel } from "@/lib/whatsapp/channels";
 import { maybeAutoReply } from "@/lib/auto-reply/run";
+import { autoAssignConversation } from "@/lib/assignment/auto-assign";
 import { mustRefuse, signatureState, type SignatureState } from "@/lib/whatsapp/signature";
 import { MEDIA_TYPE, describeNonText } from "@/lib/whatsapp/inbound-text";
+import { storeInboundMedia } from "@/lib/whatsapp/store-inbound-media";
 
 /**
  * Whether signature enforcement has armed (see mustRefuse): some delivery in the
@@ -307,6 +309,18 @@ export async function POST(req: NextRequest) {
         // Confirm / Amend tap would draw the opener above it.
         const replyTo = !buttonId && !flowFields ? m.context?.id : undefined;
 
+        // What the inbox stores for a picture or file, reused below to secure our
+        // own R2 copy once the message row exists. A document keeps its real
+        // filename so the thread and the download offer it back by that name.
+        const mediaPayload = media?.id
+          ? {
+              mediaId: media.id,
+              mimeType: media.mime_type,
+              ...(m.document?.filename ? { fileName: m.document.filename } : {}),
+              ...(replyTo ? { replyTo } : {}),
+            }
+          : null;
+
         // Flows still get `text` exactly as before: a sticker or a reaction is
         // not an answer to "why do you want to postpone?".
         const inbound = await recordInbound(convo.id, text || describeNonText(m), {
@@ -316,12 +330,31 @@ export async function POST(req: NextRequest) {
             ? { kind: "flow_reply", fields: flowFields }
             : buttonId
               ? { tapped: buttonId }
-              : media?.id
-                ? { mediaId: media.id, mimeType: media.mime_type, ...(replyTo ? { replyTo } : {}) }
-                : replyTo
-                  ? { replyTo }
-                  : undefined,
+              : mediaPayload ?? (replyTo ? { replyTo } : undefined),
         });
+
+        // Keep our own copy of the customer's media so the thread can still show
+        // it after Meta drops the original (~30-day retention). Best-effort: a
+        // failure leaves the message with its Meta mediaId, which the serve route
+        // still tries — the delivery already succeeded above.
+        if (mediaPayload) {
+          try {
+            const stored = await storeInboundMedia({
+              mediaId: mediaPayload.mediaId,
+              companyId: channel.companyId,
+              conversationId: convo.id,
+              messageId: inbound.id,
+            });
+            if (stored) {
+              await db
+                .update(messageTable)
+                .set({ interactivePayload: { ...mediaPayload, r2Key: stored.r2Key, size: stored.size } })
+                .where(eq(messageTable.id, inbound.id));
+            }
+          } catch (e) {
+            console.error("INBOUND_MEDIA_PERSIST_FAIL", e);
+          }
+        }
 
         if (isMedia) {
           // An image may be a payment slip — or a poster, a product photo, a
@@ -351,6 +384,16 @@ export async function POST(req: NextRequest) {
             companyId: channel.companyId,
             inboundMessageId: inbound.id,
           }).catch((e) => console.error("AUTO_REPLY_FAIL", e));
+          // This inbound is human-bound — no automation took it — so give the
+          // thread an owner if the company has auto-assignment on and nobody owns
+          // it yet (the first non-bot inbound). Off by default; never fails the
+          // delivery, which is already saved. See lib/assignment/auto-assign.ts.
+          if (!convo.assignedAgentId) {
+            await autoAssignConversation(db, {
+              companyId: channel.companyId,
+              conversationId: convo.id,
+            }).catch((e) => console.error("AUTO_ASSIGN_FAIL", e));
+          }
         }
         handled++;
       }
