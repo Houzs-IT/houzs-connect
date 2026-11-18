@@ -387,7 +387,7 @@ export async function supportStats(companyId: string, w: PeriodWindow) {
   };
 }
 
-/** One row per active member: conversations in the window + reply times. */
+/** One row per active member who replied to a customer in the window: reply count, conversations + reply times. Members who did not reply are left out. */
 export async function agentsReport(companyId: string, w: PeriodWindow, deptId?: string) {
   const db = getDb();
   const [members, depts, rows, sends, replies] = await Promise.all([
@@ -464,6 +464,9 @@ export async function agentsReport(companyId: string, w: PeriodWindow, deptId?: 
         avg: avg(rt?.all),
       };
     })
+    // Only people who actually replied to a customer in the window — the report
+    // is about who worked the inbox, so idle members (replied 0) are left out.
+    .filter((a) => a.replied > 0)
     .sort((a, b) => b.replied - a.replied || b.assigned - a.assigned || a.name.localeCompare(b.name));
   return { list, depts };
 }
