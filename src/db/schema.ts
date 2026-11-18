@@ -851,8 +851,9 @@ export const autoReply = connect.table(
  * nothing is auto-assigned, so the feature is inert until someone enables it.
  * Ensured at runtime (db/ensure-auto-assign.ts) like auto_reply — a standalone
  * table rather than a `company` column, so a deploy before its migration cannot
- * break the reads sign-in depends on. Per-department scoping rides with the
- * dept-routing follow-up; v1 is a company-wide switch.
+ * break the reads sign-in depends on. Optionally scoped to one department
+ * (department_id): when set, only that department's members are eligible, so a
+ * company can route to just its support team instead of everyone.
  */
 export const autoAssign = connect.table(
   "auto_assign",
@@ -860,6 +861,8 @@ export const autoAssign = connect.table(
     id: id(),
     companyId: text("company_id").notNull(),
     enabled: boolean("enabled").notNull().default(false),
+    // null = every active member is eligible; set = only this department's members.
+    departmentId: text("department_id"),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
     updatedBy: text("updated_by"),
   },

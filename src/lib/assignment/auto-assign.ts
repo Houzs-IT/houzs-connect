@@ -19,19 +19,28 @@ import { bypassReadCache } from "@/db/fresh";
 import { companyPresence } from "@/lib/presence";
 import { logActivity } from "@/lib/activity";
 
-/** Is the company's auto-assignment switch on? Fresh read (a just-flipped toggle must count). */
-export async function isAutoAssignEnabled(db: DB, companyId: string): Promise<boolean> {
+/** The company's auto-assignment config, or null when off / missing / unreadable.
+ *  Fresh read (a just-flipped toggle or just-changed scope must count). */
+async function getAutoAssign(
+  db: DB,
+  companyId: string
+): Promise<{ enabled: boolean; departmentId: string | null } | null> {
   try {
     await ensureAutoAssignTable(db);
     const row = await db.query.autoAssign.findFirst({
       where: and(eq(autoAssign.companyId, companyId), bypassReadCache()),
-      columns: { enabled: true },
+      columns: { enabled: true, departmentId: true },
     });
-    return !!row?.enabled;
+    return row ? { enabled: !!row.enabled, departmentId: row.departmentId ?? null } : null;
   } catch {
     // Table missing and not creatable, or a transient error: treat as off.
-    return false;
+    return null;
   }
+}
+
+/** Is the company's auto-assignment switch on? Fresh read (a just-flipped toggle must count). */
+export async function isAutoAssignEnabled(db: DB, companyId: string): Promise<boolean> {
+  return !!(await getAutoAssign(db, companyId))?.enabled;
 }
 
 type Candidate = { id: string; concurrencyLimit: number };
@@ -47,12 +56,20 @@ export async function autoAssignConversation(
 ): Promise<string | null> {
   const { companyId, conversationId } = args;
   try {
-    if (!(await isAutoAssignEnabled(db, companyId))) return null;
+    const cfg = await getAutoAssign(db, companyId);
+    if (!cfg?.enabled) return null;
 
-    // Eligible = active members of the company. No role filter: the manual
-    // assignee picker offers every company member, and we match it.
+    // Eligible = active members of the company. When the company scoped
+    // auto-assign to one department (cfg.departmentId), only that department's
+    // members are eligible — so a chat never lands on a department that doesn't
+    // work the inbox. Unscoped (null) keeps every active member eligible, which
+    // matches the manual assignee picker.
     const agents = (await db.query.member.findMany({
-      where: and(eq(member.companyId, companyId), eq(member.active, true)),
+      where: and(
+        eq(member.companyId, companyId),
+        eq(member.active, true),
+        cfg.departmentId ? eq(member.departmentId, cfg.departmentId) : undefined
+      ),
       columns: { id: true, concurrencyLimit: true },
     })) as Candidate[];
     if (!agents.length) return null;

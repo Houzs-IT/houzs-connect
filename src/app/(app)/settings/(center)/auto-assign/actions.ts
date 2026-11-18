@@ -12,15 +12,24 @@ export interface SaveResult {
   error?: string;
 }
 
-/** Turn the session company's auto-assignment on or off (owner/admin only). */
-export async function saveAutoAssign(enabled: boolean): Promise<SaveResult> {
+/**
+ * Turn the session company's auto-assignment on or off, and optionally scope it
+ * to one department (null = all departments). Owner/admin only.
+ */
+export async function saveAutoAssign(enabled: boolean, departmentId: string | null): Promise<SaveResult> {
   const me = await getCurrentMember();
   if (!me || !isAdminRole(me.role)) {
     return { ok: false, error: "Only an owner or admin can change auto-assignment." };
   }
   const db = getDb();
   await ensureAutoAssignTable(db);
-  const values = { companyId: me.companyId, enabled, updatedAt: new Date(), updatedBy: me.email };
+  const values = {
+    companyId: me.companyId,
+    enabled,
+    departmentId: departmentId || null,
+    updatedAt: new Date(),
+    updatedBy: me.email,
+  };
   await db
     .insert(autoAssign)
     .values(values)
