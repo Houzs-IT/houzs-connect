@@ -579,6 +579,11 @@ const en = {
     export: "Export",
     connect: "+Connect",
     soonNote: "Coming soon — not built yet.",
+    errTitle: "This page couldn't load",
+    errBody: "Part of the dashboard hit a server error. Your data is safe — try again, and it usually comes back.",
+    errRetry: "Try again",
+    errHome: "Back to overview",
+    errRef: "Reference",
   },
   contacts: {
     tagManage: "Manage",
@@ -2327,6 +2332,11 @@ const zh: Dict = {
     export: "导出",
     connect: "+连接",
     soonNote: "即将推出，暂未开放。",
+    errTitle: "页面加载失败",
+    errBody: "仪表盘的某个部分遇到了服务器错误。你的数据没有问题——重试一下通常就能恢复。",
+    errRetry: "重试",
+    errHome: "返回概览",
+    errRef: "错误编号",
   },
   contacts: {
     tagManage: "管理",
