@@ -41,7 +41,7 @@ export async function SupportTab({
     { label: s.k3, hint: s.k3Hint, dot: "var(--color-success)", now: stats.cur.closed, prev: stats.prev.closed },
     { label: s.k4, hint: s.k4Hint, dot: "var(--color-danger)", now: stats.cur.queue, prev: stats.prev.queue },
   ];
-  const cols = "grid-cols-[minmax(0,2.2fr)_repeat(3,minmax(0,0.8fr))_repeat(2,minmax(0,1.2fr))]";
+  const cols = "grid-cols-[minmax(0,2.2fr)_repeat(4,minmax(0,0.8fr))_repeat(2,minmax(0,1.2fr))]";
 
   return (
     <div className="flex flex-col gap-4">
@@ -144,12 +144,13 @@ export async function SupportTab({
           <DeptFilter depts={report.depts} value={dept ?? ""} allLabel={s.allDepts} />
         </div>
         <div className="overflow-x-auto">
-          <div className="min-w-[760px]">
+          <div className="min-w-[820px]">
             <div className={`grid ${cols} gap-2 border-y border-[var(--color-border-subtle)] bg-[var(--color-surface-2)] px-[22px] py-2.5 text-[11px] font-semibold uppercase tracking-[0.06em] text-[var(--color-faint)]`}>
               <span>{s.colName}</span>
               <span>{s.colAssigned}</span>
               <span>{s.colOpen}</span>
               <span>{s.colClosed}</span>
+              <span>{s.colReplied}</span>
               <span>{s.colFirst}</span>
               <span>{s.colAvg}</span>
             </div>
@@ -180,6 +181,7 @@ export async function SupportTab({
                   <span>{a.assigned}</span>
                   <span className="font-semibold">{a.open}</span>
                   <span>{a.closed}</span>
+                  <span>{a.replied}</span>
                   <span className="flex items-center gap-1.5">
                     {a.first == null ? "—" : humanDuration(a.first)}
                     {a.onTime != null && <Badge tone={a.onTime ? "success" : "danger"}>{a.onTime ? s.onTime : s.late}</Badge>}
