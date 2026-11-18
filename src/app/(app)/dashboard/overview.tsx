@@ -422,7 +422,7 @@ export async function AgentsCard({ companyId, w, s }: Props) {
   const [report, people] = await Promise.all([agentsReport(companyId, w), companyPresence(companyId)]);
   const online = new Set(people.filter((p) => p.online).map((p) => p.id));
   const photos = await photoSrcs(report.list.map((a) => a.id));
-  const cols = "grid-cols-[minmax(0,2.2fr)_repeat(3,minmax(0,0.8fr))_repeat(2,minmax(0,1.2fr))]";
+  const cols = "grid-cols-[minmax(0,2.2fr)_repeat(4,minmax(0,0.8fr))_repeat(2,minmax(0,1.2fr))]";
   return (
     <Card pad="p-0" className="overflow-hidden">
       <div className="flex flex-wrap items-center gap-4 px-[22px] py-[18px]">
@@ -432,12 +432,13 @@ export async function AgentsCard({ companyId, w, s }: Props) {
         </Link>
       </div>
       <div className="overflow-x-auto">
-        <div className="min-w-[760px]">
+        <div className="min-w-[820px]">
           <div className={`grid ${cols} gap-2 border-y border-[var(--color-border-subtle)] bg-[var(--color-surface-2)] px-[22px] py-2.5 text-[11px] font-semibold uppercase tracking-[0.06em] text-[var(--color-faint)]`}>
             <span>{s.colName}</span>
             <span>{s.colAssigned}</span>
             <span>{s.colOpen}</span>
             <span>{s.colClosed}</span>
+            <span>{s.colReplied}</span>
             <span>{s.colFirst}</span>
             <span>{s.colAvg}</span>
           </div>
@@ -468,6 +469,7 @@ export async function AgentsCard({ companyId, w, s }: Props) {
                 <span>{a.assigned}</span>
                 <span className="font-semibold">{a.open}</span>
                 <span>{a.closed}</span>
+                <span>{a.replied}</span>
                 <span className="flex items-center gap-1.5">
                   {a.first == null ? "—" : humanDuration(a.first)}
                   {a.onTime != null && <Badge tone={a.onTime ? "success" : "danger"}>{a.onTime ? s.onTime : s.late}</Badge>}
