@@ -190,6 +190,12 @@ export function buildTemplateSendGraph(opts: {
   if (opts.service) {
     const nodes: FlowNode[] = [
       { id: "trigger", type: "trigger", data: {}, x: 40, y: 120 },
+      // Routes on service_job PRESENCE — correct only while service_job is set iff
+      // this send is a service-case leg. The ERP webhook MERGES attributes
+      // (dispatch.ts) and a prior Service Arrangement leaves service_job on the
+      // contact, so the ERP must send service_job empty on an SO reminder to clear
+      // it; otherwise an SO reminder for a past service-case customer would
+      // misroute here. (ERP go-live prerequisite.)
       {
         id: "job_router",
         type: "criteria_router",

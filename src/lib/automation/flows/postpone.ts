@@ -98,6 +98,12 @@ export const postponeServiceFlow: SeedFlow = {
     return {
       nodes: [
         { id: "trigger", type: "trigger", data: {}, x: 40, y: 320 },
+        // Routes on service_job PRESENCE — correct only while service_job is set
+        // iff this send is a service-case leg. The ERP webhook MERGES attributes
+        // (dispatch.ts), and a prior Service Arrangement leaves service_job on the
+        // contact, so the ERP must send service_job empty on an SO postpone to
+        // clear it; otherwise an SO postpone for a past service-case customer
+        // would misroute here. (ERP go-live prerequisite.)
         {
           id: "job_router",
           type: "criteria_router",
