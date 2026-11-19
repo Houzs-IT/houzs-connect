@@ -24,7 +24,7 @@ import { buildTemplateSendGraph, ERP_CALLBACK_HEADERS } from "./shared";
  *
  * ERP must inject on the prep trigger: full_name, ref_1, refs_all, phone,
  * callback_url, and amount when a balance is outstanding. Shipped adds
- * tracking_no, eta. The destination shown to customers is a FIXED
+ * consignment_no, eta_em_port. The destination shown to customers is a FIXED
  * literal "EM" baked into each template send (owner, 2026-11-19) — not injected.
  * All three seed DRAFT/disabled; enable them once the templates are approved on
  * Meta.
@@ -79,8 +79,8 @@ const ASK_ADDRESS = `Lastly, please reply with the *full delivery address* (incl
 
 const SHIPPED_MSG = `Hi {full_name} 👋 Your order *{ref_1}* is now on its way to East Malaysia by sea freight 🚢
 
-Consignment / Tracking No.: *{tracking_no}*
-Estimated arrival at EM port: *{eta}*
+Consignment No.: *{consignment_no}*
+Estimated arrival at EM port: *{eta_em_port}*
 
 We'll notify you again once it arrives and is ready for the next step. Thank you for your patience! ✨`;
 
@@ -236,7 +236,7 @@ export const eastMyShippedFlow: SeedFlow = {
   build: () =>
     buildTemplateSendGraph({
       templateName: "hc_eastmy_shipped",
-      params: ["{full_name}", "{ref_1}", "{tracking_no}", "EM", "{eta}"],
+      params: ["{full_name}", "{ref_1}", "{consignment_no}", "EM", "{eta_em_port}"],
       message: SHIPPED_MSG,
       tag: "east malaysia",
     }),

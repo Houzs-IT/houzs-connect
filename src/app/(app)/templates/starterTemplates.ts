@@ -155,7 +155,7 @@ If everything's clear, tap *"Noted"*. If you have any questions, tap *"I have a 
     category: "UTILITY",
     body: `Hi {{1}} 👋 Your order *{{2}}* is now on its way to East Malaysia by sea freight 🚢
 
-Consignment / Tracking No.: *{{3}}*
+Consignment No.: *{{3}}*
 Estimated arrival at {{4}} port: *{{5}}*
 
 We'll notify you again once it arrives and is ready for the next step. Thank you for your patience! ✨`,
