@@ -23,21 +23,23 @@ import { buildTemplateSendGraph, ERP_CALLBACK_HEADERS } from "./shared";
  * hc_order_balance_collection), which the ERP fires on its own — no new work.
  *
  * ERP must inject on the prep trigger: full_name, ref_1, refs_all, phone,
- * destination (the East-MY port/town), callback_url, and amount when a balance
- * is outstanding. Shipped adds forwarder, tracking_no, eta. All three seed
- * DRAFT/disabled; enable them once the templates are approved on Meta.
+ * callback_url, and amount when a balance is outstanding. Shipped adds
+ * forwarder, tracking_no, eta. The destination shown to customers is a FIXED
+ * literal "EM" baked into each template send (owner, 2026-11-19) — not injected.
+ * All three seed DRAFT/disabled; enable them once the templates are approved on
+ * Meta.
  */
 
 // ── Touchpoint 1 copy ──────────────────────────────────────────────────────
 
 // Opener (DEMO/inbox preview; the real send uses hc_eastmy_prep_notice). The
 // 2–3 week window and "collect balance after arrival" wording is the approved
-// customer narrative; {company_signature} / {destination} resolve per contact.
+// customer narrative; {company_signature} resolves per contact, "EM" is fixed.
 const PREP_OPENING = `Hi {full_name} 👋
 
 Good news! We'll start preparing your {company_signature} order *{ref_1}* this week to next week. After that, our transporter will arrange sea freight to East Malaysia 🚢
 
-🕒 Estimated arrival at {destination} port: around *2–3 weeks* after dispatch.
+🕒 Estimated arrival at EM port: around *2–3 weeks* after dispatch.
 
 Once it arrives and is unloaded at the port, we'll collect the balance payment — then our transporter will contact you to arrange delivery to your door 🚚
 
@@ -79,11 +81,11 @@ const SHIPPED_MSG = `Hi {full_name} 👋 Your order *{ref_1}* is now on its way 
 
 Forwarder: *{forwarder}*
 Consignment / Tracking No.: *{tracking_no}*
-Estimated arrival at {destination} port: *{eta}*
+Estimated arrival at EM port: *{eta}*
 
 We'll notify you again once it arrives and is ready for the next step. Thank you for your patience! ✨`;
 
-const ARRIVED_MSG = `Hi {full_name} 👋 Great news — your order *{ref_1}* has arrived at {destination} port and is being unloaded 📦
+const ARRIVED_MSG = `Hi {full_name} 👋 Great news — your order *{ref_1}* has arrived at EM port and is being unloaded 📦
 
 Our transporter will contact you shortly to arrange delivery to your door 🚚
 
@@ -127,7 +129,7 @@ export const eastMyPrepFlow: SeedFlow = {
         data: {
           templateName: "hc_eastmy_prep_notice",
           templateLang: "en",
-          templateParams: ["{full_name}", "{ref_1}", "{destination}"],
+          templateParams: ["{full_name}", "{ref_1}", "EM"],
           message: PREP_OPENING,
           buttons: [
             { id: NOTED_BTN, label: NOTED_BTN },
@@ -235,7 +237,7 @@ export const eastMyShippedFlow: SeedFlow = {
   build: () =>
     buildTemplateSendGraph({
       templateName: "hc_eastmy_shipped",
-      params: ["{full_name}", "{ref_1}", "{forwarder}", "{tracking_no}", "{destination}", "{eta}"],
+      params: ["{full_name}", "{ref_1}", "{forwarder}", "{tracking_no}", "EM", "{eta}"],
       message: SHIPPED_MSG,
       tag: "east malaysia",
     }),
@@ -254,7 +256,7 @@ export const eastMyArrivedFlow: SeedFlow = {
   build: () =>
     buildTemplateSendGraph({
       templateName: "hc_eastmy_arrived",
-      params: ["{full_name}", "{ref_1}", "{destination}"],
+      params: ["{full_name}", "{ref_1}", "EM"],
       message: ARRIVED_MSG,
       tag: "east malaysia",
     }),
