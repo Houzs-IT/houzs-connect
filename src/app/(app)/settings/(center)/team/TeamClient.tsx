@@ -4,6 +4,7 @@ import type { Dict } from "@/lib/i18n/dict";
 import { fmt } from "@/lib/i18n/dict";
 import { restoreAccess, toggleAccess, type Person, type RemovedPerson, type TeamCompany } from "./actions";
 import { syncFromErp } from "../sync-actions";
+import { OrgEdit } from "./OrgEdit";
 import { RemoveAccess } from "./RemoveAccess";
 import { RoleSelect } from "./RoleSelect";
 import { TeamPhoto } from "./TeamPhoto";
@@ -38,6 +39,9 @@ export function TeamClient({
   canManage: boolean;
   requests: React.ReactNode;
 }) {
+  // For the department and reporting editor (OrgEdit): names in use, and everyone to report to.
+  const departments = [...new Set(people.map((p) => p.department).filter((d): d is string => !!d))].sort();
+  const choices = people.map((p) => ({ email: p.email, name: p.name })).sort((a, b) => a.name.localeCompare(b.name));
   const columns: DataColumn[] = [
     { key: "person", label: L.person },
     { key: "role", label: L.role },
@@ -98,7 +102,23 @@ export function TeamClient({
           </div>
         ),
         role: <RoleSelect email={p.email} name={p.name} role={p.role} canSuper={canSuper} canManage={canManage} erpRole={p.erpRole} setHere={p.roleSetHere} />,
-        department: <span className="text-[var(--color-ink)]">{p.department ?? "—"}</span>,
+        // Houzs ERP people take these from the ERP; anyone else is set here by a Super Admin.
+        department: (
+          <span className="flex items-center gap-1.5 text-[var(--color-ink)]">
+            {p.department ?? "—"}
+            {canManage && p.erpRole == null && (
+              <OrgEdit
+                email={p.email}
+                name={p.name}
+                department={p.department}
+                division={p.division}
+                reportsToEmail={p.reportsToEmail}
+                departments={departments}
+                people={choices}
+              />
+            )}
+          </span>
+        ),
         division: <span className="text-[var(--color-ink)]">{p.division ?? "—"}</span>,
         reportsTo: <span className="text-[var(--color-ink)]">{p.reportsTo ?? "—"}</span>,
         ...Object.fromEntries(companies.map((co) => [`co:${co.id}`, accessCell(p, co, L, canManage)])),
