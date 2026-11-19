@@ -7,6 +7,7 @@ import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { isAccessRemoved, roleOverride } from "@/lib/team-access";
 import { getDb } from "@/db/client";
 import { bypassReadCache } from "@/db/fresh";
+import { verifyTurnstile } from "@/lib/turnstile";
 import { company, member } from "@/db/schema";
 import { brandForCompany, brandForHost, companyOrigin, pickLoginRow } from "@/lib/company-brand";
 import { askErp, configuredErps, erpOrder, OTHER_ERPS, type OtherErp } from "@/lib/erp-logins";
@@ -63,6 +64,16 @@ export async function login(
     else if (a.kind === "stopped") return { error: a.message };
     else return { error: `Cannot reach ${OTHER_ERPS[system].name} right now. Try again in a moment.`, twoStep: prev.twoStep };
   } else {
+    // Bot check (Cloudflare Turnstile) on the email/password step. Enforced only
+    // when the secret is set on the Worker; the code step above carries no token.
+    if (env.TURNSTILE_SECRET_KEY) {
+      const ok = await verifyTurnstile(
+        env.TURNSTILE_SECRET_KEY,
+        String(formData.get("cf-turnstile-response") ?? ""),
+        (await headers()).get("cf-connecting-ip")
+      );
+      if (!ok) return { error: "Verification failed. Please try again." };
+    }
     const email = String(formData.get("email") ?? "").trim().toLowerCase();
     const password = String(formData.get("password") ?? "");
     if (!email || !password) return { error: "Enter your email and password." };

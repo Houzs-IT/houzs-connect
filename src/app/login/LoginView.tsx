@@ -2,7 +2,9 @@
 
 import { useActionState, useEffect, useState } from "react";
 import { useShell } from "@/components/shell/ShellProvider";
+import Script from "next/script";
 import { HouzsConnectMark } from "@/components/brand/HouzsConnectMark";
+import { TurnstileWidget } from "./TurnstileWidget";
 import { fmt } from "@/lib/i18n/dict";
 import { login } from "./actions";
 import { submitAccessRequest } from "./request-actions";
@@ -14,6 +16,7 @@ import { submitAccessRequest } from "./request-actions";
 
 /** The action's own sentences, in the viewer's language. */
 const ZH_ERRORS: Record<string, string> = {
+  "Verification failed. Please try again.": "人机验证未通过，请重试。",
   "Wrong email or password.": "邮箱或密码错误。",
   "Enter your email and password.": "请输入邮箱和密码。",
   "Cannot reach the staff directory. Ask IT to grant access.": "无法连接员工目录，请联系 IT。",
@@ -112,6 +115,9 @@ export function LoginView({ openRequest = false }: { openRequest?: boolean }) {
         title=""
         className="pointer-events-none absolute -bottom-16 -left-10 hidden w-[480px] max-w-[64vw] opacity-[0.06] md:block"
       />
+
+      {/* Cloudflare Turnstile script (bot-check on the sign-in form below). */}
+      <Script src="https://challenges.cloudflare.com/turnstile/v0/api.js" strategy="afterInteractive" />
 
       {/* Language */}
       <div className="absolute right-4 top-4 z-20 flex rounded-full border border-white/20 bg-white/5 p-0.5 md:right-8 md:top-6">
@@ -257,6 +263,8 @@ export function LoginView({ openRequest = false }: { openRequest?: boolean }) {
                     {error}
                   </p>
                 )}
+                {/* Bot check — gates sign-in; injects cf-turnstile-response into this form. */}
+                <TurnstileWidget resetSignal={state} className="min-h-[65px]" />
                 <button
                   type="submit"
                   disabled={pending}
@@ -264,19 +272,11 @@ export function LoginView({ openRequest = false }: { openRequest?: boolean }) {
                 >
                   {pending ? L.signingIn : L.submit}
                 </button>
-                <div className="flex items-center gap-2.5 sm:flex-col sm:gap-0">
-                  <button type="button" onClick={() => setPanel("forgot")} className="flex-1 text-[13px] font-semibold text-[var(--color-accent)] sm:hidden">
-                    {L.forgot}
-                  </button>
-                  <span className="hidden text-[12px] text-[var(--color-faint)] sm:block">{L.noAccount}</span>
-                  <button
-                    type="button"
-                    onClick={() => setPanel("request")}
-                    className="h-[44px] flex-1 rounded-[10px] border border-[var(--color-border)] bg-white text-[13.5px] font-semibold text-[var(--color-ink)] hover:border-[var(--color-border-strong)] sm:mt-2.5 sm:w-full sm:flex-none"
-                  >
-                    {L.request}
-                  </button>
-                </div>
+                {/* "Request access" removed — the captcha above now gates sign-in.
+                    Forgot-password stays reachable on mobile (desktop has it by the field). */}
+                <button type="button" onClick={() => setPanel("forgot")} className="text-[13px] font-semibold text-[var(--color-accent)] sm:hidden">
+                  {L.forgot}
+                </button>
               </form>
             ) : panel === "forgot" ? (
               <div className="mt-6">

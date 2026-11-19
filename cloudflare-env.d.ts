@@ -14,6 +14,11 @@ interface CloudflareEnv {
   // Worker secret in prod; in .dev.vars for local.
   SESSION_SECRET?: string;
 
+  // Cloudflare Turnstile secret (bot-check on the login form). Set as a Worker
+  // secret in prod; the login action skips the check when it's unset. The public
+  // site key is a build-time NEXT_PUBLIC_TURNSTILE_SITE_KEY env, not a binding.
+  TURNSTILE_SECRET_KEY?: string;
+
   // WhatsApp transport (see src/lib/whatsapp/cloud-api.ts).
   WHATSAPP_MODE?: string;
   WHATSAPP_TOKEN?: string;
