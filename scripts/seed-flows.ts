@@ -21,7 +21,7 @@
 // touch only the company you mean to.
 import { and, eq } from "drizzle-orm";
 import { scriptDb } from "./_env";
-import { automation, channel, company, form } from "../src/db/schema";
+import { automation, channel, company, form, member } from "../src/db/schema";
 import {
   COMPANY_FLOW_SETS,
   graphForCompany,
@@ -29,6 +29,7 @@ import {
   validateGraph,
   type SeedForm,
 } from "../src/lib/automation/flows";
+import type { FlowGraph } from "../src/lib/automation/types";
 
 function arg(name: string): string | undefined {
   const i = process.argv.indexOf(`--${name}`);
@@ -55,6 +56,41 @@ async function upsertForm(
     .values({ companyId, name: f.name, status: "draft", fields: f.fields })
     .returning();
   return row.id;
+}
+
+/**
+ * Resolve any `assign` node that names an agent (`data.assignToName`) to this
+ * company's member id. The id is not known when the flow is authored and differs
+ * per company (one member row per company), so the graph carries the name and the
+ * seed — which runs against the real DB — looks it up. Matches an ACTIVE member by
+ * name (case-insensitive) within the company; 0 or >1 matches leaves the node
+ * unassigned with a warning (not an error), so the flow still ships.
+ */
+async function resolveAssignees(
+  db: ReturnType<typeof scriptDb>["db"],
+  companyId: string,
+  companyName: string,
+  graph: FlowGraph
+): Promise<void> {
+  const pending = graph.nodes.filter(
+    (n) => n.type === "assign" && typeof n.data?.assignToName === "string"
+  );
+  if (pending.length === 0) return;
+  const members = await db.query.member.findMany({
+    where: and(eq(member.companyId, companyId), eq(member.active, true)),
+  });
+  for (const node of pending) {
+    const name = String(node.data!.assignToName).trim();
+    delete node.data!.assignToName;
+    const hits = members.filter((m) => m.name.trim().toLowerCase() === name.toLowerCase());
+    if (hits.length === 1) {
+      node.data!.memberId = hits[0].id;
+    } else {
+      console.warn(
+        `    ! assign: ${hits.length === 0 ? "no" : hits.length} active member(s) named "${name}" in ${companyName} — left unassigned`
+      );
+    }
+  }
 }
 
 async function main() {
@@ -109,6 +145,9 @@ async function main() {
       //    or one that would send another company's branded template — is
       //    never written.
       const graph = graphForCompany(flow.build(formIds), set);
+      // Turn any assign node's agent name into this company's member id (reads the
+      // real DB; safe in dry-run). Does nothing for flows without an assign node.
+      await resolveAssignees(db, co.id, co.name, graph);
       const problems = [
         ...validateGraph(graph),
         ...templateGaps(graph, set).map((t) => `template "${t}" has no ${set.slug} copy and is not brand-free`),
