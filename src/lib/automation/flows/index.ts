@@ -1,7 +1,7 @@
 import type { SeedFlow } from "./types";
 import { newDeliveryFlow } from "./newDelivery";
 import { newAmendFlow } from "./newAmend";
-import { postponeFlow } from "./postpone";
+import { postponeServiceFlow } from "./postpone";
 import { postageFlow } from "./postage";
 import { deliveryLockFlow } from "./deliveryLock";
 import { optInOutFlow } from "./optInOut";
@@ -9,9 +9,9 @@ import { balanceReminderFlow } from "./balance";
 import { repliedCheckFlow } from "./repliedCheck";
 import { serviceArrangementFlow } from "./serviceArrangement";
 import {
-  reminder1Flow,
-  reminder2Flow,
-  reminder3Flow,
+  reminder1ServiceFlow,
+  reminder2ServiceFlow,
+  reminder3ServiceFlow,
   driverInfoFlow,
   deliveryCompletedFlow,
   serviceCaseReceivedFlow,
@@ -34,15 +34,15 @@ export { graphForCompany, templateGaps, type CompanyFlowSet } from "./companies"
 export const REBUILD_FLOWS: SeedFlow[] = [
   newDeliveryFlow,
   newAmendFlow,
-  postponeFlow,
+  postponeServiceFlow,
   postageFlow,
   deliveryLockFlow,
   optInOutFlow,
   balanceReminderFlow,
   repliedCheckFlow,
-  reminder1Flow,
-  reminder2Flow,
-  reminder3Flow,
+  reminder1ServiceFlow,
+  reminder2ServiceFlow,
+  reminder3ServiceFlow,
   driverInfoFlow,
   deliveryCompletedFlow,
   serviceCaseReceivedFlow,

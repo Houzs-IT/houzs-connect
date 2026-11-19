@@ -177,7 +177,68 @@ export function buildTemplateSendGraph(opts: {
   /** When set, add an add_tag node after the send (before end) that tags the
    *  contact — e.g. "service" so the inbox can filter service-case customers. */
   tag?: string;
+  /**
+   * When set, the send becomes job-type-aware: a Service Case leg (the ERP sets
+   * `service_job` on those sends) goes to this service template with its own
+   * params/copy; a normal send (no service_job) keeps the default template
+   * UNCHANGED. Used by Houzs's reminders so a pickup/inspection leg no longer
+   * reads as a "delivery". The service template is Houzs-only, so this variant
+   * is NOT given to 2990 (templateGaps would skip it).
+   */
+  service?: { templateName: string; params: string[]; message: string };
 }): FlowGraph {
+  if (opts.service) {
+    const nodes: FlowNode[] = [
+      { id: "trigger", type: "trigger", data: {}, x: 40, y: 120 },
+      // Routes on service_job PRESENCE — correct only while service_job is set iff
+      // this send is a service-case leg. The ERP webhook MERGES attributes
+      // (dispatch.ts) and a prior Service Arrangement leaves service_job on the
+      // contact, so the ERP must send service_job empty on an SO reminder to clear
+      // it; otherwise an SO reminder for a past service-case customer would
+      // misroute here. (ERP go-live prerequisite.)
+      {
+        id: "job_router",
+        type: "criteria_router",
+        x: 200,
+        y: 120,
+        data: { rules: [{ branch: "service", field: "service_job", op: "set" }] },
+      },
+      {
+        id: "send",
+        type: "send_template",
+        x: 420,
+        y: 220,
+        data: { templateName: opts.templateName, templateLang: "en", templateParams: opts.params, message: opts.message },
+      },
+      {
+        id: "svc_send",
+        type: "send_template",
+        x: 420,
+        y: 20,
+        data: {
+          templateName: opts.service.templateName,
+          templateLang: "en",
+          templateParams: opts.service.params,
+          message: opts.service.message,
+        },
+      },
+    ];
+    const edges: FlowEdge[] = [
+      { from: "trigger", to: "job_router" },
+      { from: "job_router", to: "svc_send", branch: "service" },
+      { from: "job_router", to: "send", branch: "default" },
+    ];
+    if (opts.tag) {
+      nodes.push({ id: "tag", type: "add_tag", x: 640, y: 120, data: { tag: opts.tag } });
+      nodes.push({ id: "done", type: "end", x: 860, y: 120, data: {} });
+      edges.push({ from: "send", to: "tag" }, { from: "svc_send", to: "tag" }, { from: "tag", to: "done" });
+    } else {
+      nodes.push({ id: "done", type: "end", x: 640, y: 120, data: {} });
+      edges.push({ from: "send", to: "done" }, { from: "svc_send", to: "done" });
+    }
+    return { nodes, edges };
+  }
+
   const nodes: FlowNode[] = [
     { id: "trigger", type: "trigger", data: {}, x: 40, y: 120 },
     {

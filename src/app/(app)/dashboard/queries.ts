@@ -48,7 +48,7 @@ export type ReplyStats = {
   avgFirst: number | null;
   /** Average of every customer-message → next-human-reply gap, in seconds. */
   avgReply: number | null;
-  /** Per assigned agent: first-reply and all-reply averages (human-only). */
+  /** Per sending member (whoever actually replied): first-reply and all-reply averages (human-only). */
   byAgent: Map<string, { first: number[]; all: number[] }>;
   /** True when timing was measured in business-open hours (company has hours set). */
   businessHours: boolean;
@@ -72,7 +72,7 @@ export async function replyStats(companyId: string, from: Date, to?: Date): Prom
       conversationId: message.conversationId,
       direction: message.direction,
       createdAt: message.createdAt,
-      agentId: conversation.assignedAgentId,
+      senderId: message.sentByMemberId,
       isBot: message.isBot,
     })
     .from(message)
@@ -120,7 +120,10 @@ export async function replyStats(companyId: string, from: Date, to?: Date): Prom
     // wall-clock — so an overnight gap counts only the in-hours part.
     const gap = elapsedSeconds(waiting, at, cfg);
     alls.push(gap);
-    const agent = r.agentId;
+    // Credit the reply to the member who actually SENT it (sentByMemberId), not
+    // the conversation's assignee — a shared inbox replies on unassigned threads,
+    // so attributing by assignee hid everyone but the few with chats assigned.
+    const agent = r.senderId;
     const bucket = agent ? (byAgent.get(agent) ?? { first: [], all: [] }) : null;
     bucket?.all.push(gap);
     if (!answeredHuman.has(r.conversationId)) {
@@ -384,10 +387,10 @@ export async function supportStats(companyId: string, w: PeriodWindow) {
   };
 }
 
-/** One row per active member: conversations in the window + reply times. */
+/** One row per active member who replied to a customer in the window: reply count, conversations + reply times. Members who did not reply are left out. */
 export async function agentsReport(companyId: string, w: PeriodWindow, deptId?: string) {
   const db = getDb();
-  const [members, depts, rows, replies] = await Promise.all([
+  const [members, depts, rows, sends, replies] = await Promise.all([
     db.query.member.findMany({
       where: and(
         eq(member.companyId, companyId),
@@ -419,10 +422,29 @@ export async function agentsReport(companyId: string, w: PeriodWindow, deptId?: 
         )
       )
       .groupBy(conversation.assignedAgentId),
+    // Human replies the member actually SENT in the window (uncapped SQL count,
+    // not the sampled walk) — the plain "how much did they reply" figure, which
+    // the assigned/open/closed columns miss for a shared inbox.
+    db
+      .select({ memberId: message.sentByMemberId, replied: count() })
+      .from(message)
+      .innerJoin(conversation, eq(conversation.id, message.conversationId))
+      .innerJoin(contact, eq(contact.id, conversation.contactId))
+      .where(
+        and(
+          eq(contact.companyId, companyId),
+          eq(message.direction, "OUT"),
+          eq(message.isBot, false),
+          isNotNull(message.sentByMemberId),
+          gte(message.createdAt, w.since)
+        )
+      )
+      .groupBy(message.sentByMemberId),
     replyStats(companyId, w.since),
   ]);
   const deptName = new Map(depts.map((d) => [d.id, d.name]));
   const byAgent = new Map(rows.map((r) => [r.agentId, r]));
+  const repliedBy = new Map(sends.map((r) => [r.memberId, Number(r.replied)]));
   const avg = (xs?: number[]) => (xs && xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null);
   const list = members
     .map((m) => {
@@ -436,12 +458,16 @@ export async function agentsReport(companyId: string, w: PeriodWindow, deptId?: 
         assigned: r?.assigned ?? 0,
         open: r?.open ?? 0,
         closed: r?.closed ?? 0,
+        replied: repliedBy.get(m.id) ?? 0,
         first,
         onTime: first == null ? null : first <= SLA_MINUTES * 60,
         avg: avg(rt?.all),
       };
     })
-    .sort((a, b) => b.assigned - a.assigned || a.name.localeCompare(b.name));
+    // Only people who actually replied to a customer in the window — the report
+    // is about who worked the inbox, so idle members (replied 0) are left out.
+    .filter((a) => a.replied > 0)
+    .sort((a, b) => b.replied - a.replied || b.assigned - a.assigned || a.name.localeCompare(b.name));
   return { list, depts };
 }
 

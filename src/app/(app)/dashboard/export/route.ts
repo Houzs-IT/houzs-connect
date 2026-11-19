@@ -48,8 +48,8 @@ export async function GET(req: Request) {
       row(b.key, vol.series[i].inbound, vol.series[i].outbound, support.series[i].total, support.series[i].assigned)
     ),
     "",
-    row("Agent", "Department", "Assigned", "Open", "Closed", "Avg first reply (s)", "Avg reply (s)"),
-    ...agents.list.map((a) => row(a.name, a.dept, a.assigned, a.open, a.closed, secs(a.first), secs(a.avg))),
+    row("Agent", "Department", "Assigned", "Open", "Closed", "Replied", "Avg first reply (s)", "Avg reply (s)"),
+    ...agents.list.map((a) => row(a.name, a.dept, a.assigned, a.open, a.closed, a.replied, secs(a.first), secs(a.avg))),
   ];
 
   const day = w.buckets[w.buckets.length - 1]?.key ?? "export";

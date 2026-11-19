@@ -26,6 +26,9 @@ function templateFlow(opts: {
   message: string;
   /** Optional contact tag applied after the send (add_tag node). */
   tag?: string;
+  /** When set, the send is job-type-aware (Service Case leg → service template);
+   *  see buildTemplateSendGraph. Houzs-only; never given to 2990. */
+  service?: { templateName: string; params: string[]; message: string };
 }): SeedFlow {
   return {
     key: opts.key,
@@ -40,9 +43,26 @@ function templateFlow(opts: {
         params: opts.params,
         message: opts.message,
         tag: opts.tag,
+        service: opts.service,
       }),
   };
 }
+
+// Delivery reminder copy (unchanged — a normal SO order reads exactly as before).
+const REMINDER_1_MSG = `Hi {full_name} 👋 Just a friendly reminder from {company_signature} about your order *{ref_1}* — your delivery details are ready, and we'd love to share them with you. Whenever you have a moment, simply reply to this message and we'll send your delivery date and driver information right away. Thank you!`;
+const REMINDER_2_MSG = `Hi {full_name} 👋 A gentle follow-up from {company_signature} about your order *{ref_1}* — we're still holding your delivery details and would love to help get it scheduled. Whenever you have a moment, simply reply to this message and we'll share your delivery date and keep you updated right here on WhatsApp. Thank you!`;
+const REMINDER_3_MSG = `Hi {full_name} 👋 One last friendly reminder from {company_signature} about your order *{ref_1}*. We've been trying to reach you to arrange delivery. So we can keep your preferred slot, please reply to this message with a quick confirmation. If we don't hear back, we may need to release the slot and reschedule — but just message us anytime and we'll sort it out together. Thank you!`;
+
+// Service-case reminder copy (mirrors the Meta-approved hc_service_reminder_N):
+// "delivery / driver information / reschedule" rewritten so a pickup or
+// inspection leg reads naturally; the job itself is the {service_job} variable
+// (ERP-written: "service item pickup" / "inspection visit" / "service item
+// delivery").
+const SERVICE_REMINDER_1_MSG = `Hi {full_name} 👋 Just a friendly reminder from Houzs Century about your *{service_job}* for order *{ref_1}* — we're ready to arrange it with you. Whenever you have a moment, simply reply to this message and we'll confirm the date and details right away. Thank you!`;
+const SERVICE_REMINDER_2_MSG = `Hi {full_name} 👋 A gentle follow-up from Houzs Century about your *{service_job}* for order *{ref_1}* — we'd still love to help get it scheduled. Whenever you have a moment, simply reply to this message and we'll confirm the date and keep you updated right here on WhatsApp. Thank you!`;
+const SERVICE_REMINDER_3_MSG = `Hi {full_name} 👋 One last friendly reminder from Houzs Century about your *{service_job}* for order *{ref_1}*. We've been trying to reach you to arrange it. So we can keep your preferred slot, please reply to this message with a quick confirmation. If we don't hear back, we may need to release the slot and arrange another time — but just message us anytime and we'll sort it out together. Thank you!`;
+
+const SERVICE_REMINDER_PARAMS = ["{full_name}", "{service_job}", "{ref_1}"];
 
 export const reminder1Flow = templateFlow({
   key: "reminder_1",
@@ -51,7 +71,7 @@ export const reminder1Flow = templateFlow({
   event: "reminder_1",
   templateName: "hc_order_reminder_1",
   params: ["{full_name}", "{ref_1}"],
-  message: `Hi {full_name} 👋 Just a friendly reminder from {company_signature} about your order *{ref_1}* — your delivery details are ready, and we'd love to share them with you. Whenever you have a moment, simply reply to this message and we'll send your delivery date and driver information right away. Thank you!`,
+  message: REMINDER_1_MSG,
 });
 
 export const reminder2Flow = templateFlow({
@@ -61,7 +81,7 @@ export const reminder2Flow = templateFlow({
   event: "reminder_2",
   templateName: "hc_order_reminder_2",
   params: ["{full_name}", "{ref_1}"],
-  message: `Hi {full_name} 👋 A gentle follow-up from {company_signature} about your order *{ref_1}* — we're still holding your delivery details and would love to help get it scheduled. Whenever you have a moment, simply reply to this message and we'll share your delivery date and keep you updated right here on WhatsApp. Thank you!`,
+  message: REMINDER_2_MSG,
 });
 
 export const reminder3Flow = templateFlow({
@@ -71,7 +91,47 @@ export const reminder3Flow = templateFlow({
   event: "reminder_3",
   templateName: "hc_order_reminder_3",
   params: ["{full_name}", "{ref_1}"],
-  message: `Hi {full_name} 👋 One last friendly reminder from {company_signature} about your order *{ref_1}*. We've been trying to reach you to arrange delivery. So we can keep your preferred slot, please reply to this message with a quick confirmation. If we don't hear back, we may need to release the slot and reschedule — but just message us anytime and we'll sort it out together. Thank you!`,
+  message: REMINDER_3_MSG,
+});
+
+// Houzs's job-type-aware reminders (same automation names). A Service Case leg
+// (service_job set) goes to the service template; a normal order keeps the
+// delivery reminder unchanged. Houzs-only — 2990 keeps the plain ones above
+// (hc_service_reminder_* is a Houzs template; templateGaps would skip it).
+export const reminder1ServiceFlow = templateFlow({
+  key: "reminder_1",
+  name: "Reminder 1",
+  description:
+    "First reminder (manual), job-type-aware: Service Case leg → hc_service_reminder_1 (full_name + job + order ref); normal order keeps hc_order_reminder_1.",
+  event: "reminder_1",
+  templateName: "hc_order_reminder_1",
+  params: ["{full_name}", "{ref_1}"],
+  message: REMINDER_1_MSG,
+  service: { templateName: "hc_service_reminder_1", params: SERVICE_REMINDER_PARAMS, message: SERVICE_REMINDER_1_MSG },
+});
+
+export const reminder2ServiceFlow = templateFlow({
+  key: "reminder_2",
+  name: "Reminder 2",
+  description:
+    "Second reminder (manual), job-type-aware: Service Case leg → hc_service_reminder_2; normal order keeps hc_order_reminder_2.",
+  event: "reminder_2",
+  templateName: "hc_order_reminder_2",
+  params: ["{full_name}", "{ref_1}"],
+  message: REMINDER_2_MSG,
+  service: { templateName: "hc_service_reminder_2", params: SERVICE_REMINDER_PARAMS, message: SERVICE_REMINDER_2_MSG },
+});
+
+export const reminder3ServiceFlow = templateFlow({
+  key: "reminder_3",
+  name: "Reminder 3",
+  description:
+    "Final reminder (manual), job-type-aware: Service Case leg → hc_service_reminder_3; normal order keeps hc_order_reminder_3.",
+  event: "reminder_3",
+  templateName: "hc_order_reminder_3",
+  params: ["{full_name}", "{ref_1}"],
+  message: REMINDER_3_MSG,
+  service: { templateName: "hc_service_reminder_3", params: SERVICE_REMINDER_PARAMS, message: SERVICE_REMINDER_3_MSG },
 });
 
 export const driverInfoFlow = templateFlow({

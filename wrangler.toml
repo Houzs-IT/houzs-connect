@@ -92,6 +92,11 @@ IT_HUB_URL = "https://support.houzscentury.com"
 # failed, but that cause (empty-400 through Next's patched fetch) was fixed with
 # rawFetch 2026-10-05, and the key was rotated to the company Anthropic org.
 RECEIPT_AI = "on"
+# Hookka and Conts accounts sign in by asking their ERP (src/lib/erp-logins.ts);
+# the keys are secrets HOOKKA_LOGIN_KEY / CONTS_LOGIN_KEY on this Worker, the same
+# values as CONNECT_LOGIN_KEY on each ERP (CONNECT-0003).
+HOOKKA_LOGIN_URL = "https://erp.hookka.com"
+CONTS_LOGIN_URL = "https://erp.theconts.com"
 
 [observability]
 enabled = true
