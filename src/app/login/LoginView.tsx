@@ -1,13 +1,14 @@
 "use client";
 
-import { useActionState, useState } from "react";
+import { useActionState, useEffect, useState } from "react";
 import { useShell } from "@/components/shell/ShellProvider";
 import { HouzsConnectMark } from "@/components/brand/HouzsConnectMark";
+import { fmt } from "@/lib/i18n/dict";
 import { login } from "./actions";
 import { submitAccessRequest } from "./request-actions";
 
 /*
-  Sign in with a Houzs ERP account, on the Connect palette: deep ink-blue sky,
+  Sign in with a Houzs, Hookka or Conts ERP account, on the Connect palette: deep ink-blue sky,
   a teal glow, a field of faint stars, and a white glass card.
 */
 
@@ -16,6 +17,10 @@ const ZH_ERRORS: Record<string, string> = {
   "Wrong email or password.": "邮箱或密码错误。",
   "Enter your email and password.": "请输入邮箱和密码。",
   "Cannot reach the staff directory. Ask IT to grant access.": "无法连接员工目录，请联系 IT。",
+  "Your account has no company access in Connect yet. Ask a Super Admin.": "您的账号尚未获得 Connect 的公司权限，请联系超级管理员。",
+  "Enter the code from your authenticator app.": "请输入验证器 App 上的验证码。",
+  "That code is not right.": "验证码不正确。",
+  "Enter your email and password again.": "请重新输入邮箱和密码。",
 };
 
 function Eye({ off }: { off: boolean }) {
@@ -62,6 +67,10 @@ export function LoginView({ openRequest = false }: { openRequest?: boolean }) {
   const { t, lang, setLang } = useShell();
   const L = t.login;
   const [state, formAction, pending] = useActionState(login, {});
+  // Signed in on another company's address: carry on there (login/actions.ts).
+  useEffect(() => {
+    if (state.go) window.location.assign(state.go);
+  }, [state.go]);
   const [show, setShow] = useState(false);
   const [panel, setPanel] = useState<"none" | "forgot" | "request" | "sent">(openRequest ? "request" : "none");
   const [req, setReq] = useState({ name: "", email: "", phone: "", department: "", note: "" });
@@ -173,13 +182,44 @@ export function LoginView({ openRequest = false }: { openRequest?: boolean }) {
               <p className="text-[13px] text-[var(--color-brand)]">{L.sub}</p>
             </div>
 
-            {panel === "none" ? (
+            {state.twoStep ? (
+              <form action={formAction} className="mt-6 flex flex-col gap-4">
+                <div className="rounded-[12px] border border-[var(--color-border)] bg-white p-4">
+                  <div className="mb-1.5 text-[13.5px] font-semibold text-[var(--color-ink)]">{L.twoStepTitle}</div>
+                  <p className="text-[13px] leading-relaxed text-[var(--color-muted)]">{fmt(L.twoStepBody, { system: state.twoStep.systemName })}</p>
+                </div>
+                <input type="hidden" name="system" value={state.twoStep.system} />
+                <input type="hidden" name="challenge" value={state.twoStep.challenge} />
+                <div>
+                  <label className={label} htmlFor="code">
+                    {L.code}
+                  </label>
+                  <input id="code" name="code" inputMode="numeric" autoComplete="one-time-code" required autoFocus placeholder="123456" className={input} />
+                </div>
+                {error && (
+                  <p role="alert" className="flex items-center gap-2 rounded-[8px] bg-[var(--color-danger-soft)] px-3 py-2 text-[12.5px] font-medium text-[var(--color-danger)]">
+                    <span className="grid h-4 w-4 place-items-center rounded-full bg-[var(--color-danger)] text-[10px] text-white">!</span>
+                    {error}
+                  </p>
+                )}
+                <button
+                  type="submit"
+                  disabled={pending}
+                  className="h-[46px] w-full rounded-[10px] bg-[var(--color-accent)] text-[14px] font-semibold text-white shadow-[var(--shadow-primary)] transition-colors hover:bg-[var(--color-accent-hi)] disabled:opacity-60"
+                >
+                  {pending ? L.signingIn : L.verify}
+                </button>
+                <a href="/login" className="text-center text-[13px] font-semibold text-[var(--color-accent)] hover:underline">
+                  {L.startOver}
+                </a>
+              </form>
+            ) : panel === "none" ? (
               <form action={formAction} className="mt-6 flex flex-col gap-4">
                 <div>
                   <label className={`${label} hidden sm:block`} htmlFor="email">
                     {L.email}
                   </label>
-                  <input id="email" name="email" type="email" autoComplete="username" required autoFocus placeholder="you@houzscentury.com" className={input} />
+                  <input id="email" name="email" type="email" autoComplete="username" required autoFocus placeholder="you@company.com" className={input} />
                 </div>
                 <div>
                   <div className="mb-1.5 hidden items-center justify-between sm:flex">
@@ -258,7 +298,7 @@ export function LoginView({ openRequest = false }: { openRequest?: boolean }) {
                 {(
                   [
                     ["name", L.fullName, "text", ""],
-                    ["email", L.workEmail, "email", "you@houzscentury.com"],
+                    ["email", L.workEmail, "email", "you@company.com"],
                     ["phone", L.phone, "tel", "+60"],
                     ["department", L.department, "text", ""],
                     ["note", L.note, "text", L.notePh],

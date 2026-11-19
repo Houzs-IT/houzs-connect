@@ -34,7 +34,8 @@ export const getCurrentMember = cache(async () => {
     where: eq(member.id, memberId),
     with: { department: true },
   });
-  if (!m) return null;
+  // Company access taken away on the Team page ends a session standing in it.
+  if (!m || !m.active) return null;
   // Access removed on the Team page: signed out everywhere, not just at the next sign-in.
   if (await isAccessRemoved(db, m.email)) return null;
   return m;

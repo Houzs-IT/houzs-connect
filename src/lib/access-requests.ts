@@ -21,7 +21,7 @@ export type AccessRequest = {
   createdAt: Date;
 };
 
-/** Requests land in the home company — the first one, the same one sign-in uses. */
+/** Requests land in the home company — the first one. */
 export async function homeCompanyId(): Promise<string | null> {
   const r = (await getDb().execute(sql`
     select id from connect.company order by created_at asc limit 1

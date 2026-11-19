@@ -12,6 +12,7 @@
 // contact list becomes searchable. Keyboard: ↑/↓ move, Enter picks, Esc closes.
 
 import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { IconChevronDown, IconSearch } from "@/components/icons";
 
 export type SelectOption = {
@@ -84,6 +85,10 @@ export function SearchableSelect({
   const hiddenRef = useRef<HTMLInputElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  // Where the open panel sits on screen: under the trigger, or above it when
+  // there is not room below (a row near the bottom of a table).
+  const [pos, setPos] = useState<{ left: number; width: number; top?: number; bottom?: number } | null>(null);
   const autoId = useId();
 
   const selected = options.find((o) => o.value === current) ?? null;
@@ -97,14 +102,27 @@ export function SearchableSelect({
     );
   }, [options, query]);
 
-  // Close on a click outside.
+  // Close on a click outside (the panel lives in <body>, so it counts as inside),
+  // and on any scroll or resize outside the panel: it is placed once, on open.
   useEffect(() => {
     if (!open) return;
+    const inside = (t: EventTarget | null) =>
+      !!(rootRef.current?.contains(t as Node) || panelRef.current?.contains(t as Node));
     const onDown = (e: MouseEvent) => {
-      if (!rootRef.current?.contains(e.target as Node)) setOpen(false);
+      if (!inside(e.target)) setOpen(false);
     };
+    const onScroll = (e: Event) => {
+      if (!inside(e.target)) setOpen(false);
+    };
+    const onResize = () => setOpen(false);
     document.addEventListener("mousedown", onDown);
-    return () => document.removeEventListener("mousedown", onDown);
+    window.addEventListener("scroll", onScroll, true);
+    window.addEventListener("resize", onResize);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      window.removeEventListener("scroll", onScroll, true);
+      window.removeEventListener("resize", onResize);
+    };
   }, [open]);
 
   // On open, move focus into the menu (search box, else the list). The query /
@@ -129,6 +147,19 @@ export function SearchableSelect({
     setQuery("");
     const idx = options.findIndex((o) => o.value === current);
     setActive(idx < 0 ? 0 : idx);
+    // The panel is drawn in <body> at a fixed spot, not inside the trigger: a
+    // table cell that clips its content (DataTable with fixed columns) hid
+    // everything below the search box.
+    const r = rootRef.current?.getBoundingClientRect();
+    if (r) {
+      const PANEL = 288; // max-h-72
+      const below = window.innerHeight - r.bottom;
+      setPos(
+        below < PANEL && r.top > below
+          ? { left: r.left, width: r.width, bottom: window.innerHeight - r.top + 4 }
+          : { left: r.left, width: r.width, top: r.bottom + 4 }
+      );
+    }
     setOpen(true);
   }
 
@@ -205,9 +236,11 @@ export function SearchableSelect({
         )}
       </button>
 
-      {open && (
+      {open && pos && createPortal(
         <div
-          className={`absolute left-0 z-40 mt-1 flex max-h-72 min-w-full flex-col overflow-hidden rounded-[10px] border border-[var(--color-border)] bg-[var(--color-surface)] shadow-[var(--shadow-popover)] ${menuClassName}`}
+          ref={panelRef}
+          style={{ position: "fixed", left: pos.left, top: pos.top, bottom: pos.bottom, minWidth: pos.width }}
+          className={`z-[130] flex max-h-72 flex-col overflow-hidden rounded-[10px] border border-[var(--color-border)] bg-[var(--color-surface)] shadow-[var(--shadow-popover)] ${menuClassName}`}
         >
           {showSearch && (
             <div className="relative shrink-0 border-b border-[var(--color-border)] p-1.5">
@@ -272,7 +305,8 @@ export function SearchableSelect({
               );
             })}
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );

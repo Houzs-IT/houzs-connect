@@ -28,6 +28,7 @@ export function RoleSelect({
   name,
   role,
   canSuper,
+  canManage,
   erpRole = null,
   setHere = false,
 }: {
@@ -36,6 +37,8 @@ export function RoleSelect({
   role: string;
   /** The viewer may grant SUPER_ADMIN (they are one, or none exists yet). */
   canSuper: boolean;
+  /** The viewer may change roles: a Super Admin. */
+  canManage: boolean;
   /** The role the ERP maps this person to, when they are in the ERP. */
   erpRole?: string | null;
   /** The current role was picked here rather than taken from the ERP. */
@@ -53,14 +56,14 @@ export function RoleSelect({
         name="role"
         defaultValue={role}
         submitOnChange
-        disabled={role === "SUPER_ADMIN" && !canSuper}
+        disabled={!canManage && !canSuper}
         aria-label={`Role for ${name}`}
         className={`h-[28px] w-[128px] cursor-pointer appearance-none rounded-full border-0 bg-[length:10px] bg-[right_10px_center] bg-no-repeat px-3 text-[11px] font-semibold uppercase tracking-[0.04em] outline-none focus:shadow-[0_0_0_3px_var(--color-accent-ring)] ${PILL[role] ?? PILL.VIEWER}`}
         options={[
           ...(canSuper || role === "SUPER_ADMIN" ? [{ value: "SUPER_ADMIN", label: "SUPER ADMIN" }] : []),
           ...(role === "OWNER" ? [{ value: "OWNER", label: "OWNER" }] : []),
-          ...ROLE_OPTIONS.map((r) => ({ value: r, label: r })),
-          ...(setHere && erpRole ? [{ value: "ERP", label: fmt(L.useErpRole, { r: erpRole }) }] : []),
+          ...ROLE_OPTIONS.filter((r) => canManage || r === role).map((r) => ({ value: r, label: r })),
+          ...(canManage && setHere && erpRole ? [{ value: "ERP", label: fmt(L.useErpRole, { r: erpRole }) }] : []),
         ]}
       />
       {setHere && erpRole && erpRole !== role && (
