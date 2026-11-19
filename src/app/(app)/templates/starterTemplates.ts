@@ -126,6 +126,55 @@ Thank you so much! ✨`,
     body: `Hi *{{1}}* , this is the Customer Service Team from ${brand.name}. We sincerely apologize for the delay with your order *{{2}}*. Due to *{{3}}*, your order requires additional time to ensure everything meets our standards. Our team is actively working on your items, and we expect to deliver your order within the next delivery timeframe *{{4}}*. Our logistics team will contact you shortly to confirm the exact date and time. Thank you for your patience and for giving us the opportunity to make this right.`,
     examples: ["Wong", "znt7001", "supplier delay", "end of August"],
   },
+  {
+    label: "East Malaysia — prep notice",
+    note: "Touchpoint 1 of the East Malaysia delivery flow. Info only — no amount or bank account.",
+    name: "hc_eastmy_prep_notice",
+    language: "en",
+    category: "UTILITY",
+    body: `Hi {{1}} 👋
+
+Good news! We'll start preparing your ${brand.short} order *{{2}}* this week to next week. After that, our transporter will arrange sea freight to East Malaysia 🚢
+
+🕒 Estimated arrival at {{3}} port: around *2–3 weeks* after dispatch.
+
+Once it arrives and is unloaded at the port, we'll collect the balance payment — then our transporter will contact you to arrange delivery to your door 🚚
+
+If everything's clear, tap *"Noted"*. If you have any questions, tap *"I have a question"* 👇`,
+    examples: ["Wong", "znt7001", "Kota Kinabalu"],
+    buttons: [
+      { type: "QUICK_REPLY", text: "Noted" },
+      { type: "QUICK_REPLY", text: "I have a question" },
+    ],
+  },
+  {
+    label: "East Malaysia — shipped / tracking",
+    note: "Touchpoint 2. One-way 'on its way' notice with forwarder + tracking no. + ETA.",
+    name: "hc_eastmy_shipped",
+    language: "en",
+    category: "UTILITY",
+    body: `Hi {{1}} 👋 Your order *{{2}}* is now on its way to East Malaysia by sea freight 🚢
+
+Forwarder: *{{3}}*
+Consignment / Tracking No.: *{{4}}*
+Estimated arrival at {{5}} port: *{{6}}*
+
+We'll notify you again once it arrives and is ready for the next step. Thank you for your patience! ✨`,
+    examples: ["Wong", "znt7001", "Swift Cargo", "SC123456", "Kota Kinabalu", "early Dec"],
+  },
+  {
+    label: "East Malaysia — arrived at port",
+    note: "Touchpoint 3. 'Arrived & unloaded' notice; the transporter then contacts the customer for home delivery.",
+    name: "hc_eastmy_arrived",
+    language: "en",
+    category: "UTILITY",
+    body: `Hi {{1}} 👋 Great news — your order *{{2}}* has arrived at {{3}} port and is being unloaded 📦
+
+Our transporter will contact you shortly to arrange delivery to your door 🚚
+
+Thank you for your patience! ✨`,
+    examples: ["Wong", "znt7001", "Kota Kinabalu"],
+  },
   ];
 }
 
