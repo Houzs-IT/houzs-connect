@@ -12,7 +12,7 @@ import { buildTemplateSendGraph, ERP_CALLBACK_HEADERS } from "./shared";
  *   1. Prep Notice   (event eastmy_prep)    — timeline heads-up + collect the
  *      transporter's delivery details + (in-window) request the balance.
  *   2. Shipped       (event eastmy_shipped) — one-shot "on its way" notice with
- *      forwarder + tracking no. + ETA.
+ *      tracking no. + ETA.
  *   3. Arrived       (event eastmy_arrived) — one-shot "arrived at port" notice;
  *      the transporter then contacts the customer for home delivery.
  *
@@ -24,7 +24,7 @@ import { buildTemplateSendGraph, ERP_CALLBACK_HEADERS } from "./shared";
  *
  * ERP must inject on the prep trigger: full_name, ref_1, refs_all, phone,
  * callback_url, and amount when a balance is outstanding. Shipped adds
- * forwarder, tracking_no, eta. The destination shown to customers is a FIXED
+ * tracking_no, eta. The destination shown to customers is a FIXED
  * literal "EM" baked into each template send (owner, 2026-11-19) — not injected.
  * All three seed DRAFT/disabled; enable them once the templates are approved on
  * Meta.
@@ -79,7 +79,6 @@ const ASK_ADDRESS = `Lastly, please reply with the *full delivery address* (incl
 
 const SHIPPED_MSG = `Hi {full_name} 👋 Your order *{ref_1}* is now on its way to East Malaysia by sea freight 🚢
 
-Forwarder: *{forwarder}*
 Consignment / Tracking No.: *{tracking_no}*
 Estimated arrival at EM port: *{eta}*
 
@@ -230,14 +229,14 @@ export const eastMyShippedFlow: SeedFlow = {
   key: "eastmy_shipped",
   name: "East Malaysia Shipped",
   description:
-    "East-MY touchpoint 2: one-shot 'on its way' notice (hc_eastmy_shipped) — forwarder + tracking no. + ETA. No buttons.",
+    "East-MY touchpoint 2: one-shot 'on its way' notice (hc_eastmy_shipped) — tracking no. + ETA. No buttons.",
   triggerType: "WEBHOOK",
   triggerConfig: { source: "erp", event: "eastmy_shipped" },
   forms: [],
   build: () =>
     buildTemplateSendGraph({
       templateName: "hc_eastmy_shipped",
-      params: ["{full_name}", "{ref_1}", "{forwarder}", "{tracking_no}", "EM", "{eta}"],
+      params: ["{full_name}", "{ref_1}", "{tracking_no}", "EM", "{eta}"],
       message: SHIPPED_MSG,
       tag: "east malaysia",
     }),
