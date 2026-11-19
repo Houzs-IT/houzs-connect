@@ -21,7 +21,7 @@ import { and, eq, isNull, sql } from "drizzle-orm";
 import { ensureAccessTables } from "@/db/ensure-access";
 import { getDb } from "@/db/client";
 import { bypassReadCache } from "@/db/fresh";
-import { company, member } from "@/db/schema";
+import { company, department, member } from "@/db/schema";
 import { getCurrentMember } from "@/lib/current-member";
 import { roleFromErp } from "@/lib/erp-auth";
 import { photoSrcs } from "@/lib/member-photo";
@@ -60,6 +60,8 @@ export interface Person {
   /** The ERP division: a sub-group within the department. */
   division: string | null;
   reportsTo: string | null;
+  /** The email of the person they report to, to pre-fill the editor. */
+  reportsToEmail: string | null;
   /** companyId -> access, only for companies the person can currently read. */
   access: Record<string, PersonAccess>;
   /** Profile photo URL (lib/member-photo.ts), or null. */
@@ -135,6 +137,7 @@ export async function fetchTeam(): Promise<TeamView> {
 
   const deptName = new Map(departments.map((d) => [d.id, d.name]));
   const memberName = new Map(members.map((m) => [m.id, m.name]));
+  const memberEmail = new Map(members.map((m) => [m.id, m.email]));
 
   // One row per person, keyed by ERP user id when synced, else by email — the
   // same identity the sign-in upsert and sync reconcile on.
@@ -162,6 +165,7 @@ export async function fetchTeam(): Promise<TeamView> {
         department: m.departmentId ? deptName.get(m.departmentId) ?? null : null,
         division: divisionOf.get(m.id) ?? null,
         reportsTo: m.managerId ? memberName.get(m.managerId) ?? null : null,
+        reportsToEmail: m.managerId ? memberEmail.get(m.managerId) ?? null : null,
         access: {},
         photo: null,
         erpRole: null,
@@ -176,7 +180,10 @@ export async function fetchTeam(): Promise<TeamView> {
     if (m.erpUserId == null) p.role = m.role;
     if (!p.department && m.departmentId) p.department = deptName.get(m.departmentId) ?? null;
     if (!p.division && divisionOf.has(m.id)) p.division = divisionOf.get(m.id) ?? null;
-    if (!p.reportsTo && m.managerId) p.reportsTo = memberName.get(m.managerId) ?? null;
+    if (!p.reportsTo && m.managerId) {
+      p.reportsTo = memberName.get(m.managerId) ?? null;
+      p.reportsToEmail = memberEmail.get(m.managerId) ?? null;
+    }
     if (m.active) {
       p.access[m.companyId] = {
         companyId: m.companyId,
@@ -366,4 +373,62 @@ export async function restoreAccess(formData: FormData): Promise<void> {
   `);
   revalidatePath("/settings/team");
   revalidatePath("/inbox");
+}
+
+/**
+ * Department, division and who they report to, for someone the Houzs ERP does
+ * not hold (Hookka, Conts and other manual grants). The ERP sync only ever
+ * writes ERP-linked rows (lib/sync/erp-org.ts applyOrgHierarchy), so what is set
+ * here stays. Written on every active row of the person; a department is found
+ * or created by name in each of their companies, the way the sync does, and the
+ * manager is that person's row in the same company. Super Admin only, like the
+ * company ticks.
+ */
+export async function setOrg(input: { email: string; department: string; division: string; reportsTo: string }): Promise<{ ok: boolean; error?: string }> {
+  const me = await getCurrentMember();
+  if (me?.role !== "SUPER_ADMIN") return { ok: false, error: "Only a Super Admin can change this." };
+  const email = input.email.trim().toLowerCase();
+  const deptName = input.department.trim().slice(0, 80);
+  const division = input.division.trim().slice(0, 80) || null;
+  const bossEmail = input.reportsTo.trim().toLowerCase();
+  if (!email) return { ok: false, error: "Not found." };
+  if (bossEmail && bossEmail === email) return { ok: false, error: "Someone cannot report to themselves." };
+  const db = getDb();
+  await ensureAccessTables(db);
+
+  const rows = await db.query.member.findMany({
+    columns: { id: true, companyId: true, erpUserId: true },
+    where: and(sql`lower(${member.email}) = ${email}`, eq(member.active, true), bypassReadCache()),
+  });
+  if (!rows.length) return { ok: false, error: "Not found." };
+  // The ERP decides this for its own people; Sync from ERP would overwrite it.
+  if (rows.some((r) => r.erpUserId != null)) return { ok: false, error: "This comes from the Houzs ERP. Change it there." };
+
+  if (deptName) {
+    await db.execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS "department_company_name_key" ON "connect"."department" ("company_id", "name")`);
+  }
+  for (const r of rows) {
+    let departmentId: string | null = null;
+    if (deptName) {
+      await db.insert(department).values({ companyId: r.companyId, name: deptName }).onConflictDoNothing({ target: [department.companyId, department.name] });
+      const d = await db.query.department.findFirst({
+        columns: { id: true },
+        where: and(eq(department.companyId, r.companyId), sql`lower(${department.name}) = ${deptName.toLowerCase()}`, bypassReadCache()),
+      });
+      departmentId = d?.id ?? null;
+    }
+    let managerId: string | null = null;
+    if (bossEmail) {
+      const boss = await db.query.member.findFirst({
+        columns: { id: true },
+        where: and(eq(member.companyId, r.companyId), sql`lower(${member.email}) = ${bossEmail}`, eq(member.active, true), bypassReadCache()),
+      });
+      managerId = boss?.id ?? null;
+    }
+    await db.update(member).set({ departmentId, managerId }).where(eq(member.id, r.id));
+    await db.execute(sql`update connect.member set division = ${division} where id = ${r.id}`);
+  }
+  revalidatePath("/settings/team");
+  revalidatePath("/inbox");
+  return { ok: true };
 }
