@@ -113,13 +113,21 @@ export const eastMyPrepFlow: SeedFlow = {
   key: "eastmy_prep",
   name: "East Malaysia Prep Notice",
   description:
-    "East-MY touchpoint 1: prep/sea-freight timeline + Noted/Question fork, collect delivery details (name/phone/address), in-window balance request, ERP callback.",
+    "East-MY touchpoint 1: tags EM Order + assigns to Syasya at blast-out, then prep/sea-freight timeline + Noted/Question fork, collect delivery details (name/phone/address), in-window balance request, ERP callback.",
   triggerType: "WEBHOOK",
   triggerConfig: { source: "erp", event: "eastmy_prep" },
   forms: EASTMY_FORMS,
   build: (formIds) => ({
     nodes: [
       { id: "trigger", type: "trigger", data: {}, x: 40, y: 260 },
+      // At blast-out (the order fires), BEFORE the opener: tag the conversation
+      // "EM Order" and assign it to Syasya. The opener below pauses for the tap,
+      // so anything after it waits on the customer — tag + assign sit here so they
+      // apply to every EM order the moment it is sent. `assignToName` is resolved
+      // to this company's member id at seed time (scripts/seed-flows.ts); an
+      // unmatched name leaves the run unassigned (fail-safe) rather than erroring.
+      { id: "tag_emorder", type: "add_tag", x: 120, y: 120, data: { tag: "EM Order" } },
+      { id: "assign_sya", type: "assign", x: 180, y: 120, data: { assignToName: "Syasya" } },
       {
         id: "ask",
         type: "send_template",
@@ -196,7 +204,9 @@ export const eastMyPrepFlow: SeedFlow = {
       { id: "q_end", type: "end", x: 900, y: 420, data: {} },
     ],
     edges: [
-      { from: "trigger", to: "ask" },
+      { from: "trigger", to: "tag_emorder" },
+      { from: "tag_emorder", to: "assign_sya" },
+      { from: "assign_sya", to: "ask" },
       { from: "ask", to: "set_ack", branch: NOTED_BTN },
       { from: "ask", to: "tag_agent", branch: QUESTION_BTN },
 
