@@ -92,14 +92,22 @@ async function setContactAttr(contactId: string, key: string, value: string) {
     // Append to the history unless the last entry is already this same customer
     // date — the amend loop can re-submit the same date, which should not be
     // recorded twice in a row.
+    // Every ${DELIVERY_DATE_HISTORY_KEY} is cast ::text. Drizzle binds it as an
+    // untyped parameter, and both `jsonb -> $p` (text vs int overload) and
+    // jsonb_build_object($p, ...) (variadic "any") then leave Postgres unable to
+    // infer its type — the whole UPDATE fails with "could not determine data type
+    // of parameter". That silently broke every amended_delivery_date write (the
+    // one CUSTOMER_DATE_KEY), so customer reschedule replies never resumed their
+    // run and the amend callback never reached the ERP. The cast makes each use
+    // resolve to the text overload.
     await db
       .update(contactTable)
       .set({
         attributes: sql`coalesce(${contactTable.attributes}, '{}'::jsonb) || ${patch}::jsonb || case
-          when coalesce(${contactTable.attributes} -> ${DELIVERY_DATE_HISTORY_KEY} -> -1 ->> 'date', '') = ${value}
-           and coalesce(${contactTable.attributes} -> ${DELIVERY_DATE_HISTORY_KEY} -> -1 ->> 'source', '') = 'customer'
+          when coalesce(${contactTable.attributes} -> ${DELIVERY_DATE_HISTORY_KEY}::text -> -1 ->> 'date', '') = ${value}
+           and coalesce(${contactTable.attributes} -> ${DELIVERY_DATE_HISTORY_KEY}::text -> -1 ->> 'source', '') = 'customer'
           then '{}'::jsonb
-          else jsonb_build_object(${DELIVERY_DATE_HISTORY_KEY}, coalesce(${contactTable.attributes} -> ${DELIVERY_DATE_HISTORY_KEY}, '[]'::jsonb) || ${entry}::jsonb)
+          else jsonb_build_object(${DELIVERY_DATE_HISTORY_KEY}::text, coalesce(${contactTable.attributes} -> ${DELIVERY_DATE_HISTORY_KEY}::text, '[]'::jsonb) || ${entry}::jsonb)
         end`,
       })
       .where(eq(contactTable.id, contactId));

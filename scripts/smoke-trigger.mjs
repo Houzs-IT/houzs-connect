@@ -98,6 +98,7 @@ async function main() {
   const CALLBACK_ID = "SMOKE";
   const CALLBACK_ID_B = "SMOKE-B";
   const CALLBACK_ID_C = "SMOKE-C";
+  const CALLBACK_ID_D = "SMOKE-D";
   const PHONE = "60111111111";
 
   // (1) Teardown any prior smoke data for a deterministic starting point. The
@@ -134,7 +135,7 @@ async function main() {
     await db.delete(channel).where(eq(channel.companyId, prior.id));
     await db.delete(company).where(eq(company.id, prior.id));
   }
-  await db.delete(webhookEvent).where(inArray(webhookEvent.eventType, [CALLBACK_ID, CALLBACK_ID_B, CALLBACK_ID_C]));
+  await db.delete(webhookEvent).where(inArray(webhookEvent.eventType, [CALLBACK_ID, CALLBACK_ID_B, CALLBACK_ID_C, CALLBACK_ID_D]));
 
   // (2) Create the throwaway company + channel + the ACTION_CALLBACK automation.
   const [companyRow] = await db
@@ -399,6 +400,73 @@ async function main() {
       .where(and(eq(message.conversationId, conversationId), eq(message.direction, "OUT")))
   ).filter((m) => !outIdsBeforeC.has(m.id));
   assert(outC.length === 1 && outC[0].body === "Fallback question?", `only the fallback question may go out, got ${outC.map((m) => m.body).join(" | ")}`);
+
+  // (8) A PUBLISHED date form (the amend "New Delivery Date" flow): the customer's
+  //     submission must RESUME the run and write amended_delivery_date onto the
+  //     contact. This is the amend/reschedule callback path. Regression for the
+  //     Nov-2026 outage where setContactAttr's delivery_date_history merge bound
+  //     an untyped jsonb-key parameter, so the UPDATE died with "could not
+  //     determine data type of parameter" and the run sat waiting forever — the
+  //     ERP never saw the new date. amended_delivery_date is the one
+  //     CUSTOMER_DATE_KEY, so only this path exercised the broken merge.
+  const [dateForm] = await db
+    .insert(form)
+    .values({
+      companyId: companyRow.id,
+      name: "Smoke New Delivery Date",
+      status: "published",
+      fields: [{ key: "amended_delivery_date", label: "Preferred delivery date", type: "date" }],
+      metaFlowId: "987654321",
+    })
+    .returning();
+  const [autoD] = await db
+    .insert(automation)
+    .values({
+      companyId: companyRow.id,
+      channelId: channelRow.id,
+      name: "Smoke ACTION_CALLBACK D",
+      description: "smoke-trigger test automation D (published date form)",
+      triggerType: "ACTION_CALLBACK",
+      triggerConfig: { event: "ACTION_CALLBACK", callbackId: CALLBACK_ID_D, keywords: [] },
+      status: "PUBLISHED",
+      enabled: true,
+      graph: {
+        nodes: [
+          { id: "d_trigger", type: "trigger", x: 40, y: 200, data: { event: "ACTION_CALLBACK", callbackId: CALLBACK_ID_D } },
+          { id: "d_form", type: "send_form", x: 260, y: 200, data: { message: "Please choose your desired delivery date.", formId: dateForm.id } },
+          { id: "d_end", type: "end", x: 480, y: 200, data: {} },
+        ],
+        edges: [
+          { from: "d_trigger", to: "d_form" },
+          { from: "d_form", to: "d_end" },
+        ],
+      },
+    })
+    .returning();
+  const resD = await send(CALLBACK_ID_D, "SMK-7");
+  assert(resD.ok && resD.runs.length === 1 && resD.triggered.includes(autoD.name), `send D: ${JSON.stringify(resD)}`);
+  let runD = await runById(resD.runs[0]);
+  assert(runD.status === "waiting", `run D should wait at the published form, got '${runD.status}'`);
+  assert(runD.cursorNodeId === "d_form", `run D must pause at d_form, got '${runD.cursorNodeId}'`);
+
+  const SUBMITTED_DATE = "2026-12-01";
+  const tapD = await handleInboundMessage(contactId, { flow: { fields: { amended_delivery_date: SUBMITTED_DATE } } });
+  assert(tapD.resumed === 1, `the form submission must resume exactly one run, got resumed=${tapD.resumed}`);
+  runD = await runById(resD.runs[0]);
+  assert(runD.status === "completed", `run D should complete after the submission, got '${runD.status}'`);
+
+  const contactAfterForm = await db.query.contact.findFirst({ where: eq(contact.id, contactId) });
+  const attrsAfterForm = contactAfterForm?.attributes ?? {};
+  assert(
+    attrsAfterForm.amended_delivery_date === SUBMITTED_DATE,
+    `the submitted date must land on the contact, got '${attrsAfterForm.amended_delivery_date}'`
+  );
+  const history = Array.isArray(attrsAfterForm.delivery_date_history) ? attrsAfterForm.delivery_date_history : [];
+  const lastEntry = history[history.length - 1];
+  assert(
+    lastEntry && lastEntry.date === SUBMITTED_DATE && lastEntry.source === "customer",
+    `the customer date must be appended to delivery_date_history, got ${JSON.stringify(lastEntry)}`
+  );
 
   console.log("SMOKE PASS:");
   console.log(`  automation:     ${autoRow.id} (${autoRow.name})`);
