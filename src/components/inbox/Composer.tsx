@@ -21,6 +21,7 @@ import { REPLY_EVENT, type ReplyTarget } from "@/components/inbox/ReplyButton";
 import {
   ATTACHMENT_ACCEPT,
   checkAttachment,
+  classifyAttachment,
   formatBytes,
   MAX_CAPTION_CHARS,
   MAX_DOCUMENT_BYTES,
@@ -183,6 +184,17 @@ export function Composer({
   const textRef = useRef<HTMLTextAreaElement>(null);
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const note = kind === "note";
+  // Thumbnail of a picked image. The URL is made inside the effect, so
+  // StrictMode's double run never leaves the <img> on a revoked URL.
+  const thumbRef = useRef<HTMLImageElement>(null);
+  const fileMime = file ? resolveMimeType(file.name, file.type) : "";
+  const isImage = classifyAttachment(fileMime) === "IMAGE";
+  useEffect(() => {
+    if (!file || !isImage || !thumbRef.current) return;
+    const url = URL.createObjectURL(file);
+    thumbRef.current.src = url;
+    return () => URL.revokeObjectURL(url);
+  }, [file, isImage]);
   useEffect(() => {
     const onReply = (e: Event) => {
       setReplyTarget((e as CustomEvent<ReplyTarget>).detail);
@@ -288,6 +300,15 @@ export function Composer({
     setFile(null);
     setCaption("");
     setPanel(null);
+  }
+
+  /** Open the picked file in a new tab so the operator can check it before it goes out. */
+  function openPreview(f: File) {
+    // Declare the resolved type: Windows often reports "" and the tab would download it instead.
+    const url = URL.createObjectURL(new Blob([f], { type: resolveMimeType(f.name, f.type) }));
+    window.open(url, "_blank");
+    // The new tab has its own copy by then; free the blob.
+    setTimeout(() => URL.revokeObjectURL(url), 60_000);
   }
 
   // ── Voice notes ────────────────────────────────────────────────────────────
@@ -742,13 +763,34 @@ export function Composer({
         >
           {file ? (
             <div className="px-1 pb-1">
+              {isImage && (
+                <button
+                  type="button"
+                  onClick={() => openPreview(file)}
+                  title="Open full size"
+                  className="mb-2 block w-full overflow-hidden rounded-lg bg-[var(--color-surface-2)]"
+                >
+                  {/* eslint-disable-next-line @next/next/no-img-element -- local blob URL, next/image cannot load it */}
+                  <img ref={thumbRef} alt={`Preview of ${file.name}`} className="mx-auto max-h-48 object-contain" />
+                </button>
+              )}
               <div className="mb-2 flex items-center gap-2 rounded-lg bg-[var(--color-surface-2)] px-2.5 py-2">
                 <span className="min-w-0 flex-1 truncate text-[12.5px] text-[var(--color-ink)]">
                   {file.name}
                 </span>
                 <span className="flex-none text-[11px] text-[var(--color-faint)]">
+                  {file.name.includes(".") && `${file.name.split(".").pop()!.toUpperCase()} · `}
                   {formatBytes(file.size)}
                 </span>
+                {(fileMime === "application/pdf" || fileMime === "text/plain") && (
+                  <button
+                    type="button"
+                    onClick={() => openPreview(file)}
+                    className="flex-none text-[11.5px] font-medium text-[var(--color-accent)] hover:underline"
+                  >
+                    Preview
+                  </button>
+                )}
               </div>
               <input
                 value={caption}
@@ -767,6 +809,18 @@ export function Composer({
                   className="rounded-lg border border-[var(--color-border)] px-3 py-1.5 text-[12.5px] text-[var(--color-muted)] disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   Change
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setFile(null);
+                    setCaption("");
+                    setError(null);
+                  }}
+                  disabled={busy}
+                  className="rounded-lg border border-[var(--color-border)] px-3 py-1.5 text-[12.5px] text-[var(--color-muted)] disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Remove
                 </button>
                 <button
                   type="button"
