@@ -30,9 +30,14 @@ const bigintAsNumber = {
   serialize: (x: number | string) => String(x),
 };
 
+// Hyperdrive's binding host was `<id>.hyperdrive.local`; it is now `<id>.workers.alt`.
+export function isHyperdriveUrl(databaseUrl: string): boolean {
+  return /hyperdrive\.local|\.workers\.alt[:/]/i.test(databaseUrl);
+}
+
 /**
  * Fresh postgres.js client for the given connection URL. Detects a
- * Hyperdrive-backed URL by its `*.hyperdrive.local` host. Prod reads
+ * Hyperdrive-backed URL by its host (see isHyperdriveUrl). Prod reads
  * `env.HYPERDRIVE.connectionString`; local dev reads the direct Supabase
  * pooler URL from `DATABASE_URL` in .dev.vars.
  */
@@ -44,7 +49,7 @@ export function getSql(databaseUrl: string): Sql {
     );
   }
 
-  const isHyperdrive = /hyperdrive\.local/i.test(databaseUrl);
+  const isHyperdrive = isHyperdriveUrl(databaseUrl);
 
   // Opt-in escape hatch for a plain, non-TLS Postgres (CI service container, local
   // `docker run postgres`). Only triggers when the URL explicitly asks for it, so
