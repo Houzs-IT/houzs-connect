@@ -55,6 +55,16 @@ jobs:
       - name: Trigger smoke test (real Postgres, real engine)
         run: node scripts/smoke-trigger.mjs
 
+      # AI Connector (MCP): PKCE, redirect rule, path gating, secret stripping,
+      # and that no "use server" module is reachable from the connector.
+      - name: AI Connector smoke test (pure, no DB)
+        run: node scripts/smoke-mcp.mjs
+
+      # AI Connector end to end against the real Postgres: OAuth → token → MCP
+      # tools, own visibility + modules, blocked paths, refresh, disconnect, leak check.
+      - name: AI Connector smoke test (real Postgres)
+        run: node scripts/smoke-mcp-db.mjs
+
       - name: Org-sync planner smoke test (pure, no DB)
         run: node scripts/smoke-org-sync.mjs
 
