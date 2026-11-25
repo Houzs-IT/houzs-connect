@@ -11,6 +11,7 @@ import { verifyTurnstile } from "@/lib/turnstile";
 import { company, member } from "@/db/schema";
 import { brandForCompany, brandForHost, companyOrigin, pickLoginRow } from "@/lib/company-brand";
 import { askErp, configuredErps, erpOrder, OTHER_ERPS, type OtherErp } from "@/lib/erp-logins";
+import { MCP_RETURN_COOKIE } from "@/lib/mcp/core";
 import {
   verifyErpPassword,
   roleFromErp,
@@ -165,6 +166,12 @@ export async function login(
   const token = await signSession(m.id, secret);
   const jar = await cookies();
   jar.set(SESSION_COOKIE, token, SESSION_COOKIE_OPTIONS);
+  // Signed in to approve an AI app (AI Connector, api/mcp/oauth/authorize): back to its Allow page.
+  const mcpReturn = jar.get(MCP_RETURN_COOKIE)?.value ?? "";
+  if (mcpReturn) {
+    jar.delete(MCP_RETURN_COOKIE);
+    if (/^mcpa_[A-Za-z0-9_-]{10,64}$/.test(mcpReturn)) redirect(`/api/mcp/oauth/authorize?request=${mcpReturn}`);
+  }
   redirect("/inbox");
 }
 

@@ -14,6 +14,41 @@ to the next owner** — see §7.
 
 ---
 
+## AI Connector (MCP) — 2026-11-25, branch `feat/mcp-connector`
+
+Owner 2026-11-25 「connects 也是要」: the same AI Connector Hookka ERP and Houzs ERP
+have. Staff connect Claude / ChatGPT with their OWN Connect login; READ-ONLY; it sees
+only what that login sees; the connector admin (role SUPER_ADMIN or OWNER) approves
+each person, sees every lookup and can disconnect anyone (Settings → AI Connector,
+works on a phone).
+
+- **Connector URL:** `https://<company address>/api/mcp` (e.g.
+  `https://chat.houzscentury.com/api/mcp`). A token belongs to the member row of the
+  company the person signed in to, so connect from the company's own address.
+- **Code:** `src/lib/mcp/` (core = pure, store = tables, reads = what can be read,
+  server = JSON-RPC + identity, oauth = register/authorize/token, admin = page data +
+  leak check); routes `src/app/api/mcp/**`, discovery `src/app/.well-known/oauth-*`;
+  page `src/app/(app)/settings/(center)/ai-connector/`; one Settings menu entry; the
+  sign-in action returns to a pending Allow page (cookie `hc_mcp_return`, 10 min).
+- **Read-only + own permissions, by construction:** the `hcmcp_` token is accepted only
+  by `POST /api/mcp`; the app's own auth (session cookie, `hc_` API keys) never reads it,
+  so it cannot open a page, call `/api/v1` or run a server action. Tool calls do not
+  re-enter the app: they run a fixed catalogue of SELECT-only functions
+  (`lib/mcp/reads.ts`) that reuse the pages' own predicates — Settings → Access modules
+  (`resolveModules` + `moduleChoices`), the inbox rail's company + org-chart visibility
+  (`inboxScopes` + `unifiedConversationWhere`; a thread is readable only if it passes
+  it), `contactsWhere`, the dashboard / log queries. No "use server" module is
+  reachable (pinned by `scripts/smoke-mcp.mjs`). Internal chat and Settings are never
+  exposed. Credential-shaped keys are stripped; replies capped at 60k chars.
+- **Tables:** migration `0027_mcp_connector.sql`, self-applied at runtime by
+  `src/db/ensure-mcp.ts` (prod does not run db:migrate). Tokens: SHA-256 only, access
+  24 h, refresh 90 d (rotating). Every call → `connect.mcp_calls`.
+- **Tests:** `scripts/smoke-mcp.mjs` (pure) and `scripts/smoke-mcp-db.mjs` (real
+  Postgres, end to end through the real handlers; refuses any non-localhost DB), both in CI.
+- **Not yet proven on production:** a real Claude / ChatGPT connection, and the
+  sign-in → back-to-Allow hop (needs a real ERP login). First production use creates
+  the tables through ensure-mcp.
+
 ## 0. 2026-09-14 — several WhatsApp numbers, each in its own company
 
 **State before this change (read on production, read-only, 2026-09-14):** WhatsApp is
