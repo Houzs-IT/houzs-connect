@@ -202,16 +202,58 @@ export async function refreshTokens(db: DB, refreshToken: string, clientId: stri
 
 export type McpTokenRow = { tokenId: string; memberId: string; clientId: string };
 
-/** The token row behind an access token (unknown / expired / revoked → null). Access is re-checked by the caller. */
-export async function resolveAccessToken(db: DB, token: string): Promise<McpTokenRow | null> {
+export type McpTokenCheck = McpTokenRow & {
+  /** The member row behind the token is active. */
+  active: boolean;
+  /** Connect access removed on the Team page (connect.access_removed). */
+  removed: boolean;
+  /** An AI Connector approval row exists (admins need none — the caller decides). */
+  approved: boolean;
+  /** Settings → Access ticks for this person in this company (lib/full-access.ts moduleChoices). */
+  moduleChoices: { module: string; allowed: boolean }[];
+};
+
+/**
+ * Everything the door needs about a connector token, in ONE round trip: the
+ * token row (last_used_at stamped by the same UPDATE that validates it), and for
+ * its member — active, access removed, AI Connector approval, Settings → Access
+ * ticks. Before 2026-11-25 these were four or five sequential queries per
+ * request (resolveAccessToken, isAccessRemoved, hasMcpAccess, moduleChoices).
+ * Same rules, same tables, same comparisons (emails lower-cased, as those
+ * helpers do). The UPDATE is never served from Hyperdrive's read cache, so a
+ * Disconnect / Remove counts on the very next request. The caller still reads
+ * the member row itself (with its department) and applies the rules.
+ * Needs ensureAccessTables (module_access / access_removed) to have run.
+ */
+export async function checkAccessToken(db: DB, token: string): Promise<McpTokenCheck | null> {
   if (!token.startsWith(MCP_TOKEN_PREFIX) || token.length > 200) return null;
   const r = (await rows(db, sql`
-    update connect.mcp_tokens set last_used_at = now()
-    where access_hash = ${await sha256Hex(token)} and revoked_at is null and access_expires_at > now()
-    returning id, member_id, client_id
+    with t as (
+      update connect.mcp_tokens set last_used_at = now()
+      where access_hash = ${await sha256Hex(token)} and revoked_at is null and access_expires_at > now()
+      returning id, member_id, client_id
+    )
+    select t.id, t.member_id, t.client_id,
+      coalesce(m.active, false) as active,
+      exists (select 1 from connect.access_removed ar where ar.email = lower(m.email)) as removed,
+      exists (select 1 from connect.mcp_access a where a.email = lower(m.email)) as approved,
+      coalesce((
+        select json_agg(json_build_object('module', ma.module, 'allowed', ma.allowed))
+        from connect.module_access ma where ma.company_id = m.company_id and ma.email = lower(m.email)
+      ), '[]'::json) as module_choices
+    from t left join connect.member m on m.id = t.member_id
   `))[0];
   if (!r) return null;
-  return { tokenId: s(r, "id"), memberId: s(r, "member_id"), clientId: s(r, "client_id") };
+  const choices = Array.isArray(r.module_choices) ? (r.module_choices as { module: unknown; allowed: unknown }[]) : [];
+  return {
+    tokenId: s(r, "id"),
+    memberId: s(r, "member_id"),
+    clientId: s(r, "client_id"),
+    active: r.active === true,
+    removed: r.removed === true,
+    approved: r.approved === true,
+    moduleChoices: choices.map((c) => ({ module: String(c.module), allowed: c.allowed === true })),
+  };
 }
 
 /** Revoke one connection; with `email`, only if it is that person's. */
@@ -233,15 +275,22 @@ export async function revokeEmailTokens(db: DB, email: string): Promise<number> 
 
 // ── call log ──────────────────────────────────────────────────────────────
 
-export async function logCall(
-  db: DB,
-  c: { tokenId: string; memberId: string; email: string; companyId: string; clientId: string; tool: string; target: string; status: number; ok: boolean; note: string; ms: number }
-): Promise<void> {
+export type McpCallRow = { tokenId: string; memberId: string; email: string; companyId: string; clientId: string; tool: string; target: string; status: number; ok: boolean; note: string; ms: number };
+
+/**
+ * Every call of one request in ONE insert. server.ts hands this to waitUntil,
+ * so the AI app's answer no longer waits for the log write. Never throws.
+ */
+export async function logCalls(db: DB, calls: McpCallRow[]): Promise<void> {
+  if (!calls.length) return;
   try {
+    const values = calls.map(
+      (c) => sql`(${`mcpl_${randomToken(12)}`}, ${c.tokenId}, ${c.memberId}, ${c.email.toLowerCase()}, ${c.companyId}, ${c.clientId},
+        ${c.tool.slice(0, 60)}, ${c.target.slice(0, 500)}, ${c.status}, ${c.ok}, ${c.note.slice(0, 300)}, ${c.ms})`
+    );
     await db.execute(sql`
       insert into connect.mcp_calls (id, token_id, member_id, email, company_id, client_id, tool, target, status, ok, note, ms)
-      values (${`mcpl_${randomToken(12)}`}, ${c.tokenId}, ${c.memberId}, ${c.email.toLowerCase()}, ${c.companyId}, ${c.clientId},
-        ${c.tool.slice(0, 60)}, ${c.target.slice(0, 500)}, ${c.status}, ${c.ok}, ${c.note.slice(0, 300)}, ${c.ms})
+      values ${sql.join(values, sql`, `)}
     `);
   } catch (e) {
     console.warn("[mcp] call log failed:", e instanceof Error ? e.message : String(e));

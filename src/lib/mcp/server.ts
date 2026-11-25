@@ -18,34 +18,82 @@
 //    rules requireModule() uses, and conversations go through the inbox rail's
 //    own company + org-chart visibility predicate.
 // 4. Credential-shaped fields are stripped from every reply; replies are capped.
+//
+// Speed (2026-11-25, owner: searching felt slow): quick answers (inbox_overview,
+// service_performance) answer the common questions in one call; search / fetch
+// in the shape ChatGPT requires; the door check is ONE query (store.ts
+// checkAccessToken) plus the member read; the person's conversation scope is
+// worked out once per request; the call log is one insert per request, written
+// after the answer (waitUntil) instead of before it.
 
 import { and, eq } from "drizzle-orm";
 import type { DB } from "@/db/client";
 import { member } from "@/db/schema";
 import { bypassReadCache } from "@/db/fresh";
-import { moduleChoices } from "@/lib/full-access";
+import { ensureAccessTables } from "@/db/ensure-access";
 import { resolveModules, type Module } from "@/lib/module-access";
-import { isAccessRemoved } from "@/lib/team-access";
-import { CORS_HEADERS, capText, classifyPath, MCP_PROTOCOL_VERSIONS, MCP_BLOCKED_PREFIXES, redactSecrets } from "./core";
-import { ENDPOINTS, ReadError, companyName, findEndpoint, moduleCatalog, type McpMember, type ReadCtx } from "./reads";
-import { hasMcpAccess, logCall, mcpDb, resolveAccessToken } from "./store";
+import { CORS_HEADERS, classifyPath, fitReply, isMcpAdminRole, MAX_RESULT_CHARS, MCP_PROTOCOL_VERSIONS, MCP_BLOCKED_PREFIXES, redactSecrets } from "./core";
+import { conversationDoc, contactDoc, parseFetchId, PROMPTS, promptText, recordUrl } from "./quick";
+import { ENDPOINTS, ReadError, companyName, findEndpoint, moduleCatalog, searchRecords, type McpMember, type ReadCtx } from "./reads";
+import { checkAccessToken, logCalls, mcpDb, type McpCallRow } from "./store";
 
 export const SERVER_INFO = { name: "houzs-connect", title: "Houzs Connect", version: "1.0.0" };
 
-export type Identity = { tokenId: string; clientId: string; me: McpMember; modules: Module[] };
+/** One request's caller. `memo` is per request (made fresh by mcpIdentity) — see ReadCtx. */
+export type Identity = { tokenId: string; clientId: string; me: McpMember; modules: Module[]; memo: Map<string, Promise<unknown>> };
 type RpcReq = { jsonrpc?: string; id?: string | number | null; method?: string; params?: Record<string, unknown> };
 export type ToolResult = { content: { type: "text"; text: string }[]; isError?: boolean };
 const text = (t: string, isError = false): ToolResult => ({ content: [{ type: "text", text: t }], ...(isError ? { isError: true } : {}) });
 
 const INSTRUCTIONS = `You are connected to Houzs Connect — the company's WhatsApp customer-service and follow-up platform (Service inbox, customers/contacts, payment slips, campaigns, automations, dashboard, message logs) — as the signed-in staff member.
 Everything is READ-ONLY and limited to what this person can see in Houzs Connect. Never guess figures a call did not return.
-Start with list_modules, then list_endpoints, then connect_get with a path such as /conversations or /contacts. Use query parameters (q, status, limit, days) to keep answers small.
+ANSWER FAST — use a quick answer first; it is one call and already summarised:
+- Inbox now (open / waiting for our reply, by channel and by person, longest waits, today's and this week's messages, contacts added): inbox_overview.
+- Response times / reply rate / who replied most, message volume vs the period before: service_performance {days: 7 | 30 | 90}.
+- A customer, phone or order number: search {query}, then fetch {id} for the conversation or contact.
+Only when no quick answer fits: connect_get with a path from list_endpoints (e.g. /conversations?status=OPEN, /payments?status=PENDING, /logs/messages?days=1). Pass q / status / days / limit to keep replies small.
+A field missing from a reply means it is empty. Times are UTC ISO unless a reply says Malaysia time.
 If a call says "Not available to your role", tell the person they do not have access to that part of Houzs Connect.`;
 
 const RO = { readOnlyHint: true, destructiveHint: false, openWorldHint: false };
-export const TOOLS = [
-  { name: "whoami", title: "Who am I connected as", description: "The Houzs Connect account this connection uses: name, company, role and which modules it can read.", inputSchema: { type: "object", properties: {}, additionalProperties: false }, annotations: RO },
-  { name: "list_modules", title: "List modules", description: "The Houzs Connect modules this person can read, with how many read endpoints each has. Start here.", inputSchema: { type: "object", properties: {}, additionalProperties: false }, annotations: RO },
+const NO_ARGS = { type: "object", properties: {}, additionalProperties: false };
+/** Tools tied to one module are only listed to a person who has it (`module`, stripped from tools/list). */
+export const TOOLS: ({ name: string; module?: Module } & Record<string, unknown>)[] = [
+  {
+    name: "inbox_overview",
+    module: "inbox",
+    title: "Inbox overview (quick answer)",
+    description:
+      "The Service inbox right now in ONE call: open / pending / queued conversations, how many wait for our reply, by channel and by person, the 5 longest waits, and messages, new conversations and contacts added today and in the last 7 days. Only conversations this person can see.",
+    inputSchema: NO_ARGS,
+    annotations: RO,
+  },
+  {
+    name: "service_performance",
+    module: "dashboard",
+    title: "Service performance (quick answer)",
+    description:
+      "Customer-service figures for the last 7, 30 or 90 days in ONE call: reply rate, average first reply and reply time (overall and per person), conversations by status, messages in/out vs the period before. Same numbers as the Dashboard.",
+    inputSchema: { type: "object", properties: { days: { type: "number", enum: [7, 30, 90], description: "Default 7" } }, additionalProperties: false },
+    annotations: RO,
+  },
+  {
+    name: "search",
+    title: "Search conversations and contacts",
+    description:
+      'Search the conversations and customers this person can see by name, phone, order number or message text. Returns {"results":[{"id","title","url"}]}; open one with fetch.',
+    inputSchema: { type: "object", properties: { query: { type: "string", description: "Name, phone, order number or words from a message" } }, required: ["query"], additionalProperties: false },
+    annotations: RO,
+  },
+  {
+    name: "fetch",
+    title: "Open a conversation or contact",
+    description: 'Open one search result by its id (e.g. "conversation:abc123" or "contact:abc123"). Returns {"id","title","text","url","metadata"}.',
+    inputSchema: { type: "object", properties: { id: { type: "string", description: "An id from search" } }, required: ["id"], additionalProperties: false },
+    annotations: RO,
+  },
+  { name: "whoami", title: "Who am I connected as", description: "The Houzs Connect account this connection uses: name, company, role and which modules it can read.", inputSchema: NO_ARGS, annotations: RO },
+  { name: "list_modules", title: "List modules", description: "The Houzs Connect modules this person can read, with how many read endpoints each has.", inputSchema: NO_ARGS, annotations: RO },
   {
     name: "list_endpoints",
     title: "List read endpoints",
@@ -56,7 +104,7 @@ export const TOOLS = [
   {
     name: "connect_get",
     title: "Read from Houzs Connect",
-    description: "Read one endpoint as the signed-in person and return its JSON. Large replies are cut; narrow them with query parameters.",
+    description: "Read one endpoint (from list_endpoints) as the signed-in person and return its JSON. Prefer a quick answer or search first. Long lists are trimmed to fit; narrow them with query parameters.",
     inputSchema: {
       type: "object",
       properties: {
@@ -70,18 +118,23 @@ export const TOOLS = [
   },
 ];
 
-/** The person behind a connector token, or null (unknown / expired / revoked / inactive / access removed). */
+/**
+ * The person behind a connector token, or null (unknown / expired / revoked /
+ * inactive / access removed / AI Connector access taken away). Two queries: the
+ * token + every access rule (store.checkAccessToken), then the member row with
+ * its department. Both bypass Hyperdrive's read cache.
+ */
 export async function mcpIdentity(db: DB, token: string): Promise<Identity | null> {
-  await mcpDb(db);
-  const row = await resolveAccessToken(db, token);
-  if (!row) return null;
+  await Promise.all([mcpDb(db), ensureAccessTables(db)]);
+  const t = await checkAccessToken(db, token);
+  if (!t || !t.active || t.removed) return null;
   // Fresh (db/fresh.ts): a person switched off a moment ago must not get one more answer.
-  const me = await db.query.member.findFirst({ where: and(eq(member.id, row.memberId), bypassReadCache()), with: { department: true } });
+  const me = await db.query.member.findFirst({ where: and(eq(member.id, t.memberId), bypassReadCache()), with: { department: true } });
   if (!me || !me.active) return null;
-  if (await isAccessRemoved(db, me.email)) return null;
-  if (!(await hasMcpAccess(db, me.email, me.role))) return null;
-  const modules = resolveModules(me.role, await moduleChoices(me.companyId, me.email));
-  return { tokenId: row.tokenId, clientId: row.clientId, me, modules };
+  // Connector admins always may; everyone else needs an approval (store.hasMcpAccess's rule).
+  if (!isMcpAdminRole(me.role) && !t.approved) return null;
+  const modules = resolveModules(me.role, t.moduleChoices);
+  return { tokenId: t.tokenId, clientId: t.clientId, me, modules, memo: new Map() };
 }
 
 export type ReadOutcome = { result: ToolResult; status: number; note: string; target: string; body: unknown; removed: string[] };
@@ -115,7 +168,7 @@ export async function readEndpoint(db: DB, id: Identity, rawPath: unknown, query
   }
   let body: unknown;
   try {
-    const ctx: ReadCtx = { db, me: id.me, modules: id.modules };
+    const ctx: ReadCtx = { db, me: id.me, modules: id.modules, memo: id.memo };
     body = await found.ep.run(ctx, found.params, q);
   } catch (e) {
     if (e instanceof ReadError) return { result: text(e.message, true), status: e.status, note: e.message.slice(0, 120), target, body: null, removed: [] };
@@ -124,10 +177,38 @@ export async function readEndpoint(db: DB, id: Identity, rawPath: unknown, query
   }
   const { value, removed } = redactSecrets(body);
   const notes = removed.size ? [`Credential fields removed: ${[...removed].join(", ")}.`] : [];
-  return { result: text(capText(JSON.stringify(value), notes).text), status: 200, note: "", target, body: value, removed: [...removed] };
+  return { result: text(fitReply(value, notes).text), status: 200, note: "", target, body: value, removed: [...removed] };
 }
 
-async function callTool(db: DB, id: Identity, name: string, args: Record<string, unknown>): Promise<ToolResult> {
+/** A quick answer is a catalogue endpoint with its own tool name: same gate, redaction and log. */
+const QUICK_PATHS: Record<string, (args: Record<string, unknown>) => { path: string; query: Record<string, unknown> }> = {
+  inbox_overview: () => ({ path: "/inbox/overview", query: {} }),
+  service_performance: (a) => ({ path: "/dashboard/service", query: a.days === undefined ? {} : { days: a.days } }),
+};
+
+const asJson = (v: unknown) => text(JSON.stringify(v));
+
+/** ChatGPT's fetch: one conversation or contact as {id, title, text, url, metadata}. */
+async function fetchRecord(db: DB, id: Identity, rawId: unknown, origin: string): Promise<ReadOutcome> {
+  const f = parseFetchId(rawId);
+  if (!f) {
+    return { result: text('Unknown id — use an id from search, e.g. "conversation:abc123" or "contact:abc123".', true), status: 400, note: "bad id", target: String(rawId ?? "").slice(0, 200), body: null, removed: [] };
+  }
+  const r = await readEndpoint(db, id, f.kind === "conversation" ? `/conversations/${f.rowId}` : `/contacts/${f.rowId}`, {});
+  if (r.result.isError) return r;
+  const doc = f.kind === "conversation" ? conversationDoc(r.body) : contactDoc(r.body);
+  const room = MAX_RESULT_CHARS - 2_000;
+  const body = {
+    id: `${f.kind}:${f.rowId}`,
+    title: doc.title,
+    text: doc.text.length > room ? doc.text.slice(0, room) + "\n[cut — ask for fewer messages with connect_get]" : doc.text,
+    url: recordUrl(origin, f.kind, f.rowId),
+    metadata: r.removed.length ? { ...doc.metadata, credentialFieldsRemoved: r.removed } : doc.metadata,
+  };
+  return { ...r, result: asJson(body) };
+}
+
+async function callTool(db: DB, id: Identity, name: string, args: Record<string, unknown>, origin: string, logs: McpCallRow[]): Promise<ToolResult> {
   const t0 = Date.now();
   let status = 200;
   let note = "";
@@ -167,8 +248,25 @@ async function callTool(db: DB, id: Identity, name: string, args: Record<string,
         query: e.params ?? {},
       }));
       result = text(JSON.stringify({ endpoints: eps }));
-    } else if (name === "connect_get") {
-      const r = await readEndpoint(db, id, args.path, args.query);
+    } else if (name === "connect_get" || QUICK_PATHS[name]) {
+      const q = QUICK_PATHS[name] ? QUICK_PATHS[name](args) : { path: args.path, query: args.query };
+      const r = await readEndpoint(db, id, q.path, q.query);
+      result = r.result;
+      status = r.status;
+      note = r.note;
+      target = r.target;
+    } else if (name === "search") {
+      const query = typeof args.query === "string" ? args.query : "";
+      target = query.slice(0, 200);
+      if (!id.modules.includes("inbox") && !id.modules.includes("contacts")) {
+        result = text("Not available to your role: neither Service nor Contacts is turned on for this account in Houzs Connect.", true);
+        status = 403;
+        note = "no permission";
+      } else {
+        result = asJson({ results: await searchRecords({ db, me: id.me, modules: id.modules, memo: id.memo }, query, origin) });
+      }
+    } else if (name === "fetch") {
+      const r = await fetchRecord(db, id, args.id, origin);
       result = r.result;
       status = r.status;
       note = r.note;
@@ -182,7 +280,7 @@ async function callTool(db: DB, id: Identity, name: string, args: Record<string,
     result = text("The tool failed. Try again.", true);
     status = 500;
   }
-  await logCall(db, {
+  logs.push({
     tokenId: id.tokenId,
     memberId: id.me.id,
     email: id.me.email,
@@ -198,25 +296,49 @@ async function callTool(db: DB, id: Identity, name: string, args: Record<string,
   return result;
 }
 
-export async function handleRpc(db: DB, id: Identity, m: RpcReq): Promise<unknown> {
+/** Tools for this person: a module-bound tool only when they have the module; `module` is not sent. */
+export function toolsFor(modules: Module[]) {
+  return TOOLS.filter((t) => !t.module || modules.includes(t.module)).map((t) => {
+    const out: Record<string, unknown> = { ...t };
+    delete out.module;
+    return out;
+  });
+}
+
+/**
+ * One JSON-RPC message. Tool calls append their call-log row to `logs`; the
+ * caller writes them (handleMcpPost: one insert, after the answer). Without
+ * `logs` (a direct caller), they are written before returning.
+ */
+export async function handleRpc(db: DB, id: Identity, m: RpcReq, origin = "", logs?: McpCallRow[]): Promise<unknown> {
   const reply = (result: unknown) => ({ jsonrpc: "2.0", id: m.id ?? null, result });
   if (!m || typeof m !== "object") return { jsonrpc: "2.0", id: null, error: { code: -32600, message: "Invalid Request" } };
   switch (m.method) {
     case "initialize": {
       const asked = String(m.params?.protocolVersion ?? "");
       const protocolVersion = MCP_PROTOCOL_VERSIONS.includes(asked) ? asked : MCP_PROTOCOL_VERSIONS[0];
-      return reply({ protocolVersion, capabilities: { tools: { listChanged: false } }, serverInfo: SERVER_INFO, instructions: INSTRUCTIONS });
+      return reply({ protocolVersion, capabilities: { tools: { listChanged: false }, prompts: { listChanged: false } }, serverInfo: SERVER_INFO, instructions: INSTRUCTIONS });
     }
     case "ping":
       return reply({});
     case "tools/list":
-      return reply({ tools: TOOLS });
-    case "tools/call":
-      return reply(await callTool(db, id, String(m.params?.name ?? ""), (m.params?.arguments as Record<string, unknown> | undefined) ?? {}));
+      return reply({ tools: toolsFor(id.modules) });
+    case "tools/call": {
+      const own = logs ?? [];
+      const r = await callTool(db, id, String(m.params?.name ?? ""), (m.params?.arguments as Record<string, unknown> | undefined) ?? {}, origin, own);
+      if (!logs) await logCalls(db, own);
+      return reply(r);
+    }
     case "resources/list":
       return reply({ resources: [] });
     case "prompts/list":
-      return reply({ prompts: [] });
+      return reply({ prompts: PROMPTS });
+    case "prompts/get": {
+      const name = String(m.params?.name ?? "");
+      const body = promptText(name, (m.params?.arguments as Record<string, unknown> | undefined) ?? {});
+      if (body === null) return { jsonrpc: "2.0", id: m.id ?? null, error: { code: -32602, message: `Unknown prompt: ${name.slice(0, 60)}` } };
+      return reply({ description: PROMPTS.find((p) => p.name === name)?.description ?? "", messages: [{ role: "user", content: { type: "text", text: body } }] });
+    }
     default:
       if (m.id === undefined || m.id === null || (m.method ?? "").startsWith("notifications/")) return null;
       return { jsonrpc: "2.0", id: m.id, error: { code: -32601, message: `Method not found: ${m.method ?? ""}` } };
@@ -228,8 +350,13 @@ export { CORS_HEADERS };
 const json = (body: unknown, status = 200, extra: Record<string, string> = {}) =>
   new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json", "Cache-Control": "no-store", ...CORS_HEADERS, ...extra } });
 
-/** The whole POST /api/mcp exchange. `origin` is the public address (core.originFor). */
-export async function handleMcpPost(db: DB, req: Request, origin: string): Promise<Response> {
+/**
+ * The whole POST /api/mcp exchange. `origin` is the public address
+ * (core.originFor). `defer` runs bookkeeping after the response (the route
+ * passes the Worker's waitUntil); without it the call log is written before
+ * returning (scripts, tests).
+ */
+export async function handleMcpPost(db: DB, req: Request, origin: string, defer?: (p: Promise<unknown>) => void): Promise<Response> {
   const token = (req.headers.get("authorization") ?? "").match(/^Bearer\s+(.+)$/i)?.[1]?.trim() ?? "";
   const id = token ? await mcpIdentity(db, token) : null;
   if (!id) {
@@ -246,9 +373,15 @@ export async function handleMcpPost(db: DB, req: Request, origin: string): Promi
   const msgs = Array.isArray(body) ? (body as RpcReq[]) : [body as RpcReq];
   if (msgs.length > 20) return json({ jsonrpc: "2.0", id: null, error: { code: -32600, message: "Too many messages in one batch" } }, 400);
   const out: unknown[] = [];
+  const logs: McpCallRow[] = [];
   for (const m of msgs) {
-    const r = await handleRpc(db, id, m);
+    const r = await handleRpc(db, id, m, origin, logs);
     if (r) out.push(r);
+  }
+  if (logs.length) {
+    const write = logCalls(db, logs);
+    if (defer) defer(write);
+    else await write;
   }
   if (out.length === 0) return new Response(null, { status: 202, headers: CORS_HEADERS });
   return json(Array.isArray(body) ? out : out[0]);

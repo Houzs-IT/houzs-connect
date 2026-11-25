@@ -152,11 +152,21 @@ x = await rpc("hcmcp_nonsense", { jsonrpc: "2.0", id: 1, method: "initialize" })
 assert(x.status === 401 && x.headers.get("www-authenticate").includes('error="invalid_token"'), "unknown token → invalid_token");
 x = await rpc(tok.access_token, { jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-03-26" } });
 assert(x.body.result.protocolVersion === "2025-03-26" && x.body.result.serverInfo.name === "houzs-connect", "initialize negotiates the version");
+assert(x.body.result.capabilities.prompts && x.body.result.instructions.includes("inbox_overview"), "initialize advertises prompts; instructions lead with the quick answers");
 x = await rpc(tok.access_token, { jsonrpc: "2.0", method: "notifications/initialized" });
 assert(x.status === 202, "a notification → 202");
 x = await rpc(tok.access_token, { jsonrpc: "2.0", id: 2, method: "tools/list" });
-assert(x.body.result.tools.map((t) => t.name).join() === "whoami,list_modules,list_endpoints,connect_get", "four tools");
-assert(x.body.result.tools.every((t) => t.annotations.readOnlyHint === true), "all tools read-only");
+assert(
+  x.body.result.tools.map((t) => t.name).join() === "inbox_overview,service_performance,search,fetch,whoami,list_modules,list_endpoints,connect_get",
+  `quick answers, search / fetch, then the general tools (${x.body.result.tools.map((t) => t.name).join()})`
+);
+assert(x.body.result.tools.every((t) => t.annotations.readOnlyHint === true && !("module" in t)), "all tools read-only; no internal fields sent");
+x = await rpc(tok.access_token, { jsonrpc: "2.0", id: 2, method: "prompts/list" });
+assert(x.body.result.prompts.map((p) => p.name).join() === "inbox_today,service_review,find_customer", "prompts/list");
+x = await rpc(tok.access_token, { jsonrpc: "2.0", id: 2, method: "prompts/get", params: { name: "find_customer", arguments: { who: "Wong" } } });
+assert(x.body.result.messages[0].role === "user" && x.body.result.messages[0].content.text.includes('"Wong"'), "prompts/get expands a prompt");
+x = await rpc(tok.access_token, { jsonrpc: "2.0", id: 2, method: "prompts/get", params: { name: "nope" } });
+assert(x.body.error?.code === -32602, "unknown prompt → invalid params");
 x = await rpc(tok.access_token, [{ jsonrpc: "2.0", id: 3, method: "ping" }, { jsonrpc: "2.0", id: 4, method: "nope/nope" }]);
 assert(Array.isArray(x.body) && x.body[1].error.code === -32601, "batch + method not found");
 
@@ -175,6 +185,46 @@ assert(thread.messages[0].text === "When is my sofa delivered?", "own thread rea
 assert(!t.content[0].text.includes("SHOULD-NOT-LEAK") && t.content[0].text.includes("Credential fields removed: api_token"), "credential-shaped field stripped");
 t = await call(tok.access_token, "connect_get", { path: "/conversations", query: { q: `SO-${tag}` } });
 assert(J(t).conversations.length === 1, "search by order number");
+
+// Quick answers: one call, small, the person's own visibility.
+t = await call(tok.access_token, "inbox_overview");
+let ov1 = J(t);
+assert(!t.isError && ov1.notClosed === 1 && ov1.waitingForUs === 1, `inbox overview counts only Agent A's visible thread (${t.content[0].text.slice(0, 200)})`);
+assert(ov1.byChannel[0].name === "Main" && ov1.byAgent[0].name === "(unassigned)" && ov1.longestWaiting[0].id === id("v1"), "by channel / by person / longest waiting");
+assert(ov1.today.messagesIn >= 1 && ov1.last7Days.contactsAdded >= 2, "today's messages and contacts added");
+assert(t.content[0].text.length < 2000, `inbox overview is a few hundred characters (${t.content[0].text.length})`);
+t = await call(tok.access_token, "service_performance", { days: 30 });
+assert(!t.isError && J(t).period.includes("30 days") && J(t).replies.customersWhoWrote >= 1, `service performance (${t.content[0].text.slice(0, 160)})`);
+
+// search / fetch in the exact shape ChatGPT requires, inside the person's visibility.
+t = await call(tok.access_token, "search", { query: "Wong" });
+let sr = JSON.parse(t.content[0].text);
+assert(Object.keys(sr).join() === "results" && sr.results.length >= 2, `search → {results} (${t.content[0].text.slice(0, 200)})`);
+assert(sr.results.every((r) => Object.keys(r).join() === "id,title,url"), "each result is exactly {id, title, url}");
+assert(sr.results.some((r) => r.id === `conversation:${id("v1")}` && r.url === `${ORIGIN}/inbox/open/${id("v1")}`), "own conversation found, with its link");
+assert(sr.results.some((r) => r.id === `contact:${id("c1")}` && r.url === `${ORIGIN}/contacts?id=${id("c1")}`), "contact found, with its link");
+t = await call(tok.access_token, "search", { query: "Private thread" });
+assert(!JSON.parse(t.content[0].text).results.some((r) => r.id.startsWith("conversation:")), "search never returns another department's conversation");
+t = await call(tok.access_token, "fetch", { id: `conversation:${id("v1")}` });
+let doc = JSON.parse(t.content[0].text);
+assert(Object.keys(doc).join() === "id,title,text,url,metadata", `fetch → {id, title, text, url, metadata} (${Object.keys(doc).join()})`);
+assert(doc.text.includes("When is my sofa delivered?") && !doc.text.includes("SHOULD-NOT-LEAK") && doc.metadata.credentialFieldsRemoved.includes("api_token"), "fetch text, with credential fields stripped");
+t = await call(tok.access_token, "fetch", { id: `conversation:${id("v2")}` });
+assert(t.isError && t.content[0].text.includes("not one this person can see"), "fetch refuses another department's conversation");
+t = await call(tok.access_token, "fetch", { id: `contact:${id("c1")}` });
+doc = JSON.parse(t.content[0].text);
+assert(doc.title.startsWith("Contact Wong") && doc.text.includes(`SO-${tag}`), "fetch a contact");
+t = await call(tok.access_token, "fetch", { id: "payment:x" });
+assert(t.isError, "fetch refuses an unknown kind");
+
+// A batch of calls is logged — one row per call, written in one insert.
+const before = (await sql.unsafe(`select count(*)::int as n from connect.mcp_calls where member_id = '${id("a")}'`))[0].n;
+await rpc(tok.access_token, [
+  { jsonrpc: "2.0", id: 31, method: "tools/call", params: { name: "whoami", arguments: {} } },
+  { jsonrpc: "2.0", id: 32, method: "tools/call", params: { name: "search", arguments: { query: "Lim" } } },
+]);
+const after = (await sql.unsafe(`select count(*)::int as n from connect.mcp_calls where member_id = '${id("a")}'`))[0].n;
+assert(after === before + 2, `a batch of two calls → two log rows (${before} → ${after})`);
 
 // Blocked + unknown paths.
 for (const p of ["/internal", "/settings/developers", "/api/v1/contacts", "/login"]) {
@@ -196,6 +246,13 @@ for (const p of ["/contacts", "/tags", "/campaigns", "/automations", "/drip-camp
   t = await call(tok.access_token, "connect_get", { path: p });
   assert(!t.isError, `readable: ${p} (${t.content[0].text.slice(0, 120)})`);
 }
+
+// The quick answers follow the modules too: dashboard ticked off → service_performance gone and refused.
+await sql.unsafe(`insert into connect.module_access (company_id, email, module, allowed) values ('${id("co")}', '${agentA.email}', 'dashboard', false)`);
+x = await rpc(tok.access_token, { jsonrpc: "2.0", id: 2, method: "tools/list" });
+assert(!x.body.result.tools.some((tl) => tl.name === "service_performance") && x.body.result.tools.some((tl) => tl.name === "inbox_overview"), "a module ticked off hides its quick answer");
+t = await call(tok.access_token, "service_performance");
+assert(t.isError && t.content[0].text.startsWith("Not available to your role"), "and refuses it if called anyway");
 
 const calls = await sql.unsafe(`select count(*)::int as n, count(*) filter (where not ok)::int as refused from connect.mcp_calls where member_id = '${id("a")}'`);
 assert(calls[0].n >= 20 && calls[0].refused >= 6, `every call logged (${calls[0].n}, ${calls[0].refused} refused)`);
