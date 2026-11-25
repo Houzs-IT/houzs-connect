@@ -12,7 +12,9 @@ export const MCP_REFRESH_PREFIX = "hcmcpr_";
 export const ACCESS_TTL_MS = 24 * 60 * 60 * 1000; // 24 h
 export const REFRESH_TTL_MS = 90 * 24 * 60 * 60 * 1000; // 90 days
 export const CODE_TTL_MS = 10 * 60 * 1000; // 10 min
-export const MAX_RESULT_CHARS = 60_000;
+// 2026-11-25: 60k → 30k. A reply the AI has to read is the slow part of an answer;
+// lists trim whole rows to fit (fitReply) instead of being cut mid-JSON.
+export const MAX_RESULT_CHARS = 30_000;
 export const MCP_PROTOCOL_VERSIONS = ["2025-06-18", "2025-03-26", "2024-11-05"];
 /** The pending "Allow?" request carried across the sign-in page (login/actions.ts). */
 export const MCP_RETURN_COOKIE = "hc_mcp_return";
@@ -216,16 +218,85 @@ export function redactSecrets(v: unknown): { value: unknown; removed: Set<string
 }
 
 /** Serialise a reply, cut at MAX_RESULT_CHARS, with a note saying so. */
-export function capText(json: string, notes: string[] = []): { text: string; cut: boolean } {
+export function capText(json: string, notes: string[] = [], max = MAX_RESULT_CHARS): { text: string; cut: boolean } {
   let out = json;
   let cut = false;
-  if (out.length > MAX_RESULT_CHARS) {
-    out = out.slice(0, MAX_RESULT_CHARS);
+  if (out.length > max) {
+    out = out.slice(0, max);
     cut = true;
   }
   const n = [...notes];
-  if (cut) n.push(`Reply cut at ${MAX_RESULT_CHARS} characters — narrow it with query parameters (limit, q, status, days).`);
+  if (cut) n.push(`Reply cut at ${max} characters — narrow it with query parameters (limit, q, status, days).`);
   return { text: (n.length ? n.join(" ") + "\n" : "") + out, cut };
+}
+
+/**
+ * Drop what carries no information — null, undefined, "", [] and {} — at any
+ * depth (array items are kept, only compacted). A missing key reads as "none";
+ * the instructions say so.
+ */
+export function compact(v: unknown, depth = 0): unknown {
+  if (depth > 40) return null;
+  if (Array.isArray(v)) return v.map((x) => compact(x, depth + 1));
+  if (v instanceof Date) return v.toISOString();
+  if (v && typeof v === "object") {
+    const out: Record<string, unknown> = {};
+    for (const [k, x] of Object.entries(v as Record<string, unknown>)) {
+      const c = compact(x, depth + 1);
+      if (c === null || c === undefined || c === "") continue;
+      if (Array.isArray(c) && c.length === 0) continue;
+      if (c && typeof c === "object" && !Array.isArray(c) && Object.keys(c).length === 0) continue;
+      out[k] = c;
+    }
+    return out;
+  }
+  return v;
+}
+
+/** The longest array in a reply: the value itself, or one of its top-level fields. */
+function longestList(v: unknown): { key: string | null; list: unknown[] } | null {
+  if (Array.isArray(v)) return { key: null, list: v };
+  if (!v || typeof v !== "object") return null;
+  let best: { key: string; list: unknown[]; size: number } | null = null;
+  for (const [k, x] of Object.entries(v as Record<string, unknown>)) {
+    if (!Array.isArray(x) || x.length < 2) continue;
+    const size = JSON.stringify(x).length;
+    if (!best || size > best.size) best = { key: k, list: x, size };
+  }
+  return best ? { key: best.key, list: best.list } : null;
+}
+
+/**
+ * Serialise a reply within MAX_RESULT_CHARS, compacted. Over the cap, a list
+ * reply keeps as many WHOLE rows as fit (valid JSON, with a note saying how many
+ * of how many); anything else falls back to capText's hard cut.
+ */
+export function fitReply(value: unknown, notes: string[] = [], max = MAX_RESULT_CHARS): { text: string; cut: boolean; shown?: number } {
+  const v = compact(value);
+  const head = (n: string[]) => (n.length ? n.join(" ") + "\n" : "");
+  const whole = head(notes) + JSON.stringify(v);
+  if (whole.length <= max) return { text: whole, cut: false };
+  const target = longestList(v);
+  if (target && target.list.length > 1) {
+    const total = target.list.length;
+    const build = (k: number) => {
+      const rows = target.list.slice(0, k);
+      const body = target.key === null ? rows : { ...(v as Record<string, unknown>), [target.key]: rows };
+      const note = `Showing the first ${k} of ${total}${target.key ? ` ${target.key}` : " rows"} to stay under ${max} characters — narrow it with query parameters (q, status, days, limit, offset).`;
+      return head([...notes, note]) + JSON.stringify(body);
+    };
+    let lo = 0;
+    let hi = total - 1;
+    while (lo < hi) {
+      const mid = Math.ceil((lo + hi) / 2);
+      if (build(mid).length <= max) lo = mid;
+      else hi = mid - 1;
+    }
+    const text = build(lo);
+    if (lo > 0 && text.length <= max) return { text, cut: true, shown: lo };
+  }
+  const c = capText(JSON.stringify(v), notes, max);
+  return { text: c.text, cut: c.cut };
 }
 
 /** Money / people field names — the leak check reports where these reach a staff account (names only). */

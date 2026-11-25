@@ -39,12 +39,35 @@ works on a phone).
   (`inboxScopes` + `unifiedConversationWhere`; a thread is readable only if it passes
   it), `contactsWhere`, the dashboard / log queries. No "use server" module is
   reachable (pinned by `scripts/smoke-mcp.mjs`). Internal chat and Settings are never
-  exposed. Credential-shaped keys are stripped; replies capped at 60k chars.
+  exposed. Credential-shaped keys are stripped; replies capped at 30k chars (was 60k).
 - **Tables:** migration `0027_mcp_connector.sql`, self-applied at runtime by
   `src/db/ensure-mcp.ts` (prod does not run db:migrate). Tokens: SHA-256 only, access
   24 h, refresh 90 d (rotating). Every call → `connect.mcp_calls`.
 - **Tests:** `scripts/smoke-mcp.mjs` (pure) and `scripts/smoke-mcp-db.mjs` (real
   Postgres, end to end through the real handlers; refuses any non-localhost DB), both in CI.
+- **Speed + quick answers (2026-11-25, branch `feat/mcp-quick-answers`; owner: searching
+  felt slow).** Tools now lead with `inbox_overview` (open / waiting-for-us by status,
+  channel and person, 5 longest waits, messages / new conversations / contacts added today
+  and last 7 days — inbox visibility, contacts only with the contacts module) and
+  `service_performance {days}` (dashboard module: reply rate, first-reply / reply times
+  overall and per person, status, volume vs previous period). Both are catalogue endpoints
+  too (`/inbox/overview`, `/dashboard/service`), so the module gate, redaction, call log and
+  leak check cover them. `search {query}` → `{"results":[{id,title,url}]}` (ids
+  `conversation:<id>` / `contact:<id>`, same predicates as `/conversations?q=` /
+  `/contacts?q=`) and `fetch {id}` → `{id,title,text,url,metadata}` — the shape ChatGPT
+  requires. `prompts/list` + `prompts/get` (3 prompts). Module-bound tools are hidden from a
+  person without the module. Pure parts: `src/lib/mcp/quick.ts`.
+  Door check = ONE query (`store.checkAccessToken`: token + active + access_removed +
+  approval + Settings → Access ticks) + the member read — was 4–5 sequential queries. The
+  conversation scope is memoised per request (`Identity.memo`). Call log = one insert per
+  request, after the answer (`waitUntil`, `route.ts`). Replies: cap 60k → 30k; `fitReply`
+  drops empty fields and trims a long list to whole rows (valid JSON + "first N of M" note);
+  smaller list defaults (20 rows, 30 messages, 1k-char message text).
+  Bench: `scripts/bench-mcp-db.mjs` (local DB only; counts queries on the wire through a
+  proxy). "How is the inbox?" was list_modules → list_endpoints → /conversations?limit=100
+  → /dashboard/summary ≈ 52k chars / 33 queries / 4 calls; now `inbox_overview` ≈ 1.8k chars
+  / 9 queries / 1 call. Not measured: production latency (Hyperdrive), a real ChatGPT
+  connection using search/fetch.
 - **Not yet proven on production:** a real Claude / ChatGPT connection, and the
   sign-in → back-to-Allow hop (needs a real ERP login). First production use creates
   the tables through ensure-mcp.

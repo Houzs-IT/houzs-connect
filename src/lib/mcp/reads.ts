@@ -23,12 +23,14 @@ import type { DB } from "@/db/client";
 import {
   automation,
   campaign,
+  channel,
   company,
   contact,
   conversation,
   department,
   dripCampaign,
   member,
+  message,
   note,
   payment,
   tag,
@@ -39,16 +41,22 @@ import type { Module } from "@/lib/module-access";
 import type { CurrentMember } from "@/lib/current-member";
 import { contactDetail, contactsWhere, type Segment } from "@/app/(app)/contacts/queries";
 import { conversationStatus, messagesByAgent, messageVolume, replyStats, teamLoad } from "@/app/(app)/dashboard/queries";
-import { parsePeriod, periodWindow } from "@/app/(app)/dashboard/util";
+import { klDayKey, parsePeriod, periodWindow } from "@/app/(app)/dashboard/util";
 import { logRows } from "@/app/(app)/logs/data";
 import { ensureConversationMemberTable } from "@/db/ensure-conversation-member";
 import { ensureDripTables } from "@/db/ensure-drip";
 import { intParam, matchPattern, strParam } from "./core";
+import { searchResult, summariseInbox, summariseService, type InboxGroupRow, type SearchResult } from "./quick";
 
 /** The person a connector call runs as: their member row in the company they connected from. */
 export type McpMember = CurrentMember;
 
-export type ReadCtx = { db: DB; me: McpMember; modules: Module[] };
+/**
+ * `memo` lives for ONE MCP request (server.ts makes it per POST): answers that
+ * several reads of the same request need — the person's conversation scope —
+ * are worked out once. Never shared between requests or people.
+ */
+export type ReadCtx = { db: DB; me: McpMember; modules: Module[]; memo?: Map<string, Promise<unknown>> };
 type Query = Record<string, unknown>;
 
 export class ReadError extends Error {
@@ -78,12 +86,69 @@ async function memberNames(db: DB, companyId: string): Promise<Map<string, strin
 
 const STATUSES = ["OPEN", "QUEUE", "PENDING", "CLOSED"];
 
-async function conversationScopeWhere(ctx: ReadCtx): Promise<SQL | undefined> {
+async function computeScopeWhere(ctx: ReadCtx): Promise<SQL | undefined> {
+  await ensureConversationMemberTable(ctx.db).catch(() => {});
   const scopes = await inboxScopes(ctx.db, ctx.me);
   return unifiedConversationWhere(ctx.db, scopes);
 }
 
+/** The inbox rail's visibility predicate for this person — once per request (search + a list + a thread share it). */
+function conversationScopeWhere(ctx: ReadCtx): Promise<SQL | undefined> {
+  if (!ctx.memo) return computeScopeWhere(ctx);
+  let p = ctx.memo.get("scope") as Promise<SQL | undefined> | undefined;
+  if (!p) {
+    p = computeScopeWhere(ctx);
+    p.catch(() => ctx.memo?.delete("scope")); // never keep a failure
+    ctx.memo.set("scope", p);
+  }
+  return p;
+}
+
+/** The /conversations search: customer name, order refs, phone digits, or message text. */
+function conversationMatch(term: string): SQL | undefined {
+  if (!term) return undefined;
+  const digits = term.replace(/\D/g, "");
+  return or(
+    sql`exists (select 1 from connect.contact c where c.id = ${conversation.contactId} and (
+      c.name ilike ${like(term)}
+      or exists (select 1 from jsonb_each_text(c.attributes) kv where kv.key like 'ref%' and kv.value ilike ${like(term)})
+      ${digits.length >= 3 ? sql`or c.phone like ${`%${digits}%`}` : sql``}))`,
+    sql`exists (select 1 from connect.message m where m.conversation_id = ${conversation.id} and m.body ilike ${like(term)})`
+  );
+}
+
+/** Start of today and of the 7-day window ending today, Malaysian calendar days. */
+function klWindows(now = new Date()) {
+  const today = new Date(`${klDayKey(now)}T00:00:00+08:00`);
+  return { today, week: new Date(today.getTime() - 6 * 86_400_000) };
+}
+
 export const ENDPOINTS: Endpoint[] = [
+  // ── Quick answers (also tools: inbox_overview, service_performance) ──
+  {
+    path: "/inbox/overview",
+    module: "inbox",
+    description:
+      "QUICK ANSWER — the Service inbox right now, as this person sees it: not-closed conversations by status, how many wait for our reply (last message from the customer), by channel and by person, the longest waits, and messages / new conversations / contacts added today and in the last 7 days.",
+    run: inboxOverview,
+  },
+  {
+    path: "/dashboard/service",
+    module: "dashboard",
+    description:
+      "QUICK ANSWER — customer-service performance for a period: reply rate, average first reply and reply times (overall and by person), conversations by status, messages in / out against the period before. Same figures as the Dashboard.",
+    params: { days: "7 | 30 | 90 (default 7)" },
+    async run({ db, me }, _p, q) {
+      const w = periodWindow(parsePeriod(strParam(q.days) || "7"));
+      const [reply, status, volume, names] = await Promise.all([
+        replyStats(me.companyId, w.since),
+        conversationStatus(me.companyId, w),
+        messageVolume(me.companyId, w),
+        memberNames(db, me.companyId),
+      ]);
+      return summariseService({ days: w.days, label: w.rangeLabel }, reply, status, volume, names);
+    },
+  },
   // ── Service (inbox) ──
   {
     path: "/conversations",
@@ -93,26 +158,15 @@ export const ENDPOINTS: Endpoint[] = [
       q: "search customer name, phone, order number (SO / ref) or message text",
       status: "OPEN | QUEUE | PENDING | CLOSED",
       unread: "true = only unread",
-      limit: "1-100 (default 30)",
+      limit: "1-100 (default 20)",
       offset: "for paging",
     },
     async run(ctx, _p, q) {
       const { db } = ctx;
-      await ensureConversationMemberTable(db).catch(() => {});
       const scope = await conversationScopeWhere(ctx);
-      const term = strParam(q.q);
-      const digits = term.replace(/\D/g, "");
       const status = strParam(q.status).toUpperCase();
-      const match = term
-        ? or(
-            sql`exists (select 1 from connect.contact c where c.id = ${conversation.contactId} and (
-              c.name ilike ${like(term)}
-              or exists (select 1 from jsonb_each_text(c.attributes) kv where kv.key like 'ref%' and kv.value ilike ${like(term)})
-              ${digits.length >= 3 ? sql`or c.phone like ${`%${digits}%`}` : sql``}))`,
-            sql`exists (select 1 from connect.message m where m.conversation_id = ${conversation.id} and m.body ilike ${like(term)})`
-          )
-        : undefined;
-      const limit = intParam(q.limit, 30, 1, 100);
+      const match = conversationMatch(strParam(q.q));
+      const limit = intParam(q.limit, 20, 1, 100);
       const rows = await db.query.conversation.findMany({
         where: and(
           scope,
@@ -124,11 +178,11 @@ export const ENDPOINTS: Endpoint[] = [
         limit: limit + 1,
         offset: intParam(q.offset, 0, 0, 5000),
         with: {
-          contact: true,
+          contact: { columns: { name: true, phone: true, attributes: true } },
           assignedAgent: { columns: { name: true } },
           assignedDepartment: { columns: { name: true } },
           tagLinks: { with: { tag: { columns: { name: true } } } },
-          messages: { orderBy: (m, { desc }) => desc(m.createdAt), limit: 1 },
+          messages: { orderBy: (m, { desc }) => desc(m.createdAt), limit: 1, columns: { createdAt: true, direction: true, body: true, type: true } },
         },
       });
       const more = rows.length > limit;
@@ -147,7 +201,7 @@ export const ENDPOINTS: Endpoint[] = [
             tags: c.tagLinks.map((t) => t.tag.name),
             orderRef: a.ref_1 || null,
             deliveryDate: a.delivery_date_1 || null,
-            lastMessage: last ? { at: last.createdAt, from: last.direction === "IN" ? "customer" : "us", text: clip(mediaCaption(last.body) || `[${last.type.toLowerCase()}]`, 200) } : null,
+            lastMessage: last ? { at: last.createdAt, from: last.direction === "IN" ? "customer" : "us", text: clip(mediaCaption(last.body) || `[${last.type.toLowerCase()}]`, 160) } : null,
             waitingOnUs: last?.direction === "IN",
           };
         }),
@@ -159,12 +213,11 @@ export const ENDPOINTS: Endpoint[] = [
     path: "/conversations/:id",
     module: "inbox",
     description: "One conversation: the customer, its order fields, and the latest messages and internal notes (only if this person can see it in Service).",
-    params: { limit: "messages, 1-200 (default 50)" },
+    params: { limit: "messages, 1-200 (default 30, the newest)" },
     async run(ctx, p, q) {
       const { db } = ctx;
-      await ensureConversationMemberTable(db).catch(() => {});
       const scope = await conversationScopeWhere(ctx);
-      const limit = intParam(q.limit, 50, 1, 200);
+      const limit = intParam(q.limit, 30, 1, 200);
       const c = await db.query.conversation.findFirst({
         where: and(eq(conversation.id, p.id), scope),
         with: {
@@ -177,7 +230,7 @@ export const ENDPOINTS: Endpoint[] = [
       });
       if (!c) throw new ReadError(404, "Conversation not found, or not one this person can see in Service.");
       const [notes, names] = await Promise.all([
-        db.select().from(note).where(eq(note.conversationId, c.id)).orderBy(desc(note.createdAt)).limit(50),
+        db.select({ createdAt: note.createdAt, memberId: note.memberId, body: note.body }).from(note).where(eq(note.conversationId, c.id)).orderBy(desc(note.createdAt)).limit(20),
         memberNames(db, c.contact.companyId),
       ]);
       return {
@@ -201,10 +254,10 @@ export const ENDPOINTS: Endpoint[] = [
             at: m.createdAt,
             from: m.direction === "IN" ? "customer" : m.isBot ? "bot" : (names.get(m.sentByMemberId ?? "") ?? "us"),
             type: m.type,
-            text: clip(mediaCaption(m.body) || (m.type === "TEXT" ? "" : `[${m.type.toLowerCase()}]`), 2000),
+            text: clip(mediaCaption(m.body) || (m.type === "TEXT" ? "" : `[${m.type.toLowerCase()}]`), 1000),
             status: m.direction === "OUT" ? m.status : undefined,
           })),
-        internalNotes: notes.reverse().map((n) => ({ at: n.createdAt, by: names.get(n.memberId) ?? "—", text: clip(n.body, 2000) })),
+        internalNotes: notes.reverse().map((n) => ({ at: n.createdAt, by: names.get(n.memberId) ?? "—", text: clip(n.body, 1000) })),
       };
     },
   },
@@ -217,7 +270,7 @@ export const ENDPOINTS: Endpoint[] = [
       q: "name, email, phone or order number",
       segment: "open-order | balance-due | waiting | blocked",
       tag: "tag id (from /tags)",
-      limit: "1-100 (default 30)",
+      limit: "1-100 (default 20)",
       offset: "for paging",
     },
     async run({ db, me }, _p, q) {
@@ -229,7 +282,7 @@ export const ENDPOINTS: Endpoint[] = [
         segment: (["open-order", "balance-due", "waiting", "blocked"] as string[]).includes(seg) ? seg : undefined,
         tagId: strParam(q.tag) || undefined,
       });
-      const limit = intParam(q.limit, 30, 1, 100);
+      const limit = intParam(q.limit, 20, 1, 100);
       const [total, rows] = await Promise.all([
         db.$count(contact, where),
         db.query.contact.findMany({
@@ -250,7 +303,8 @@ export const ENDPOINTS: Endpoint[] = [
           source: c.source,
           blocked: c.blocked,
           tags: c.tagLinks.map((t) => t.tag.name),
-          fields: attrs(c.attributes),
+          // The list keeps every field but clips long values; /contacts/:id has them whole.
+          fields: Object.fromEntries(Object.entries(attrs(c.attributes)).map(([k, v]) => [k, typeof v === "string" ? clip(v, 80) : v])),
           updatedAt: c.updatedAt,
         })),
       };
@@ -305,7 +359,7 @@ export const ENDPOINTS: Endpoint[] = [
     path: "/payments",
     module: "payments",
     description: "Payment slips customers sent in chat, newest first, with counts by status.",
-    params: { status: "PENDING | VERIFIED | REJECTED", q: "customer name, phone, order or reference number", limit: "1-100 (default 30)" },
+    params: { status: "PENDING | VERIFIED | REJECTED", q: "customer name, phone, order or reference number", limit: "1-100 (default 20)" },
     async run({ db, me }, _p, q) {
       const mine = eq(contact.companyId, me.companyId);
       const st = strParam(q.status).toUpperCase();
@@ -348,7 +402,7 @@ export const ENDPOINTS: Endpoint[] = [
           .innerJoin(contact, eq(contact.id, payment.contactId))
           .where(filter)
           .orderBy(desc(payment.createdAt))
-          .limit(intParam(q.limit, 30, 1, 100)),
+          .limit(intParam(q.limit, 20, 1, 100)),
       ]);
       return { countsByStatus: Object.fromEntries(counts.map((c) => [c.status, c.n])), payments: rows };
     },
@@ -482,7 +536,7 @@ export const ENDPOINTS: Endpoint[] = [
       status: "QUEUED | SENT | DELIVERED | READ | FAILED",
       direction: "IN | OUT",
       days: "only the last N days (1-90)",
-      limit: "1-200 (default 50)",
+      limit: "1-200 (default 30)",
     },
     async run({ me }, _p, q) {
       const dir = strParam(q.direction).toUpperCase();
@@ -495,7 +549,7 @@ export const ENDPOINTS: Endpoint[] = [
           type: "",
           days: q.days ? intParam(q.days, 7, 1, 90) : null,
         },
-        intParam(q.limit, 50, 1, 200)
+        intParam(q.limit, 30, 1, 200)
       );
       return {
         messages: rows.map((r) => ({
@@ -506,7 +560,7 @@ export const ENDPOINTS: Endpoint[] = [
           direction: r.direction,
           type: r.type,
           status: r.status,
-          text: clip(r.body, 300),
+          text: clip(r.body, 200),
           sendError: r.sendError,
         })),
       };
@@ -526,6 +580,147 @@ export const ENDPOINTS: Endpoint[] = [
     },
   },
 ];
+
+// ── quick answer: inbox overview ──────────────────────────────────────────
+
+/** The direction of a conversation's newest message ('IN' = the customer wrote last). */
+const lastDirection = sql`(select m.direction from connect.message m where m.conversation_id = ${conversation.id} order by m.created_at desc limit 1)`;
+
+/**
+ * Five aggregate queries, sent together on the request's one socket, all through
+ * the inbox rail's own visibility predicate (contacts: company scope, and only
+ * when the person has the contacts module). Replaces reading /conversations
+ * page by page to count.
+ */
+async function inboxOverview(ctx: ReadCtx): Promise<unknown> {
+  const { db, me } = ctx;
+  const scope = await conversationScopeWhere(ctx);
+  const { today, week } = klWindows();
+  const notClosed = sql`${conversation.status} <> 'CLOSED'`;
+  const waitingNow = sql`${lastDirection} = 'IN'`;
+  const num = (q: SQL) => sql<number>`${q}`.mapWith(Number);
+  const [groups, msgs, convos, contacts, waiting] = await Promise.all([
+    db
+      .select({
+        status: conversation.status,
+        channel: channel.displayName,
+        agent: member.name,
+        n: num(sql`count(*)`),
+        unread: num(sql`count(*) filter (where ${conversation.unreadCount} > 0)`),
+        waiting: num(sql`count(*) filter (where ${waitingNow})`),
+        oldestWaitingAt: sql<Date | string | null>`min(${conversation.lastMessageAt}) filter (where ${waitingNow})`,
+      })
+      .from(conversation)
+      .leftJoin(channel, eq(channel.id, conversation.channelId))
+      .leftJoin(member, eq(member.id, conversation.assignedAgentId))
+      .where(and(scope, notClosed))
+      .groupBy(conversation.status, channel.displayName, member.name),
+    db
+      .select({
+        inToday: num(sql`count(*) filter (where ${message.direction} = 'IN' and ${message.createdAt} >= ${today.toISOString()}::timestamptz)`),
+        outToday: num(sql`count(*) filter (where ${message.direction} = 'OUT' and ${message.createdAt} >= ${today.toISOString()}::timestamptz)`),
+        in7: num(sql`count(*) filter (where ${message.direction} = 'IN')`),
+        out7: num(sql`count(*) filter (where ${message.direction} = 'OUT')`),
+      })
+      .from(message)
+      .innerJoin(conversation, eq(conversation.id, message.conversationId))
+      .where(and(scope, sql`${message.createdAt} >= ${week.toISOString()}::timestamptz`)),
+    db
+      .select({
+        today: num(sql`count(*) filter (where ${conversation.createdAt} >= ${today.toISOString()}::timestamptz)`),
+        week: num(sql`count(*)`),
+      })
+      .from(conversation)
+      .where(and(scope, sql`${conversation.createdAt} >= ${week.toISOString()}::timestamptz`)),
+    ctx.modules.includes("contacts")
+      ? db
+          .select({
+            today: num(sql`count(*) filter (where ${contact.createdAt} >= ${today.toISOString()}::timestamptz)`),
+            week: num(sql`count(*)`),
+          })
+          .from(contact)
+          .where(and(eq(contact.companyId, me.companyId), sql`${contact.createdAt} >= ${week.toISOString()}::timestamptz`))
+      : Promise.resolve(null),
+    db
+      .select({
+        id: conversation.id,
+        name: contact.name,
+        phone: contact.phone,
+        assignedTo: member.name,
+        channel: channel.displayName,
+        since: conversation.lastMessageAt,
+      })
+      .from(conversation)
+      .innerJoin(contact, eq(contact.id, conversation.contactId))
+      .leftJoin(channel, eq(channel.id, conversation.channelId))
+      .leftJoin(member, eq(member.id, conversation.assignedAgentId))
+      .where(and(scope, notClosed, waitingNow))
+      .orderBy(asc(conversation.lastMessageAt))
+      .limit(5),
+  ]);
+  const m0 = msgs[0];
+  const c0 = convos[0];
+  const k0 = contacts?.[0];
+  return summariseInbox(
+    groups as InboxGroupRow[],
+    {
+      messagesInToday: m0?.inToday ?? 0,
+      messagesOutToday: m0?.outToday ?? 0,
+      messagesIn7d: m0?.in7 ?? 0,
+      messagesOut7d: m0?.out7 ?? 0,
+      newConversationsToday: c0?.today ?? 0,
+      newConversations7d: c0?.week ?? 0,
+      contactsAddedToday: contacts ? (k0?.today ?? 0) : null,
+      contactsAdded7d: contacts ? (k0?.week ?? 0) : null,
+    },
+    waiting.map((w) => ({ id: w.id, customer: displayName(w.name, w.phone), assignedTo: w.assignedTo, channel: w.channel, since: w.since }))
+  );
+}
+
+// ── search (ChatGPT's search tool) ────────────────────────────────────────
+
+/**
+ * Conversations (the inbox rail's visibility) and contacts (company scope) that
+ * match a name, phone, order number or message text — only from the modules the
+ * person has. Same predicates as /conversations?q= and /contacts?q=.
+ */
+export async function searchRecords(ctx: ReadCtx, query: unknown, origin: string): Promise<SearchResult[]> {
+  const term = strParam(query, 100);
+  if (!term) return [];
+  const { db, me } = ctx;
+  const [convos, people] = await Promise.all([
+    ctx.modules.includes("inbox")
+      ? conversationScopeWhere(ctx).then((scope) =>
+          db.query.conversation.findMany({
+            where: and(scope, conversationMatch(term)),
+            orderBy: [desc(conversation.lastMessageAt), desc(conversation.createdAt)],
+            limit: 10,
+            columns: { id: true, status: true },
+            with: { contact: { columns: { name: true, phone: true } }, assignedAgent: { columns: { name: true } } },
+          })
+        )
+      : Promise.resolve([]),
+    ctx.modules.includes("contacts")
+      ? db.query.contact.findMany({
+          where: contactsWhere(me.companyId, { q: term, digits: /\d{3,}/.test(term) ? term.replace(/\D/g, "") : undefined }),
+          orderBy: desc(contact.updatedAt),
+          limit: 10,
+          columns: { id: true, name: true, phone: true },
+        })
+      : Promise.resolve([]),
+  ]);
+  return [
+    ...convos.map((c) =>
+      searchResult(
+        origin,
+        "conversation",
+        c.id,
+        `Conversation: ${displayName(c.contact.name, c.contact.phone)} (${c.status.toLowerCase()}${c.assignedAgent?.name ? `, ${c.assignedAgent.name}` : ""})`
+      )
+    ),
+    ...people.map((c) => searchResult(origin, "contact", c.id, `Contact: ${displayName(c.name, c.phone)} · ${c.phone}`)),
+  ];
+}
 
 /** Find the endpoint for a concrete (already classified) path. */
 export function findEndpoint(path: string): { ep: Endpoint; params: Record<string, string> } | null {
