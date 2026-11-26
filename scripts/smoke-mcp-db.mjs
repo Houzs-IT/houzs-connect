@@ -162,7 +162,15 @@ const rpc = async (token, body) => {
 };
 // A reply may start with a one-line note (fields removed / cut) before the JSON.
 const J = (t) => JSON.parse(t.content[0].text.replace(/^[^[{].*\n/, ""));
-const call = async (token, name, args = {}) => (await rpc(token, { jsonrpc: "2.0", id: 9, method: "tools/call", params: { name, arguments: args } })).body.result;
+// The rate limit (30 tool calls a minute) is real here too: `call` first moves the call
+// log two minutes back so this script's own burst never trips it. `callNow` does not —
+// the rate-limit test below uses it.
+const ageCalls = () => sql.unsafe("update connect.mcp_calls set created_at = created_at - interval '2 minutes'");
+const callNow = async (token, name, args = {}) => (await rpc(token, { jsonrpc: "2.0", id: 9, method: "tools/call", params: { name, arguments: args } })).body.result;
+const call = async (token, name, args = {}) => {
+  await ageCalls();
+  return callNow(token, name, args);
+};
 
 let x = await rpc(null, { jsonrpc: "2.0", id: 1, method: "initialize" });
 assert(x.status === 401 && x.headers.get("www-authenticate").includes(`resource_metadata="${ORIGIN}/.well-known/oauth-protected-resource/api/mcp"`), "401 + WWW-Authenticate without a token");
@@ -360,21 +368,26 @@ t = await call(ownerTok.access_token, "customer_mood_scan", { from: "2026-01-01"
 assert(t.isError && t.content[0].text.includes("At most 7 days"), "mood scan range capped at 7 days");
 
 // Rate limit: counted per person from mcp_calls; over it → a normal isError result, logged as 429, not counted.
-const used = (await store.countRecentCalls(appDb, owner.email)).minute;
-const savedLimits = { ...r3.RATE_LIMITS };
-r3.RATE_LIMITS.perMinute = used + 2;
-assert(!(await call(ownerTok.access_token, "whoami")).isError, "call 1 under the limit");
-assert(!(await call(ownerTok.access_token, "whoami")).isError, "call 2 under the limit");
-t = await call(ownerTok.access_token, "whoami");
-assert(t.isError && t.content[0].text.startsWith("Too many requests — wait a minute"), `over the limit → plain refusal (${t.content[0].text})`);
+await ageCalls();
+const ownerEmail = owner.email.toLowerCase();
+const fill = (n, ago) =>
+  sql.unsafe(`insert into connect.mcp_calls (id, member_id, email, tool, ok, status, created_at)
+    select '${tag}_rl_' || g || '_${ago}', '${owner.id}', '${ownerEmail}', 'synthetic', true, 200, now() - interval '${ago}'
+    from generate_series(1, ${n}) g`);
+await fill(r3.RATE_LIMITS.perMinute - 1, "5 seconds");
+assert(!(await callNow(ownerTok.access_token, "whoami")).isError, "call number 30 in a minute is allowed");
+t = await callNow(ownerTok.access_token, "whoami");
+assert(t.isError && t.content[0].text.startsWith("Too many requests — wait a minute"), `call 31 → plain refusal (${t.content[0].text})`);
 x = await rpc(ownerTok.access_token, { jsonrpc: "2.0", id: 2, method: "tools/list" });
-assert(Array.isArray(x.body.result.tools), "tools/list is not counted");
-const limited = await sql.unsafe(`select count(*)::int as n from connect.mcp_calls where email = '${owner.email.toLowerCase()}' and status = 429`);
-assert(limited[0].n === 1 && (await store.countRecentCalls(appDb, owner.email)).minute === used + 2, "refusal logged as 429 and not counted");
-r3.RATE_LIMITS.perDay = 0;
-t = await call(ownerTok.access_token, "whoami");
-assert(t.isError && t.content[0].text.startsWith("Daily limit reached"), "daily limit");
-Object.assign(r3.RATE_LIMITS, savedLimits);
+assert(Array.isArray(x.body.result.tools), "tools/list is not counted or refused");
+const limited = await sql.unsafe(`select count(*)::int as n from connect.mcp_calls where email = '${ownerEmail}' and status = 429`);
+assert(limited[0].n === 1 && (await store.countRecentCalls(appDb, owner.email)).minute === r3.RATE_LIMITS.perMinute, "refusal logged as 429 and not counted");
+await ageCalls();
+assert(!(await callNow(ownerTok.access_token, "whoami")).isError, "a minute later it works again");
+await fill(r3.RATE_LIMITS.perDay, "1 hour");
+t = await callNow(ownerTok.access_token, "whoami");
+assert(t.isError && t.content[0].text.startsWith("Daily limit reached"), `daily limit (${t.content[0].text})`);
+await sql.unsafe(`delete from connect.mcp_calls where tool = 'synthetic' and email = '${ownerEmail}'`);
 const ov = await admin.adminOverview(appDb);
 assert(ov.connected.some((k) => k.email === agentA.email) && ov.allowed.some((a) => a.email === agentA.email), "overview lists the connection and the allowed person");
 assert(ov.calls.length > 0 && ov.calls.length <= 100, "recent lookups listed");
