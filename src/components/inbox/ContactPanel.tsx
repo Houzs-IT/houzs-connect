@@ -7,6 +7,7 @@ import { RemarksBox } from "./RemarksBox";
 import { ProfileEditor } from "./ProfileEditor";
 import { ConversationMenu } from "./ConversationMenu";
 import { FieldList, PanelTabs } from "./PanelTabs";
+import { ContactNameToggle } from "./ContactNameToggle";
 import { SubmitSelect } from "./SubmitSelect";
 import {
   addChatMember,
@@ -452,7 +453,9 @@ export async function ContactPanel({
         </span>
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-1.5">
-            <span className="truncate text-[15px] font-semibold text-[var(--color-ink)]">{contactName}</span>
+            <ContactNameToggle className="min-w-0 truncate text-left text-[15px] font-semibold text-[var(--color-ink)] transition-colors hover:text-[var(--color-accent-ink)] xl:cursor-pointer">
+              {contactName}
+            </ContactNameToggle>
             <ProfileEditor contactId={contactId} name={contactName} email={email} starred={starred} />
           </div>
           <div className="flex items-center gap-1.5 text-[12px] tabular-nums text-[var(--color-muted)]" title={id.label}>
