@@ -11,6 +11,7 @@ import { ContactPanel, type FirstReply } from "@/components/inbox/ContactPanel";
 import { ConversationMenu } from "@/components/inbox/ConversationMenu";
 import { AssignButton, ResolveButton } from "@/components/inbox/HeaderActions";
 import { MenuWithoutPanel, PanelGate, PanelToggle } from "@/components/inbox/PanelToggle";
+import { ContactNameToggle } from "@/components/inbox/ContactNameToggle";
 import { DemoReplyBar } from "@/components/inbox/DemoReplyBar";
 import { WindowTimer } from "@/components/inbox/WindowTimer";
 import { getCurrentMember } from "@/lib/current-member";
@@ -302,7 +303,9 @@ export default async function ConversationPage({
           </span>
           <div className="min-w-0 flex-1 md:flex-none">
             <div className="flex items-center gap-1.5">
-              <span className="truncate text-[14.5px] font-semibold text-[var(--color-ink)]">{name}</span>
+              <ContactNameToggle className="min-w-0 truncate text-left text-[14.5px] font-semibold text-[var(--color-ink)] transition-colors hover:text-[var(--color-accent-ink)] xl:cursor-pointer">
+                {name}
+              </ContactNameToggle>
               <span className={`hidden whitespace-nowrap rounded-full px-[7px] py-px text-[10px] font-semibold uppercase tracking-[0.06em] md:inline ${statusTone[convo.status] ?? statusTone.CLOSED}`}>
                 {s.statusLabel[convo.status] ?? convo.status}
               </span>
