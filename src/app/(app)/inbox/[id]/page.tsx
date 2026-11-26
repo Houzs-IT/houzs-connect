@@ -295,40 +295,46 @@ export default async function ConversationPage({
               <path d="M15 18l-6-6 6-6" />
             </svg>
           </Link>
-          <span
-            className="grid h-[34px] w-[34px] shrink-0 place-items-center rounded-full text-[12px] font-semibold text-white md:h-9 md:w-9"
-            style={{ background: tint(name) }}
-          >
-            {initials(name).toUpperCase()}
-          </span>
-          <div className="min-w-0 flex-1 md:flex-none">
-            <div className="flex items-center gap-1.5">
-              <ContactNameToggle className="min-w-0 truncate text-left text-[14.5px] font-semibold text-[var(--color-ink)] transition-colors hover:text-[var(--color-accent-ink)] xl:cursor-pointer">
-                {name}
-              </ContactNameToggle>
-              <span className={`hidden whitespace-nowrap rounded-full px-[7px] py-px text-[10px] font-semibold uppercase tracking-[0.06em] md:inline ${statusTone[convo.status] ?? statusTone.CLOSED}`}>
-                {s.statusLabel[convo.status] ?? convo.status}
-              </span>
-              {origin && (
-                <span className="shrink-0 whitespace-nowrap rounded-[4px] border border-[var(--color-border)] bg-[var(--color-surface-2)] px-1.5 py-px text-[10px] font-semibold tabular-nums text-[var(--color-muted)]">
-                  {origin}
+          {/* The whole customer block — avatar, name, number, order — is one
+              control: clicking anywhere in it puts the panel away or brings it
+              back (wide screens), in step with the header's PanelToggle. The
+              name's hover tint follows the group so the block reads as tappable. */}
+          <ContactNameToggle className="group flex min-w-0 flex-1 items-center gap-2.5 text-left md:gap-3 xl:cursor-pointer">
+            <span
+              className="grid h-[34px] w-[34px] shrink-0 place-items-center rounded-full text-[12px] font-semibold text-white md:h-9 md:w-9"
+              style={{ background: tint(name) }}
+            >
+              {initials(name).toUpperCase()}
+            </span>
+            <div className="min-w-0 flex-1 md:flex-none">
+              <div className="flex items-center gap-1.5">
+                <span className="min-w-0 truncate text-[14.5px] font-semibold text-[var(--color-ink)] transition-colors group-hover:text-[var(--color-accent-ink)]">
+                  {name}
                 </span>
-              )}
+                <span className={`hidden whitespace-nowrap rounded-full px-[7px] py-px text-[10px] font-semibold uppercase tracking-[0.06em] md:inline ${statusTone[convo.status] ?? statusTone.CLOSED}`}>
+                  {s.statusLabel[convo.status] ?? convo.status}
+                </span>
+                {origin && (
+                  <span className="shrink-0 whitespace-nowrap rounded-[4px] border border-[var(--color-border)] bg-[var(--color-surface-2)] px-1.5 py-px text-[10px] font-semibold tabular-nums text-[var(--color-muted)]">
+                    {origin}
+                  </span>
+                )}
+              </div>
+              {/* Phone: the window as a line of text. Desktop: number · order. */}
+              <div className="md:hidden">
+                <WindowTimer expiresAt={convo.windowExpiresAt?.toISOString() ?? null} plain />
+              </div>
+              <div className="hidden truncate text-[11.5px] tabular-nums text-[var(--color-muted)] md:block" title={ident.label}>
+                {ident.text}
+                {orderRef && (
+                  <>
+                    {" · "}
+                    <span className="font-medium text-[var(--color-brand)]">{orderRef}</span>
+                  </>
+                )}
+              </div>
             </div>
-            {/* Phone: the window as a line of text. Desktop: number · order. */}
-            <div className="md:hidden">
-              <WindowTimer expiresAt={convo.windowExpiresAt?.toISOString() ?? null} plain />
-            </div>
-            <div className="hidden truncate text-[11.5px] tabular-nums text-[var(--color-muted)] md:block" title={ident.label}>
-              {ident.text}
-              {orderRef && (
-                <>
-                  {" · "}
-                  <span className="font-medium text-[var(--color-brand)]">{orderRef}</span>
-                </>
-              )}
-            </div>
-          </div>
+          </ContactNameToggle>
 
           <div className="ml-auto flex shrink-0 items-center gap-2">
             {/* Who else is in the room — the panel is hidden below xl. */}
