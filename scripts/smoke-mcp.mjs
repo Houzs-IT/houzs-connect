@@ -202,6 +202,133 @@ assert(!reads.ENDPOINTS.some((e) => e.module === "internal" || e.module === "set
 assert(reads.listEndpointPaths().every((p) => !p.includes(":")), "leak check reads only parameter-free lists");
 assert(reads.moduleCatalog(["inbox"]).every((m) => m.module === "inbox"), "module catalogue follows the person's modules");
 
+
+// ── Round 3 (owner 2026-11-26): reply speed, delivery, campaigns, mood scan gate, daily brief, export, rate limit ──
+const r3 = await import("../src/lib/mcp/round3.ts");
+const xl = await import("../src/lib/mcp/xlsx.ts");
+const { inflateRawSync } = await import("node:zlib");
+
+// Dates
+assert(r3.myToday(Date.parse("2026-11-25T17:30:00Z")) === "2026-11-26", "Malaysia today");
+assert(r3.shiftDay("2026-03-01", -1) === "2026-02-28" && r3.myMidnight("2026-11-26").toISOString() === "2026-11-25T16:00:00.000Z", "day helpers");
+const NOW3 = Date.parse("2026-11-26T04:00:00Z");
+const dr = r3.dayRange(undefined, undefined, 7, NOW3);
+assert(dr.from === "2026-11-26" && dr.to === "2026-11-26" && dr.start.toISOString() === "2026-11-25T16:00:00.000Z" && dr.end.toISOString() === "2026-11-26T16:00:00.000Z", "default range = today");
+assert(r3.dayRange("2026-11-20", "2026-11-26", 7, NOW3).from === "2026-11-20", "7 days allowed");
+assert("error" in r3.dayRange("2026-11-19", "2026-11-26", 7, NOW3), "8 days refused");
+assert("error" in r3.dayRange("bad", undefined, 7, NOW3) && "error" in r3.dayRange("2026-11-26", "2026-11-20", 7, NOW3), "bad / reversed range refused");
+assert(r3.dayRange("2026-11-26", "2026-12-31", 7, NOW3).to === "2026-11-26", "future end clamped to today");
+
+// Mood scan gate: Connect's admin roles + MANAGER only
+for (const role of ["SUPER_ADMIN", "OWNER", "ADMIN", "MANAGER"]) assert(r3.moodScanAllowed(role), `mood scan allowed for ${role}`);
+for (const role of ["AGENT", "SALES", "VIEWER", "DRIVER", "", null, undefined, "admin"]) assert(!r3.moodScanAllowed(role), `mood scan refused for ${role}`);
+assert(r3.MOOD_SCAN_REFUSAL.startsWith("Supervisors and admins only"), "plain refusal text");
+assert(r3.maskPhone("60123456789") === "60•••••6789" && r3.maskPhone("123") === "•••" && r3.maskPhone("") === "", "phones masked");
+assert(r3.keywordHints("I want a REFUND, still waiting!").join() === "refund,still waiting" && r3.keywordHints("还没送到，我要投诉").includes("投诉"), "keyword hints (EN / ZH)");
+
+// Mood scan grouping: most active first, clipped, capped, flags
+const T = (m) => new Date(NOW3 - m * 60_000).toISOString();
+const convos3 = new Map([
+  ["c1", { id: "c1", customer: "Wong", status: "OPEN", assignedTo: "Ann", department: "Service", channel: "Main", lastReplyAt: T(120), lastMessageAt: T(50), lastFromCustomer: true }],
+  ["c2", { id: "c2", customer: "Lim", status: "OPEN", assignedTo: null, department: null, channel: "Main", lastReplyAt: T(1), lastMessageAt: T(1), lastFromCustomer: false }],
+]);
+const msgs3 = [
+  { conversationId: "c1", at: T(100), text: "Hello?", type: "TEXT" },
+  { conversationId: "c1", at: T(70), text: "Still waiting for my refund " + "x".repeat(400), type: "TEXT" },
+  { conversationId: "c1", at: T(50), text: "", type: "IMAGE" },
+  { conversationId: "c2", at: T(5), text: "Thanks!", type: "TEXT" },
+  { conversationId: "zz", at: T(5), text: "not visible", type: "TEXT" },
+];
+const ms = r3.buildMoodScan(msgs3, convos3, { from: "2026-11-26", to: "2026-11-26" }, NOW3);
+assert(ms.conversations === 2 && ms.byConversation[0].conversationId === "c1" && ms.inboundMessages === 4, "most active conversation first; unknown conversations dropped");
+const f1 = ms.byConversation[0].flags;
+assert(f1.unansweredInARow === 3 && f1.repeatedWithoutReply && f1.overSla && f1.waiting === "50m" && f1.keywordHints.includes("refund"), `flags (${JSON.stringify(f1)})`);
+assert(ms.byConversation[0].messages[1].text.length === r3.MOOD_TEXT_CHARS + 1 && ms.byConversation[0].messages[2].text === "[image]", "text clipped; media shown by type");
+assert(!ms.byConversation[1].flags.overSla && !ms.byConversation[1].flags.repeatedWithoutReply, "answered conversation not flagged");
+assert(ms.instructions.includes("Do not repeat the messages"), "tells the AI to summarise, not dump");
+const many = Array.from({ length: 300 }, (_, i) => ({ conversationId: "c1", at: T(i), text: `m${i}`, type: "TEXT" }));
+assert(r3.buildMoodScan(many, convos3, { from: "a", to: "b" }, NOW3).messagesShown === r3.MOOD_MAX_MESSAGES, "at most 200 messages");
+
+// Reply speed: per member from the dashboard's replyStats shape, waiting over SLA
+const RS = (first, all, byAgent) => ({ asked: 10, answered: 9, answeredHuman: 8, avgFirst: first, avgReply: all, businessHours: false, byAgent: new Map(byAgent) });
+const rs = r3.summariseReplySpeed(
+  { today: RS(300, 120, [["u1", { first: [300], all: [120, 120] }]]), yesterday: RS(600, 200, []), last7: RS(2400, 900, [["u1", { first: [300], all: [120] }], ["u2", { first: [3600], all: [3600] }]]) },
+  new Map([["u1", "Ann"], ["u2", "Bob"]]),
+  [{ id: "v9", customer: "Wong", assignedTo: null, department: "Service", channel: "Main", since: T(45) }],
+  1,
+  NOW3
+);
+assert(rs.slaMinutes === r3.SLA_MINUTES && rs.today.replyRatePct === 90 && rs.today.avgFirstHumanReply === "5m" && rs.firstReplyTodayVsYesterdayPct === -50, `reply speed windows (${JSON.stringify(rs.today)})`);
+assert(rs.byMember.find((p) => p.name === "Bob").firstReplyOverSla7d === true && rs.byMember.find((p) => p.name === "Ann").repliesToday === 2, "per member, slow one flagged");
+assert(rs.waitingOverSla.count === 1 && rs.waitingOverSla.longest[0].waiting === "45m" && rs.waitingOverSla.longest[0].assignedTo === "(unassigned)", "waiting over SLA");
+
+// Delivery + campaigns
+const dv = r3.summariseDelivery({ sent: 10, delivered: 8, read: 5, failed: 1, waiting: 1 }, [{ id: "x", createdAt: "t", conversationId: "v", customer: "W", type: "TEXT", sendError: null }], new Map([["x", "131026 · Undeliverable"]]), 7, 200);
+assert(dv.todayOutbound.deliveredPct === 80 && dv.failed.count === 1 && dv.failed.byReason["131026 · Undeliverable"] === 1, "delivery summary");
+const cs = r3.summariseCampaigns([{ name: "A", status: "sent", stats: { total: 100, sent: 98, failed: 2 } }, { name: "B", status: "draft", stats: null }]);
+assert(cs.campaigns === 2 && cs.totals.sent === 98 && cs.byStatus.sent === 1, "campaign summary");
+
+// Daily brief: a refused part says so; the rest answers
+const db3 = r3.buildDailyBrief(
+  {
+    overview: { ok: true, value: { waitingForUs: 3, longestWait: "2h", byAgent: [{ name: "Ann", open: 2, waiting: 1 }, { name: "(unassigned)", open: 1, waiting: 1 }], longestWaiting: [{ id: "v1", customer: "Wong" }], today: { messagesIn: 4 } } },
+    mine: { ok: true, value: { conversations: [{ id: "v1", customer: "Wong", status: "OPEN", waitingOnUs: true, unread: 2, lastMessage: { at: "t" } }, { id: "v2", customer: "Lim", status: "OPEN", waitingOnUs: false, unread: 0 }] } },
+    payments: { ok: false, message: "You do not have access to payments in Houzs Connect." },
+    delivery: { ok: true, value: { todayOutbound: { sent: 1 }, failed: { count: 0, latest: [] } } },
+  },
+  { name: "Ann" },
+  "https://chat.x"
+);
+assert(db3.myConversations.waitingForMyReply === 1 && db3.myConversations.top[0].url === "https://chat.x/inbox/open/v1", "brief: my conversations waiting");
+assert(db3.inbox.mine.waiting === 1 && db3.inbox.unassignedWaiting === 1, "brief: inbox for me + unassigned");
+assert(db3.paymentsToCheck.unavailable.includes("do not have access"), "brief: refused part says so");
+assert(r3.DAILY_BRIEF_PROMPT.name === "daily-brief" && r3.DAILY_BRIEF_TEXT.includes("daily_brief"), "daily-brief prompt");
+
+// Export: allowlist, no message text column, money in RM, columns picked
+assert(Object.keys(r3.EXPORT_LISTS).join() === "conversations,contacts,payments,logs,campaigns", "export allowlist");
+for (const [k, l] of Object.entries(r3.EXPORT_LISTS)) {
+  assert(!l.columns.some((c) => /text|body|message$/i.test(c.key)), `export ${k} carries no message text`);
+  assert(reads.findEndpoint(l.path) && !l.path.includes(":"), `export ${k} reads a catalogue list`);
+}
+assert(r3.EXPORT_LISTS.payments.columns.find((c) => c.key === "amount").kind === "money", "payment amount exported as RM money");
+assert(r3.pickColumns(r3.EXPORT_LISTS.payments.columns, ["Customer", "amount"]).map((c) => c.key).join() === "customer,amount", "fields pick columns in list order");
+assert(r3.pickColumns(r3.EXPORT_LISTS.payments.columns, ["nope"]).length === r3.EXPORT_LISTS.payments.columns.length, "unknown fields → all columns");
+const er = r3.exportRows([{ lastMessage: { at: "2026-11-26T01:00:00Z" }, waitingOnUs: true }], r3.EXPORT_LISTS.conversations.columns);
+assert(er[0].lastMessageAt === "2026-11-26T01:00:00Z" && er[0].waitingOnUs === "yes", "export rows flattened");
+assert(r3.exportFileName("payments", "2026-11-26") === "connect-payments-2026-11-26.xlsx", "export file name");
+
+// xlsx: a real zip with CRCs, header, money, dates
+const xbytes = await xl.buildXlsx("Payments", [{ key: "c", header: "Customer" }, { key: "a", header: "Amount (RM)", kind: "money" }, { key: "t", header: "When", kind: "date" }], [{ c: "Wong & <Co>", a: 1234.5, t: "2026-11-25T17:05:00Z" }]);
+const xb = Buffer.from(xbytes);
+const eocd = xb.lastIndexOf(Buffer.from([0x50, 0x4b, 0x05, 0x06]));
+const files3 = new Map();
+for (let i = 0, p = xb.readUInt32LE(eocd + 16); i < xb.readUInt16LE(eocd + 10); i++) {
+  const method = xb.readUInt16LE(p + 10), crc = xb.readUInt32LE(p + 16), csize = xb.readUInt32LE(p + 20), nlen = xb.readUInt16LE(p + 28), off = xb.readUInt32LE(p + 42);
+  const name = xb.subarray(p + 46, p + 46 + nlen).toString();
+  const data = xb.subarray(off + 30 + xb.readUInt16LE(off + 26), off + 30 + xb.readUInt16LE(off + 26) + csize);
+  const raw = method === 8 ? inflateRawSync(data) : data;
+  assert(xl.crc32(new Uint8Array(raw)) === crc, `xlsx part ${name} CRC`);
+  files3.set(name, raw.toString());
+  p += 46 + nlen;
+}
+assert(files3.size === 6 && files3.has("xl/worksheets/sheet1.xml") && files3.has("[Content_Types].xml"), "xlsx has its six parts");
+const sheet3 = files3.get("xl/worksheets/sheet1.xml");
+assert(sheet3.includes('<c r="B2" s="2"><v>1234.5</v></c>') && sheet3.includes("Wong &amp; &lt;Co&gt;") && sheet3.includes("2026-11-26 01:05") && sheet3.includes('state="frozen"'), "xlsx sheet: money, escaping, Malaysia time, frozen header");
+
+// Rate limit
+assert(r3.RATE_LIMITS.perMinute === 30 && r3.RATE_LIMITS.perDay === 600, "limits 30 / min, 600 / day");
+assert(r3.rateLimitMessage({ minute: 29, day: 599 }) === null, "under the limit");
+assert(r3.rateLimitMessage({ minute: 30, day: 1 }).startsWith("Too many requests — wait a minute"), "minute limit");
+assert(r3.rateLimitMessage({ minute: 0, day: 600 }).startsWith("Daily limit reached"), "daily limit");
+
+// Tool list: the mood scan is listed only to supervisors / admins
+const srv = await import("../src/lib/mcp/server.ts");
+const allMods = [...MODULES];
+assert(srv.toolsFor(allMods, "AGENT").every((t) => t.name !== "customer_mood_scan"), "mood scan hidden from an agent");
+assert(srv.toolsFor(allMods, "MANAGER").some((t) => t.name === "customer_mood_scan"), "mood scan listed to a manager");
+assert(srv.toolsFor(allMods, "ADMIN").every((t) => !("supervisorOnly" in t) && !("module" in t)), "no internal fields sent");
+assert(srv.toolsFor(["inbox"], "ADMIN").every((t) => !["reply_speed", "message_delivery", "contacts_summary", "campaign_summary"].includes(t.name)), "module-bound quick answers follow modules");
+
 // ── Runtime DDL == migration 0027 ──
 const { MCP_DDL } = await import("../src/db/ensure-mcp.ts");
 const mig = readFileSync(resolve(root, "src/db/migrations/0027_mcp_connector.sql"), "utf8");
@@ -239,6 +366,7 @@ for (const entry of [
   "src/app/api/mcp/oauth/token/route.ts",
   "src/app/api/mcp/oauth/authorize/route.ts",
   "src/lib/mcp/admin.ts",
+  "src/app/api/mcp/export/[token]/route.ts",
 ]) {
   walk(resolve(root, entry));
 }
