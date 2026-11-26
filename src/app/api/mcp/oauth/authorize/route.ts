@@ -44,8 +44,12 @@ export async function POST(req: Request) {
   const origin = originFor(req.headers.get("host"), req.url);
   // The decision is a same-site form post. The session cookie is SameSite=Lax,
   // so a cross-site post carries no session anyway; refuse it outright too.
+  // `Origin: null` (privacy mode, or an older page served with no-referrer) is allowed only when the browser
+  // itself says the post came from this same site.
   const from = req.headers.get("origin");
-  if ((from && from !== origin) || req.headers.get("sec-fetch-site") === "cross-site") {
+  const site = req.headers.get("sec-fetch-site");
+  const nullOk = from === "null" && (site === "same-origin" || site === "none");
+  if ((from && from !== origin && !nullOk) || site === "cross-site" || site === "same-site") {
     return new Response("Forbidden\n", { status: 403, headers: { "Content-Type": "text/plain" } });
   }
   const fd = await req.formData().catch(() => null);

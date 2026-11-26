@@ -106,8 +106,10 @@ function page(title: string, body: string): Response {
       "Content-Type": "text/html; charset=utf-8",
       "Cache-Control": "no-store",
       "X-Frame-Options": "DENY",
-      "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'",
-      "Referrer-Policy": "no-referrer",
+      "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; form-action 'self' https: http://localhost:* http://127.0.0.1:*; frame-ancestors 'none'",
+      // same-origin, not no-referrer: with no-referrer the browser sends `Origin: null` on the Allow form post,
+      // which the POST handler's same-site check refused (BUG: Connect "Forbidden" on Allow, 2026-11-26).
+      "Referrer-Policy": "same-origin",
     },
   });
 }
