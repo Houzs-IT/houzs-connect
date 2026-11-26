@@ -18,7 +18,7 @@
 // Nothing here imports a "use server" module (scripts/smoke-mcp.mjs checks the
 // import list), so no server action is reachable from a connector token.
 
-import { and, asc, count, desc, eq, ilike, or, sql, type SQL } from "drizzle-orm";
+import { and, asc, count, desc, eq, ilike, inArray, or, sql, type SQL } from "drizzle-orm";
 import type { DB } from "@/db/client";
 import {
   automation,
@@ -42,11 +42,28 @@ import type { CurrentMember } from "@/lib/current-member";
 import { contactDetail, contactsWhere, type Segment } from "@/app/(app)/contacts/queries";
 import { conversationStatus, messagesByAgent, messageVolume, replyStats, teamLoad } from "@/app/(app)/dashboard/queries";
 import { klDayKey, parsePeriod, periodWindow } from "@/app/(app)/dashboard/util";
-import { logRows } from "@/app/(app)/logs/data";
+import { failureReasons, logRows, todayStats } from "@/app/(app)/logs/data";
+import { SLA_MINUTES } from "@/lib/sla";
 import { ensureConversationMemberTable } from "@/db/ensure-conversation-member";
 import { ensureDripTables } from "@/db/ensure-drip";
 import { intParam, matchPattern, strParam } from "./core";
 import { searchResult, summariseInbox, summariseService, type InboxGroupRow, type SearchResult } from "./quick";
+import {
+  buildMoodScan,
+  dayRange,
+  maskPhone,
+  MOOD_MAX_DAYS,
+  MOOD_SCAN_REFUSAL,
+  moodScanAllowed,
+  myMidnight,
+  myToday,
+  shiftDay,
+  summariseCampaigns,
+  summariseDelivery,
+  summariseReplySpeed,
+  type MoodConversation,
+  type WaitingRow,
+} from "./round3";
 
 /** The person a connector call runs as: their member row in the company they connected from. */
 export type McpMember = CurrentMember;
@@ -149,6 +166,106 @@ export const ENDPOINTS: Endpoint[] = [
       return summariseService({ days: w.days, label: w.rangeLabel }, reply, status, volume, names);
     },
   },
+  // ── Round 3 quick answers (owner 2026-11-26). Listed BEFORE the :id
+  // patterns so /contacts/summary is not read as a contact id. ──
+  {
+    path: "/dashboard/reply-speed",
+    module: "dashboard",
+    description:
+      "QUICK ANSWER — how fast we reply: the Dashboard's own reply figures (avg first human reply, avg reply, reply rate) for today, yesterday and the last 7 days, per member, and the conversations waiting on us longer than the reply SLA (who, how long, assigned to).",
+    async run({ db, me }) {
+      const today = myToday();
+      const t0 = myMidnight(today);
+      const [rt, ry, rw, names, waiting] = await Promise.all([
+        replyStats(me.companyId, t0),
+        replyStats(me.companyId, myMidnight(shiftDay(today, -1)), t0),
+        replyStats(me.companyId, myMidnight(shiftDay(today, -6))),
+        memberNames(db, me.companyId),
+        waitingOverSla(db, me.companyId),
+      ]);
+      return summariseReplySpeed({ today: rt, yesterday: ry, last7: rw }, names, waiting.rows, waiting.total);
+    },
+  },
+  {
+    path: "/logs/delivery",
+    module: "logs",
+    description: "QUICK ANSWER — message delivery: today's outbound messages by where they got to (sent / delivered / read / failed / waiting) and the failed ones of the last N days with Meta's reason.",
+    params: { days: "failed messages of the last N days, 1-30 (default 7)" },
+    async run({ me }, _p, q) {
+      const days = intParam(q.days, 7, 1, 30);
+      const CAP = 200;
+      const [today, failed] = await Promise.all([
+        todayStats(me.companyId),
+        logRows(me.companyId, { q: "", status: "FAILED", direction: "OUT", type: "", days }, CAP),
+      ]);
+      const reasons = await failureReasons(failed.slice(0, 20));
+      return summariseDelivery(
+        today,
+        failed.map((r) => ({ id: r.id, createdAt: r.createdAt, conversationId: r.conversationId, customer: displayName(r.name, r.phone), type: r.type, sendError: r.sendError })),
+        reasons,
+        days,
+        CAP
+      );
+    },
+  },
+  {
+    path: "/contacts/summary",
+    module: "contacts",
+    description: "QUICK ANSWER — customers (contacts) in numbers: total, with an open order, with a balance due, waiting, blocked, added today / last 7 days, and the most used tags.",
+    async run({ db, me }) {
+      const { today, week } = klWindows();
+      const seg = (segment?: Segment) => db.$count(contact, contactsWhere(me.companyId, segment ? { segment } : {}));
+      const mine = eq(contact.companyId, me.companyId);
+      const [total, openOrder, balanceDue, waiting, blocked, added, tags] = await Promise.all([
+        seg(),
+        seg("open-order"),
+        seg("balance-due"),
+        seg("waiting"),
+        seg("blocked"),
+        db
+          .select({
+            today: sql<number>`count(*) filter (where ${contact.createdAt} >= ${today.toISOString()}::timestamptz)`.mapWith(Number),
+            week: sql<number>`count(*)`.mapWith(Number),
+          })
+          .from(contact)
+          .where(and(mine, sql`${contact.createdAt} >= ${week.toISOString()}::timestamptz`)),
+        db
+          .select({ name: tag.name, contacts: sql<number>`(select count(*) from connect.contact_tag ct where ct.tag_id = ${tag.id})`.mapWith(Number) })
+          .from(tag)
+          .where(eq(tag.companyId, me.companyId)),
+      ]);
+      return {
+        total,
+        segments: { openOrder, balanceDue, waiting, blocked },
+        addedToday: added[0]?.today ?? 0,
+        added7d: added[0]?.week ?? 0,
+        topTags: tags.sort((a, b) => b.contacts - a.contacts).slice(0, 10),
+        note: "Segments are the Contacts page's own filters.",
+      };
+    },
+  },
+  {
+    path: "/campaigns/summary",
+    module: "campaigns",
+    description: "QUICK ANSWER — broadcast campaigns: how many by status, total audience / sent / failed, and the latest 10 with their numbers.",
+    async run({ db, me }) {
+      const rows = await db
+        .select({ name: campaign.name, template: campaign.templateName, status: campaign.status, scheduleAt: campaign.scheduleAt, stats: campaign.stats, createdAt: campaign.createdAt })
+        .from(campaign)
+        .where(eq(campaign.companyId, me.companyId))
+        .orderBy(desc(campaign.createdAt))
+        .limit(200);
+      return summariseCampaigns(rows as unknown as Record<string, unknown>[]);
+    },
+  },
+  {
+    path: "/inbox/mood-scan",
+    module: "inbox",
+    description:
+      "SUPERVISORS AND ADMINS ONLY — customers' own messages of a day (or up to 7 days), grouped by conversation (most active first, clipped, at most 200 messages), with flags: unanswered messages in a row, waiting past the reply SLA, complaint keywords. For judging who is unhappy; summarise, do not repeat the messages.",
+    params: { date: "YYYY-MM-DD (default today)", from: "YYYY-MM-DD", to: "YYYY-MM-DD (at most 7 days from from)" },
+    run: moodScan,
+  },
   // ── Service (inbox) ──
   {
     path: "/conversations",
@@ -158,6 +275,8 @@ export const ENDPOINTS: Endpoint[] = [
       q: "search customer name, phone, order number (SO / ref) or message text",
       status: "OPEN | QUEUE | PENDING | CLOSED",
       unread: "true = only unread",
+      assigned: "me = only conversations assigned to this person",
+      open: "true = only not closed",
       limit: "1-100 (default 20)",
       offset: "for paging",
     },
@@ -172,7 +291,9 @@ export const ENDPOINTS: Endpoint[] = [
           scope,
           match,
           STATUSES.includes(status) ? sql`${conversation.status} = ${status}` : undefined,
-          String(q.unread) === "true" ? sql`${conversation.unreadCount} > 0` : undefined
+          String(q.unread) === "true" ? sql`${conversation.unreadCount} > 0` : undefined,
+          String(q.assigned) === "me" ? eq(conversation.assignedAgentId, ctx.me.id) : undefined,
+          String(q.open) === "true" ? sql`${conversation.status} <> 'CLOSED'` : undefined
         ),
         orderBy: [desc(conversation.lastMessageAt), desc(conversation.createdAt)],
         limit: limit + 1,
@@ -359,7 +480,7 @@ export const ENDPOINTS: Endpoint[] = [
     path: "/payments",
     module: "payments",
     description: "Payment slips customers sent in chat, newest first, with counts by status.",
-    params: { status: "PENDING | VERIFIED | REJECTED", q: "customer name, phone, order or reference number", limit: "1-100 (default 20)" },
+    params: { status: "PENDING | VERIFIED | REJECTED", q: "customer name, phone, order or reference number", limit: "1-100 (default 20)", offset: "for paging" },
     async run({ db, me }, _p, q) {
       const mine = eq(contact.companyId, me.companyId);
       const st = strParam(q.status).toUpperCase();
@@ -402,7 +523,8 @@ export const ENDPOINTS: Endpoint[] = [
           .innerJoin(contact, eq(contact.id, payment.contactId))
           .where(filter)
           .orderBy(desc(payment.createdAt))
-          .limit(intParam(q.limit, 20, 1, 100)),
+          .limit(intParam(q.limit, 20, 1, 100))
+          .offset(intParam(q.offset, 0, 0, 100_000)),
       ]);
       return { countsByStatus: Object.fromEntries(counts.map((c) => [c.status, c.n])), payments: rows };
     },
@@ -412,7 +534,7 @@ export const ENDPOINTS: Endpoint[] = [
     path: "/campaigns",
     module: "campaigns",
     description: "Broadcast campaigns of this company with their status and delivery stats.",
-    params: { limit: "1-100 (default 30)" },
+    params: { limit: "1-100 (default 30)", offset: "for paging" },
     async run({ db, me }, _p, q) {
       const rows = await db
         .select({
@@ -427,7 +549,8 @@ export const ENDPOINTS: Endpoint[] = [
         .from(campaign)
         .where(eq(campaign.companyId, me.companyId))
         .orderBy(desc(campaign.createdAt))
-        .limit(intParam(q.limit, 30, 1, 100));
+        .limit(intParam(q.limit, 30, 1, 100))
+        .offset(intParam(q.offset, 0, 0, 100_000));
       return { campaigns: rows };
     },
   },
@@ -537,6 +660,7 @@ export const ENDPOINTS: Endpoint[] = [
       direction: "IN | OUT",
       days: "only the last N days (1-90)",
       limit: "1-200 (default 30)",
+      offset: "for paging",
     },
     async run({ me }, _p, q) {
       const dir = strParam(q.direction).toUpperCase();
@@ -549,7 +673,8 @@ export const ENDPOINTS: Endpoint[] = [
           type: "",
           days: q.days ? intParam(q.days, 7, 1, 90) : null,
         },
-        intParam(q.limit, 30, 1, 200)
+        intParam(q.limit, 30, 1, 200),
+        intParam(q.offset, 0, 0, 100_000)
       );
       return {
         messages: rows.map((r) => ({
@@ -675,6 +800,104 @@ async function inboxOverview(ctx: ReadCtx): Promise<unknown> {
     },
     waiting.map((w) => ({ id: w.id, customer: displayName(w.name, w.phone), assignedTo: w.assignedTo, channel: w.channel, since: w.since }))
   );
+}
+
+
+// ── customer_mood_scan (supervisors and admins only) ─────────────────────
+
+/**
+ * The range's inbound messages inside the inbox rail's visibility (a manager
+ * without "see every chat" gets their own subtree), grouped for round3.ts
+ * buildMoodScan. Gate first: Connect's admin roles and MANAGER only (owner
+ * 2026-11-26). Phones are masked; message text is clipped.
+ */
+async function moodScan(ctx: ReadCtx, _p: Record<string, string>, q: Query): Promise<unknown> {
+  if (!moodScanAllowed(ctx.me.role)) throw new ReadError(403, MOOD_SCAN_REFUSAL);
+  const range = dayRange(q.from ?? q.date, q.to ?? q.date, MOOD_MAX_DAYS);
+  if ("error" in range) throw new ReadError(400, range.error);
+  const { db } = ctx;
+  const scope = await conversationScopeWhere(ctx);
+  const msgs = await db
+    .select({ conversationId: message.conversationId, at: message.createdAt, body: message.body, type: message.type })
+    .from(message)
+    .innerJoin(conversation, eq(conversation.id, message.conversationId))
+    .where(and(scope, eq(message.direction, "IN"), sql`${message.createdAt} >= ${range.start.toISOString()}::timestamptz`, sql`${message.createdAt} < ${range.end.toISOString()}::timestamptz`))
+    .orderBy(desc(message.createdAt))
+    .limit(2000);
+  const counts = new Map<string, number>();
+  for (const m of msgs) counts.set(m.conversationId, (counts.get(m.conversationId) ?? 0) + 1);
+  const ids = [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 200).map(([cid]) => cid);
+  const convos = ids.length
+    ? await db
+        .select({
+          id: conversation.id,
+          status: conversation.status,
+          name: contact.name,
+          phone: contact.phone,
+          agent: member.name,
+          dept: department.name,
+          channel: channel.displayName,
+          lastReplyAt: sql<Date | string | null>`(select max(m.created_at) from connect.message m where m.conversation_id = ${conversation.id} and m.direction = 'OUT')`,
+          lastAt: sql<Date | string | null>`(select max(m.created_at) from connect.message m where m.conversation_id = ${conversation.id})`,
+          lastDir: lastDirection,
+        })
+        .from(conversation)
+        .innerJoin(contact, eq(contact.id, conversation.contactId))
+        .leftJoin(member, eq(member.id, conversation.assignedAgentId))
+        .leftJoin(department, eq(department.id, conversation.assignedDepartmentId))
+        .leftJoin(channel, eq(channel.id, conversation.channelId))
+        .where(inArray(conversation.id, ids))
+    : [];
+  const named = (n: string | null, phone: string) => {
+    const t = (n ?? "").trim();
+    return t && !/^\+?[\d\s-]+$/.test(t) ? t : maskPhone(phone);
+  };
+  const map = new Map<string, MoodConversation>(
+    convos.map((c) => [
+      c.id,
+      {
+        id: c.id,
+        customer: named(c.name, c.phone),
+        status: c.status,
+        assignedTo: c.agent ?? null,
+        department: c.dept ?? null,
+        channel: c.channel ?? null,
+        lastReplyAt: c.lastReplyAt,
+        lastMessageAt: c.lastAt,
+        lastFromCustomer: String(c.lastDir) === "IN",
+      },
+    ])
+  );
+  return buildMoodScan(
+    msgs.map((m) => ({ conversationId: m.conversationId, at: m.at, text: mediaCaption(m.body) || "", type: m.type })),
+    map,
+    { from: range.from, to: range.to }
+  );
+}
+
+/** Not closed, the customer wrote last, longer ago than SLA_MINUTES — company-wide, like the Dashboard's live panel. */
+async function waitingOverSla(db: DB, companyId: string): Promise<{ total: number; rows: WaitingRow[] }> {
+  const rows = (await db.execute(sql`
+    select c.id, ct.name, ct.phone, mb.name as agent, d.name as dept, ch.display_name as channel, m.created_at as since,
+      count(*) over () as total
+    from connect.conversation c
+    join connect.contact ct on ct.id = c.contact_id
+    join lateral (
+      select direction, created_at from connect.message
+      where conversation_id = c.id order by created_at desc limit 1
+    ) m on true
+    left join connect.member mb on mb.id = c.assigned_agent_id
+    left join connect.department d on d.id = c.assigned_department_id
+    left join connect.channel ch on ch.id = c.channel_id
+    where ct.company_id = ${companyId} and c.status <> 'CLOSED' and m.direction = 'IN'
+      and m.created_at < now() - make_interval(mins => ${SLA_MINUTES})
+    order by m.created_at asc
+    limit 50
+  `)) as unknown as { id: string; name: string | null; phone: string; agent: string | null; dept: string | null; channel: string | null; since: string | Date; total: string | number }[];
+  return {
+    total: Number(rows[0]?.total ?? 0),
+    rows: rows.map((r) => ({ id: r.id, customer: displayName(r.name, r.phone), assignedTo: r.agent, department: r.dept, channel: r.channel, since: r.since })),
+  };
 }
 
 // ── search (ChatGPT's search tool) ────────────────────────────────────────

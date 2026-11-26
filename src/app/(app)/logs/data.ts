@@ -47,7 +47,8 @@ export type LogRow = {
 
 export type LogFilter = { q: string; status: string; direction: string; type: string; days: number | null };
 
-export async function logRows(companyId: string, f: LogFilter, limit = 200): Promise<LogRow[]> {
+/** `offset` pages further back (the AI Connector export); the page itself always starts at 0. */
+export async function logRows(companyId: string, f: LogFilter, limit = 200, offset = 0): Promise<LogRow[]> {
   const like = f.q ? `%${f.q}%` : null;
   const digits = f.q.replace(/\D/g, "");
   const rows = (await getDb().execute(sql`
@@ -64,7 +65,7 @@ export async function logRows(companyId: string, f: LogFilter, limit = 200): Pro
       ${f.days ? sql`and m.created_at >= now() - make_interval(days => ${f.days})` : sql``}
       ${like ? sql`and (ct.name ilike ${like} or m.body ilike ${like} ${digits ? sql`or ct.phone like ${`%${digits}%`}` : sql``})` : sql``}
     order by m.created_at desc
-    limit ${limit}
+    limit ${limit} offset ${offset}
   `)) as unknown as {
     id: string;
     conversation_id: string;

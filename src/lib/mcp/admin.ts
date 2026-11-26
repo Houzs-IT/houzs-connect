@@ -5,6 +5,7 @@ import type { DB } from "@/db/client";
 import { ensureAccessTables } from "@/db/ensure-access";
 import { LEAK_CLIENT_ID, SECRET_KEY, SENSITIVE_KEY, appLabel, isMcpAdminRole, jsonKeys } from "./core";
 import { listEndpointPaths } from "./reads";
+import { EXPORT_ROW_CAP, EXPORT_TTL_MS, RATE_LIMITS } from "./round3";
 import { mcpIdentity, readEndpoint } from "./server";
 import { hasMcpAccess, issueTokens, mcpDb, revokeToken } from "./store";
 
@@ -47,6 +48,7 @@ export async function myConnector(db: DB, me: { email: string; role: string }): 
 
 export type AdminOverview = {
   stats: { connectedPeople: number; callsToday: number; refusedToday: number; waiting: number };
+  limits: { perMinute: number; perDay: number; exportRows: number; exportLinkMinutes: number };
   requests: { id: string; email: string; name: string; company: string; reason: string; createdAt: string | null }[];
   connected: { tokenId: string; email: string; name: string; company: string; app: string; connectedAt: string | null; lastUsedAt: string | null }[];
   allowed: { email: string; name: string; approvedAt: string | null }[];
@@ -99,6 +101,7 @@ export async function adminOverview(db: DB): Promise<AdminOverview> {
   ]);
   return {
     stats: { connectedPeople: n(stats[0], "people"), callsToday: n(stats[0], "calls"), refusedToday: n(stats[0], "refused"), waiting: n(stats[0], "waiting") },
+    limits: { perMinute: RATE_LIMITS.perMinute, perDay: RATE_LIMITS.perDay, exportRows: EXPORT_ROW_CAP, exportLinkMinutes: EXPORT_TTL_MS / 60_000 },
     requests: requests.map((r) => ({ id: s(r, "id"), email: s(r, "email"), name: s(r, "name") || s(r, "email"), company: s(r, "company"), reason: s(r, "reason"), createdAt: iso(r.created_at) })),
     connected: connected.map((r) => ({
       tokenId: s(r, "id"),

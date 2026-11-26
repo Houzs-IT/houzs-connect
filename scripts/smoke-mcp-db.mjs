@@ -28,7 +28,24 @@ const url = process.env.DATABASE_URL ?? "";
 if (!/@(localhost|127\.0\.0\.1)(:\d+)?\//.test(url)) {
   throw new Error("smoke-mcp-db only runs against a local throwaway Postgres (DATABASE_URL on localhost / 127.0.0.1).");
 }
-globalThis[Symbol.for("__cloudflare-context__")] = { env: { DATABASE_URL: url } };
+// An in-memory stand-in for the R2 FILES bucket (export_excel stores its files there).
+const bucketStore = new Map();
+const FILES = {
+  async put(key, value, opts) {
+    bucketStore.set(key, { bytes: new Uint8Array(value), customMetadata: opts?.customMetadata ?? {}, uploaded: new Date() });
+  },
+  async get(key) {
+    const e = bucketStore.get(key);
+    return e ? { body: new Blob([e.bytes]).stream(), customMetadata: e.customMetadata } : null;
+  },
+  async list({ prefix }) {
+    return { objects: [...bucketStore.entries()].filter(([k]) => k.startsWith(prefix)).map(([key, e]) => ({ key, uploaded: e.uploaded })) };
+  },
+  async delete(keys) {
+    for (const k of [].concat(keys)) bucketStore.delete(k);
+  },
+};
+globalThis[Symbol.for("__cloudflare-context__")] = { env: { DATABASE_URL: url, FILES } };
 
 const { scriptDb } = await import("./_env.ts");
 const { db, sql } = scriptDb();
@@ -46,6 +63,7 @@ const store = await import("../src/lib/mcp/store.ts");
 const oauth = await import("../src/lib/mcp/oauth.ts");
 const server = await import("../src/lib/mcp/server.ts");
 const admin = await import("../src/lib/mcp/admin.ts");
+const r3 = await import("../src/lib/mcp/round3.ts");
 const { eq } = await import("drizzle-orm");
 const schema = await import("../src/db/schema.ts");
 
@@ -144,7 +162,15 @@ const rpc = async (token, body) => {
 };
 // A reply may start with a one-line note (fields removed / cut) before the JSON.
 const J = (t) => JSON.parse(t.content[0].text.replace(/^[^[{].*\n/, ""));
-const call = async (token, name, args = {}) => (await rpc(token, { jsonrpc: "2.0", id: 9, method: "tools/call", params: { name, arguments: args } })).body.result;
+// The rate limit (30 tool calls a minute) is real here too: `call` first moves the call
+// log two minutes back so this script's own burst never trips it. `callNow` does not —
+// the rate-limit test below uses it.
+const ageCalls = () => sql.unsafe("update connect.mcp_calls set created_at = created_at - interval '2 minutes'");
+const callNow = async (token, name, args = {}) => (await rpc(token, { jsonrpc: "2.0", id: 9, method: "tools/call", params: { name, arguments: args } })).body.result;
+const call = async (token, name, args = {}) => {
+  await ageCalls();
+  return callNow(token, name, args);
+};
 
 let x = await rpc(null, { jsonrpc: "2.0", id: 1, method: "initialize" });
 assert(x.status === 401 && x.headers.get("www-authenticate").includes(`resource_metadata="${ORIGIN}/.well-known/oauth-protected-resource/api/mcp"`), "401 + WWW-Authenticate without a token");
@@ -157,12 +183,13 @@ x = await rpc(tok.access_token, { jsonrpc: "2.0", method: "notifications/initial
 assert(x.status === 202, "a notification → 202");
 x = await rpc(tok.access_token, { jsonrpc: "2.0", id: 2, method: "tools/list" });
 assert(
-  x.body.result.tools.map((t) => t.name).join() === "inbox_overview,service_performance,search,fetch,whoami,list_modules,list_endpoints,connect_get",
+  x.body.result.tools.map((t) => t.name).join() ===
+    "inbox_overview,service_performance,reply_speed,message_delivery,contacts_summary,campaign_summary,daily_brief,export_excel,search,fetch,whoami,list_modules,list_endpoints,connect_get",
   `quick answers, search / fetch, then the general tools (${x.body.result.tools.map((t) => t.name).join()})`
 );
 assert(x.body.result.tools.every((t) => t.annotations.readOnlyHint === true && !("module" in t)), "all tools read-only; no internal fields sent");
 x = await rpc(tok.access_token, { jsonrpc: "2.0", id: 2, method: "prompts/list" });
-assert(x.body.result.prompts.map((p) => p.name).join() === "inbox_today,service_review,find_customer", "prompts/list");
+assert(x.body.result.prompts.map((p) => p.name).join() === "daily-brief,inbox_today,service_review,find_customer", "prompts/list");
 x = await rpc(tok.access_token, { jsonrpc: "2.0", id: 2, method: "prompts/get", params: { name: "find_customer", arguments: { who: "Wong" } } });
 assert(x.body.result.messages[0].role === "user" && x.body.result.messages[0].content.text.includes('"Wong"'), "prompts/get expands a prompt");
 x = await rpc(tok.access_token, { jsonrpc: "2.0", id: 2, method: "prompts/get", params: { name: "nope" } });
@@ -195,6 +222,60 @@ assert(ov1.today.messagesIn >= 1 && ov1.last7Days.contactsAdded >= 2, "today's m
 assert(t.content[0].text.length < 2000, `inbox overview is a few hundred characters (${t.content[0].text.length})`);
 t = await call(tok.access_token, "service_performance", { days: 30 });
 assert(!t.isError && J(t).period.includes("30 days") && J(t).replies.customersWhoWrote >= 1, `service performance (${t.content[0].text.slice(0, 160)})`);
+// ── Round 3 quick answers, daily brief, export (Agent A: AGENT, every module on) ──
+t = await call(tok.access_token, "reply_speed");
+let rsp = J(t);
+assert(!t.isError && rsp.slaMinutes > 0 && rsp.today.customersWhoWrote >= 1 && rsp.waitingOverSla.count === 0, `reply_speed (${t.content[0].text.slice(0, 200)})`);
+await sql.unsafe(`insert into connect.message (id, conversation_id, direction, body, created_at) values ('${id("m0")}', '${id("v1")}', 'IN', 'Earlier message', now() - interval '2 hours')`);
+await sql.unsafe(`update connect.message set created_at = now() - interval '45 minutes' where id = '${id("m1")}'`);
+t = await call(tok.access_token, "reply_speed");
+rsp = J(t);
+assert(rsp.waitingOverSla.count >= 1 && rsp.waitingOverSla.longest.some((w) => w.conversationId === id("v1") && w.assignedTo === "(unassigned)" && w.department === "Delivery"), `waiting over SLA listed (${JSON.stringify(rsp.waitingOverSla)})`);
+t = await call(tok.access_token, "message_delivery", { days: 3 });
+assert(!t.isError && J(t).todayOutbound.sent === 0 && J(t).failed.days === 3, `message_delivery (${t.content[0].text.slice(0, 160)})`);
+t = await call(tok.access_token, "contacts_summary");
+assert(!t.isError && J(t).total >= 2 && J(t).added7d >= 2, `contacts_summary (${t.content[0].text.slice(0, 160)})`);
+t = await call(tok.access_token, "campaign_summary");
+assert(!t.isError && J(t).campaigns === 0, `campaign_summary (${t.content[0].text.slice(0, 160)})`);
+t = await call(tok.access_token, "connect_get", { path: "/contacts/summary" });
+assert(!t.isError && J(t).total >= 2, "/contacts/summary is the summary, not a contact id");
+
+// The mood scan: an agent is refused with a plain line (and the refusal is logged).
+t = await call(tok.access_token, "customer_mood_scan");
+assert(t.isError && t.content[0].text.startsWith("Supervisors and admins only"), `mood scan refused for an agent (${t.content[0].text})`);
+const moodLog = await sql.unsafe(`select status, ok from connect.mcp_calls where member_id = '${id("a")}' and tool = 'customer_mood_scan' order by created_at desc limit 1`);
+assert(moodLog[0]?.status === 403 && moodLog[0]?.ok === false, "refused mood scan logged as 403");
+
+t = await call(tok.access_token, "daily_brief");
+const brief = J(t);
+assert(!t.isError && typeof brief.inbox.waitingForUs === "number" && brief.paymentsToCheck.pending === 1 && "failedMessages" in brief, `daily_brief (${t.content[0].text.slice(0, 300)})`);
+assert(brief.myConversations.assignedToMeNotClosed === 0, "nothing is assigned to Agent A yet");
+await sql.unsafe(`update connect.conversation set assigned_agent_id = '${id("a")}' where id = '${id("v1")}'`);
+t = await call(tok.access_token, "daily_brief");
+assert(J(t).myConversations.waitingForMyReply === 1 && J(t).myConversations.top[0].url === `${ORIGIN}/inbox/open/${id("v1")}`, "daily_brief: my waiting conversation, with its link");
+x = await rpc(tok.access_token, { jsonrpc: "2.0", id: 2, method: "prompts/get", params: { name: "daily-brief" } });
+assert(x.body.result.messages[0].content.text.includes("daily_brief"), "daily-brief prompt");
+
+t = await call(tok.access_token, "export_excel", { list: "conversations" });
+let ex = J(t);
+assert(!t.isError && ex.rows === 1 && ex.truncated === false && ex.linkValidMinutes === 15 && ex.download.startsWith(`${ORIGIN}/api/mcp/export/`), `export conversations, own visibility only (${t.content[0].text.slice(0, 200)})`);
+assert(ex.columns.includes("Customer") && !ex.columns.some((c) => /message text/i.test(c)), "export columns");
+const exRoute = await import("../src/app/api/mcp/export/[token]/route.ts");
+const exToken = ex.download.split("/").pop();
+let dl = await exRoute.GET(new Request(ex.download), { params: Promise.resolve({ token: exToken }) });
+let dlBytes = Buffer.from(await dl.arrayBuffer());
+assert(dl.status === 200 && dl.headers.get("content-type").includes("spreadsheetml") && dlBytes.subarray(0, 2).toString() === "PK", "the download link serves the .xlsx");
+dl = await exRoute.GET(new Request(ORIGIN + "/api/mcp/export/x"), { params: Promise.resolve({ token: "A".repeat(32) }) });
+assert(dl.status === 400, "an unknown link is refused");
+for (const e of bucketStore.values()) e.customMetadata.expiresAt = new Date(Date.now() - 1000).toISOString();
+dl = await exRoute.GET(new Request(ex.download), { params: Promise.resolve({ token: exToken }) });
+assert(dl.status === 400 && (await dl.text()).includes("expired"), "an expired link is refused");
+t = await call(tok.access_token, "export_excel", { list: "payments", filters: { status: "PENDING", bogus: "x" }, fields: ["customer", "amount"] });
+ex = J(t);
+assert(!t.isError && ex.rows === 1 && ex.columns.join() === "Customer,Amount (RM)", `export payments with filters + fields (${t.content[0].text.slice(0, 200)})`);
+t = await call(tok.access_token, "export_excel", { list: "secrets" });
+assert(t.isError && t.content[0].text.startsWith("Unknown list"), "export refuses a list outside the allowlist");
+
 
 // search / fetch in the exact shape ChatGPT requires, inside the person's visibility.
 t = await call(tok.access_token, "search", { query: "Wong" });
@@ -271,6 +352,42 @@ assert((await rpc(tok2.access_token, { jsonrpc: "2.0", id: 1, method: "ping" }))
 const ownerCode = await codeFor(owner);
 r = await oauth.handleToken(appDb, tokenReq({ grant_type: "authorization_code", client_id: client.client_id, code: new URL(ownerCode.res.headers.get("location")).searchParams.get("code"), code_verifier: verifier }));
 assert(r.status === 200, "Super Admin connects without an approval row");
+const ownerTok = await r.json();
+
+// The mood scan for a Super Admin: every conversation in the company, phones masked, flags set.
+x = await rpc(ownerTok.access_token, { jsonrpc: "2.0", id: 2, method: "tools/list" });
+assert(x.body.result.tools.some((tl) => tl.name === "customer_mood_scan"), "mood scan listed to a Super Admin");
+// Yesterday + today, so a run just after midnight (Malaysia time) still covers the seeded messages.
+t = await call(ownerTok.access_token, "customer_mood_scan", { from: r3.shiftDay(r3.myToday(), -1), to: r3.myToday() });
+const mood = J(t);
+assert(!t.isError && mood.conversations === 2 && mood.byConversation.length === 2, `mood scan sees the whole company (${t.content[0].text.slice(0, 300)})`);
+const moodV1 = mood.byConversation.find((c) => c.conversationId === id("v1"));
+assert(moodV1.customer === "Wong Ah Kow" && moodV1.flags.unansweredInARow === 2 && moodV1.flags.repeatedWithoutReply && moodV1.flags.overSla && moodV1.assignedTo === "Agent A", `mood flags (${JSON.stringify(moodV1.flags)})`);
+assert(!t.content[0].text.includes("60111111111") && !t.content[0].text.includes("60122222222"), "no phone numbers in the mood scan");
+t = await call(ownerTok.access_token, "customer_mood_scan", { from: "2026-01-01", to: "2026-01-31" });
+assert(t.isError && t.content[0].text.includes("At most 7 days"), "mood scan range capped at 7 days");
+
+// Rate limit: counted per person from mcp_calls; over it → a normal isError result, logged as 429, not counted.
+await ageCalls();
+const ownerEmail = owner.email.toLowerCase();
+const fill = (n, ago) =>
+  sql.unsafe(`insert into connect.mcp_calls (id, member_id, email, tool, ok, status, created_at)
+    select '${tag}_rl_' || g || '_${ago}', '${owner.id}', '${ownerEmail}', 'synthetic', true, 200, now() - interval '${ago}'
+    from generate_series(1, ${n}) g`);
+await fill(r3.RATE_LIMITS.perMinute - 1, "5 seconds");
+assert(!(await callNow(ownerTok.access_token, "whoami")).isError, "call number 30 in a minute is allowed");
+t = await callNow(ownerTok.access_token, "whoami");
+assert(t.isError && t.content[0].text.startsWith("Too many requests — wait a minute"), `call 31 → plain refusal (${t.content[0].text})`);
+x = await rpc(ownerTok.access_token, { jsonrpc: "2.0", id: 2, method: "tools/list" });
+assert(Array.isArray(x.body.result.tools), "tools/list is not counted or refused");
+const limited = await sql.unsafe(`select count(*)::int as n from connect.mcp_calls where email = '${ownerEmail}' and status = 429`);
+assert(limited[0].n === 1 && (await store.countRecentCalls(appDb, owner.email)).minute === r3.RATE_LIMITS.perMinute, "refusal logged as 429 and not counted");
+await ageCalls();
+assert(!(await callNow(ownerTok.access_token, "whoami")).isError, "a minute later it works again");
+await fill(r3.RATE_LIMITS.perDay, "1 hour");
+t = await callNow(ownerTok.access_token, "whoami");
+assert(t.isError && t.content[0].text.startsWith("Daily limit reached"), `daily limit (${t.content[0].text})`);
+await sql.unsafe(`delete from connect.mcp_calls where tool = 'synthetic' and email = '${ownerEmail}'`);
 const ov = await admin.adminOverview(appDb);
 assert(ov.connected.some((k) => k.email === agentA.email) && ov.allowed.some((a) => a.email === agentA.email), "overview lists the connection and the allowed person");
 assert(ov.calls.length > 0 && ov.calls.length <= 100, "recent lookups listed");

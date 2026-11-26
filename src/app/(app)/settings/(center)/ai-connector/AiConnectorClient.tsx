@@ -112,6 +112,12 @@ export function AiConnectorClient({
           ))}
         </div>
       )}
+      {o?.limits && (
+        <p className="text-[12px] text-[var(--color-faint)]">
+          Limits per person: {o.limits.perMinute} lookups a minute and {o.limits.perDay} a day (the leak check is not counted). Excel exports: up to{" "}
+          {o.limits.exportRows.toLocaleString("en")} rows, download link valid {o.limits.exportLinkMinutes} minutes.
+        </p>
+      )}
 
       {/* My status */}
       {!mine.allowed && (

@@ -281,6 +281,20 @@ export type McpCallRow = { tokenId: string; memberId: string; email: string; com
  * Every call of one request in ONE insert. server.ts hands this to waitUntil,
  * so the AI app's answer no longer waits for the log write. Never throws.
  */
+/**
+ * Tool calls this person (email) made in the last minute and the last 24 hours,
+ * for the rate limit (server.ts callTool). Refused calls (status 429) do not
+ * count, so waiting always frees the limit. Uses mcp_calls_email_idx (email, created_at).
+ */
+export async function countRecentCalls(db: DB, email: string): Promise<{ minute: number; day: number }> {
+  const r = await rows(db, sql`
+    select count(*) filter (where created_at > now() - interval '1 minute') as minute, count(*) as day
+    from connect.mcp_calls
+    where email = ${email.toLowerCase()} and created_at > now() - interval '1 day' and (status is null or status <> 429)
+  `);
+  return { minute: Number(r[0]?.minute ?? 0), day: Number(r[0]?.day ?? 0) };
+}
+
 export async function logCalls(db: DB, calls: McpCallRow[]): Promise<void> {
   if (!calls.length) return;
   try {

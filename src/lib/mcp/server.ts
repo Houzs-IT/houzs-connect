@@ -35,7 +35,25 @@ import { resolveModules, type Module } from "@/lib/module-access";
 import { CORS_HEADERS, classifyPath, fitReply, isMcpAdminRole, MAX_RESULT_CHARS, MCP_PROTOCOL_VERSIONS, MCP_BLOCKED_PREFIXES, redactSecrets } from "./core";
 import { conversationDoc, contactDoc, parseFetchId, PROMPTS, promptText, recordUrl } from "./quick";
 import { ENDPOINTS, ReadError, companyName, findEndpoint, moduleCatalog, searchRecords, type McpMember, type ReadCtx } from "./reads";
-import { checkAccessToken, logCalls, mcpDb, type McpCallRow } from "./store";
+import { checkAccessToken, countRecentCalls, logCalls, mcpDb, type McpCallRow } from "./store";
+import {
+  buildDailyBrief,
+  DAILY_BRIEF_PROMPT,
+  DAILY_BRIEF_TEXT,
+  EXPORT_LISTS,
+  EXPORT_ROW_CAP,
+  EXPORT_TTL_MS,
+  exportFileName,
+  exportRows,
+  moodScanAllowed,
+  myToday,
+  pickColumns,
+  RATE_LIMITS,
+  rateLimitMessage,
+  type BriefPart,
+} from "./round3";
+import { storeExport } from "./export-store";
+import { buildXlsx } from "./xlsx";
 
 export const SERVER_INFO = { name: "houzs-connect", title: "Houzs Connect", version: "1.0.0" };
 
@@ -49,16 +67,23 @@ const INSTRUCTIONS = `You are connected to Houzs Connect — the company's Whats
 Everything is READ-ONLY and limited to what this person can see in Houzs Connect. Never guess figures a call did not return.
 ANSWER FAST — use a quick answer first; it is one call and already summarised:
 - Inbox now (open / waiting for our reply, by channel and by person, longest waits, today's and this week's messages, contacts added): inbox_overview.
+- How fast are we replying today, who is slow, who waits past the reply SLA right now: reply_speed.
+- What do I need to look at today: daily_brief.
 - Response times / reply rate / who replied most, message volume vs the period before: service_performance {days: 7 | 30 | 90}.
+- Failed / undelivered messages: message_delivery. Customers in numbers: contacts_summary. Campaigns: campaign_summary.
+- Which customers are unhappy or complaining (supervisors and admins only): customer_mood_scan — summarise, never paste messages back.
+- A list as an Excel file: export_excel {list, filters?, fields?} returns a download link valid 15 minutes.
 - A customer, phone or order number: search {query}, then fetch {id} for the conversation or contact.
 Only when no quick answer fits: connect_get with a path from list_endpoints (e.g. /conversations?status=OPEN, /payments?status=PENDING, /logs/messages?days=1). Pass q / status / days / limit to keep replies small.
 A field missing from a reply means it is empty. Times are UTC ISO unless a reply says Malaysia time.
-If a call says "Not available to your role", tell the person they do not have access to that part of Houzs Connect.`;
+If a call says "Not available to your role", tell the person they do not have access to that part of Houzs Connect.
+Message templates live in Settings, which the connector never reads.
+Each person may make ${RATE_LIMITS.perMinute} tool calls a minute and ${RATE_LIMITS.perDay} a day; over that a call says so — wait instead of retrying at once.`;
 
 const RO = { readOnlyHint: true, destructiveHint: false, openWorldHint: false };
 const NO_ARGS = { type: "object", properties: {}, additionalProperties: false };
 /** Tools tied to one module are only listed to a person who has it (`module`, stripped from tools/list). */
-export const TOOLS: ({ name: string; module?: Module } & Record<string, unknown>)[] = [
+export const TOOLS: ({ name: string; module?: Module; supervisorOnly?: boolean } & Record<string, unknown>)[] = [
   {
     name: "inbox_overview",
     module: "inbox",
@@ -75,6 +100,81 @@ export const TOOLS: ({ name: string; module?: Module } & Record<string, unknown>
     description:
       "Customer-service figures for the last 7, 30 or 90 days in ONE call: reply rate, average first reply and reply time (overall and per person), conversations by status, messages in/out vs the period before. Same numbers as the Dashboard.",
     inputSchema: { type: "object", properties: { days: { type: "number", enum: [7, 30, 90], description: "Default 7" } }, additionalProperties: false },
+    annotations: RO,
+  },
+  {
+    name: "reply_speed",
+    module: "dashboard",
+    title: "Reply speed (quick answer)",
+    description:
+      "How fast we reply, in ONE call: average first human reply, average reply and reply rate for today, yesterday and the last 7 days (the Dashboard's own measurement), per member (who is slow), and every conversation waiting on us longer than the reply SLA (customer, how long, assigned to).",
+    inputSchema: NO_ARGS,
+    annotations: RO,
+  },
+  {
+    name: "message_delivery",
+    module: "logs",
+    title: "Message delivery (quick answer)",
+    description: "Today's outbound WhatsApp messages by where they got to (sent / delivered / read / failed / waiting) and the failed ones of the last N days with Meta's reason. ONE call.",
+    inputSchema: { type: "object", properties: { days: { type: "number", description: "Failed messages of the last N days, 1-30 (default 7)" } }, additionalProperties: false },
+    annotations: RO,
+  },
+  {
+    name: "contacts_summary",
+    module: "contacts",
+    title: "Contacts in numbers (quick answer)",
+    description: "Customers in ONE call: total, with an open order, with a balance due, waiting, blocked, added today and in the last 7 days, and the most used tags.",
+    inputSchema: NO_ARGS,
+    annotations: RO,
+  },
+  {
+    name: "campaign_summary",
+    module: "campaigns",
+    title: "Campaigns (quick answer)",
+    description: "Broadcast campaigns in ONE call: how many by status, total audience / sent / failed, and the latest 10 with their numbers.",
+    inputSchema: NO_ARGS,
+    annotations: RO,
+  },
+  {
+    name: "customer_mood_scan",
+    module: "inbox",
+    supervisorOnly: true,
+    title: "Unhappy customers (supervisors and admins)",
+    description:
+      "SUPERVISORS AND ADMINS ONLY. Customers' own messages of a day (default today; or from/to, at most 7 days), grouped by conversation, most active first, clipped to 300 characters, at most 200 messages, with flags: unanswered messages in a row, waiting past the reply SLA, complaint keywords. Use it to find who is unhappy or complaining and SUMMARISE them (who, what about, how long they waited, who has the chat, what to do) — never paste the messages back.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        date: { type: "string", description: "YYYY-MM-DD, default today (Malaysia time)" },
+        from: { type: "string", description: "YYYY-MM-DD" },
+        to: { type: "string", description: "YYYY-MM-DD, at most 7 days after from" },
+      },
+      additionalProperties: false,
+    },
+    annotations: RO,
+  },
+  {
+    name: "daily_brief",
+    title: "My day (quick answer)",
+    description:
+      "What this person needs to look at today in ONE call: conversations assigned to them that wait for their reply, the inbox's longest waits, payment slips to check and failed messages. A part they may not read says so; the rest still answers.",
+    inputSchema: NO_ARGS,
+    annotations: RO,
+  },
+  {
+    name: "export_excel",
+    title: "Export a list to Excel",
+    description: `Build an .xlsx of a list as this person sees it and return a download link valid 15 minutes, the row count and whether it was cut at ${EXPORT_ROW_CAP} rows. Lists: conversations (q, status, unread, assigned=me), contacts (q, segment, tag), payments (q, status), logs (q, status, direction, days), campaigns. Customer message text is never exported. "fields" picks columns (keys or headers).`,
+    inputSchema: {
+      type: "object",
+      properties: {
+        list: { type: "string", enum: Object.keys(EXPORT_LISTS) },
+        filters: { type: "object", description: 'Filters for that list, e.g. {"status":"PENDING"}', additionalProperties: { type: ["string", "number", "boolean"] } },
+        fields: { type: "array", items: { type: "string" }, description: 'Columns to keep, e.g. ["customer","amount","status"]' },
+      },
+      required: ["list"],
+      additionalProperties: false,
+    },
     annotations: RO,
   },
   {
@@ -184,7 +284,88 @@ export async function readEndpoint(db: DB, id: Identity, rawPath: unknown, query
 const QUICK_PATHS: Record<string, (args: Record<string, unknown>) => { path: string; query: Record<string, unknown> }> = {
   inbox_overview: () => ({ path: "/inbox/overview", query: {} }),
   service_performance: (a) => ({ path: "/dashboard/service", query: a.days === undefined ? {} : { days: a.days } }),
+  reply_speed: () => ({ path: "/dashboard/reply-speed", query: {} }),
+  message_delivery: (a) => ({ path: "/logs/delivery", query: a.days === undefined ? {} : { days: a.days } }),
+  contacts_summary: () => ({ path: "/contacts/summary", query: {} }),
+  campaign_summary: () => ({ path: "/campaigns/summary", query: {} }),
+  customer_mood_scan: (a) => ({ path: "/inbox/mood-scan", query: { date: a.date, from: a.from, to: a.to } }),
 };
+
+/** One read of a composite answer as a brief part: refused / failed reads become one plain line. */
+function briefPart(r: ReadOutcome, what: string): BriefPart {
+  if (!r.result.isError) return { ok: true, value: r.body };
+  return { ok: false, message: r.status === 403 ? `You do not have access to ${what} in Houzs Connect.` : r.result.content[0].text.slice(0, 200) };
+}
+
+async function dailyBrief(db: DB, id: Identity, origin: string): Promise<unknown> {
+  // Four catalogue reads as the person, side by side; each keeps its own module gate.
+  const [overview, mine, payments, delivery] = await Promise.all([
+    readEndpoint(db, id, "/inbox/overview", {}),
+    readEndpoint(db, id, "/conversations", { assigned: "me", open: "true", limit: 50 }),
+    readEndpoint(db, id, "/payments", { status: "PENDING", limit: 5 }),
+    readEndpoint(db, id, "/logs/delivery", { days: 1 }),
+  ]);
+  return buildDailyBrief(
+    { overview: briefPart(overview, "the Service inbox"), mine: briefPart(mine, "the Service inbox"), payments: briefPart(payments, "payments"), delivery: briefPart(delivery, "System Logs") },
+    { name: id.me.name },
+    origin
+  );
+}
+
+/** export_excel: page through one catalogue list as the person, up to EXPORT_ROW_CAP rows, into an .xlsx behind a 15-minute link. */
+async function exportExcel(db: DB, id: Identity, args: Record<string, unknown>, origin: string, defer?: (p: Promise<unknown>) => void): Promise<ReadOutcome> {
+  const listName = String(args.list ?? "");
+  const cfg = EXPORT_LISTS[listName];
+  const target0 = `export:${listName.slice(0, 40)}`;
+  if (!cfg) return { result: text(`Unknown list. Lists you can export: ${Object.keys(EXPORT_LISTS).join(", ")}.`, true), status: 400, note: "unknown list", target: target0, body: null, removed: [] };
+  const given = args.filters && typeof args.filters === "object" && !Array.isArray(args.filters) ? (args.filters as Record<string, unknown>) : {};
+  const filters: Record<string, unknown> = {};
+  for (const k of cfg.filters) if (given[k] !== undefined && given[k] !== null && typeof given[k] !== "object") filters[k] = given[k];
+  const target = `${target0}${Object.keys(filters).length ? `?${new URLSearchParams(Object.entries(filters).map(([k, v]) => [k, String(v)])).toString()}` : ""}`.slice(0, 480);
+  const rows: Record<string, unknown>[] = [];
+  const removed = new Set<string>();
+  let truncated = false;
+  for (let offset = 0; ; offset += cfg.page) {
+    const r = await readEndpoint(db, id, cfg.path, { ...filters, limit: cfg.page, offset });
+    if (r.result.isError) {
+      if (offset === 0) return { ...r, target };
+      truncated = true;
+      break;
+    }
+    for (const k of r.removed) removed.add(k);
+    const got = ((r.body as Record<string, unknown>)?.[cfg.rowsKey] as Record<string, unknown>[] | undefined) ?? [];
+    for (const row of got) {
+      if (rows.length >= EXPORT_ROW_CAP) {
+        truncated = true;
+        break;
+      }
+      rows.push(row);
+    }
+    if (truncated || got.length < cfg.page) break;
+  }
+  const columns = pickColumns(cfg.columns, args.fields);
+  const fileName = exportFileName(listName, myToday());
+  const bytes = await buildXlsx(cfg.title, columns, exportRows(rows, columns));
+  const link = await storeExport(bytes, fileName, { memberId: id.me.id, email: id.me.email }, origin, defer);
+  return {
+    result: asJson({
+      download: link.url,
+      fileName,
+      rows: rows.length,
+      truncated,
+      ...(truncated ? { note: `Cut at ${EXPORT_ROW_CAP} rows — narrow the filters for the rest.` } : {}),
+      linkExpiresAt: link.expiresAt,
+      linkValidMinutes: EXPORT_TTL_MS / 60_000,
+      columns: columns.map((c) => c.header),
+      ...(removed.size ? { credentialFieldsRemoved: [...removed] } : {}),
+    }),
+    status: 200,
+    note: `${rows.length} rows${truncated ? ", truncated" : ""}, ${bytes.length} bytes`,
+    target,
+    body: null,
+    removed: [...removed],
+  };
+}
 
 const asJson = (v: unknown) => text(JSON.stringify(v));
 
@@ -208,14 +389,30 @@ async function fetchRecord(db: DB, id: Identity, rawId: unknown, origin: string)
   return { ...r, result: asJson(body) };
 }
 
-async function callTool(db: DB, id: Identity, name: string, args: Record<string, unknown>, origin: string, logs: McpCallRow[]): Promise<ToolResult> {
+async function callTool(db: DB, id: Identity, name: string, args: Record<string, unknown>, origin: string, logs: McpCallRow[], defer?: (p: Promise<unknown>) => void): Promise<ToolResult> {
   const t0 = Date.now();
   let status = 200;
   let note = "";
   let target = "";
   let result: ToolResult;
   try {
-    if (name === "whoami") {
+    // Per person (email), tool calls only; refused calls are logged as 429 and not counted.
+    // The admin leak check reads through readEndpoint, never here, so it is never limited.
+    const refused = rateLimitMessage(await countRecentCalls(db, id.me.email));
+    if (refused) {
+      result = text(refused, true);
+      status = 429;
+      note = "rate limited";
+    } else if (name === "daily_brief") {
+      target = `daily_brief:${myToday()}`;
+      result = asJson(await dailyBrief(db, id, origin));
+    } else if (name === "export_excel") {
+      const r = await exportExcel(db, id, args, origin, defer);
+      result = r.result;
+      status = r.status;
+      note = r.note;
+      target = r.target;
+    } else if (name === "whoami") {
       const m = id.me;
       result = text(
         JSON.stringify({
@@ -297,10 +494,11 @@ async function callTool(db: DB, id: Identity, name: string, args: Record<string,
 }
 
 /** Tools for this person: a module-bound tool only when they have the module; `module` is not sent. */
-export function toolsFor(modules: Module[]) {
-  return TOOLS.filter((t) => !t.module || modules.includes(t.module)).map((t) => {
+export function toolsFor(modules: Module[], role?: string | null) {
+  return TOOLS.filter((t) => (!t.module || modules.includes(t.module)) && (!t.supervisorOnly || moodScanAllowed(role))).map((t) => {
     const out: Record<string, unknown> = { ...t };
     delete out.module;
+    delete out.supervisorOnly;
     return out;
   });
 }
@@ -310,7 +508,7 @@ export function toolsFor(modules: Module[]) {
  * caller writes them (handleMcpPost: one insert, after the answer). Without
  * `logs` (a direct caller), they are written before returning.
  */
-export async function handleRpc(db: DB, id: Identity, m: RpcReq, origin = "", logs?: McpCallRow[]): Promise<unknown> {
+export async function handleRpc(db: DB, id: Identity, m: RpcReq, origin = "", logs?: McpCallRow[], defer?: (p: Promise<unknown>) => void): Promise<unknown> {
   const reply = (result: unknown) => ({ jsonrpc: "2.0", id: m.id ?? null, result });
   if (!m || typeof m !== "object") return { jsonrpc: "2.0", id: null, error: { code: -32600, message: "Invalid Request" } };
   switch (m.method) {
@@ -322,22 +520,22 @@ export async function handleRpc(db: DB, id: Identity, m: RpcReq, origin = "", lo
     case "ping":
       return reply({});
     case "tools/list":
-      return reply({ tools: toolsFor(id.modules) });
+      return reply({ tools: toolsFor(id.modules, id.me.role) });
     case "tools/call": {
       const own = logs ?? [];
-      const r = await callTool(db, id, String(m.params?.name ?? ""), (m.params?.arguments as Record<string, unknown> | undefined) ?? {}, origin, own);
+      const r = await callTool(db, id, String(m.params?.name ?? ""), (m.params?.arguments as Record<string, unknown> | undefined) ?? {}, origin, own, defer);
       if (!logs) await logCalls(db, own);
       return reply(r);
     }
     case "resources/list":
       return reply({ resources: [] });
     case "prompts/list":
-      return reply({ prompts: PROMPTS });
+      return reply({ prompts: [DAILY_BRIEF_PROMPT, ...PROMPTS] });
     case "prompts/get": {
       const name = String(m.params?.name ?? "");
-      const body = promptText(name, (m.params?.arguments as Record<string, unknown> | undefined) ?? {});
+      const body = name === DAILY_BRIEF_PROMPT.name ? DAILY_BRIEF_TEXT : promptText(name, (m.params?.arguments as Record<string, unknown> | undefined) ?? {});
       if (body === null) return { jsonrpc: "2.0", id: m.id ?? null, error: { code: -32602, message: `Unknown prompt: ${name.slice(0, 60)}` } };
-      return reply({ description: PROMPTS.find((p) => p.name === name)?.description ?? "", messages: [{ role: "user", content: { type: "text", text: body } }] });
+      return reply({ description: [DAILY_BRIEF_PROMPT, ...PROMPTS].find((p) => p.name === name)?.description ?? "", messages: [{ role: "user", content: { type: "text", text: body } }] });
     }
     default:
       if (m.id === undefined || m.id === null || (m.method ?? "").startsWith("notifications/")) return null;
@@ -375,7 +573,7 @@ export async function handleMcpPost(db: DB, req: Request, origin: string, defer?
   const out: unknown[] = [];
   const logs: McpCallRow[] = [];
   for (const m of msgs) {
-    const r = await handleRpc(db, id, m, origin, logs);
+    const r = await handleRpc(db, id, m, origin, logs, defer);
     if (r) out.push(r);
   }
   if (logs.length) {

@@ -68,6 +68,58 @@ works on a phone).
   → /dashboard/summary ≈ 52k chars / 33 queries / 4 calls; now `inbox_overview` ≈ 1.8k chars
   / 9 queries / 1 call. Not measured: production latency (Hyperdrive), a real ChatGPT
   connection using search/fetch.
+- **Round 3 (2026-11-26, branch `feat/mcp-round3`, owner-approved).** All new reads are
+  catalogue endpoints run through `readEndpoint` (module gate, inbox visibility, redaction,
+  call log, leak check), listed before the `:id` patterns. Pure parts: `src/lib/mcp/round3.ts`.
+  - `reply_speed` (dashboard module, `/dashboard/reply-speed`): the Dashboard's own `replyStats`
+    for today / yesterday / last 7 days (avg first HUMAN reply, avg reply, reply rate), per
+    member, and every conversation waiting on us longer than `SLA_MINUTES` (company-wide, like
+    the Dashboard's live panel: customer, how long, assignee, department, channel).
+  - `message_delivery` (logs, `/logs/delivery`): System Logs' `todayStats` + `logRows` FAILED
+    for N days + `failureReasons` (Meta's reason) for the newest 20.
+  - `contacts_summary` (contacts, `/contacts/summary`): total + the Contacts page's segments
+    (`contactsWhere`), added today / 7 d, top tags. `campaign_summary` (campaigns,
+    `/campaigns/summary`).
+  - `customer_mood_scan` (inbox, `/inbox/mood-scan`): **supervisors and admins only** —
+    `SUPER_ADMIN`, `OWNER`, `ADMIN`, `MANAGER` (`round3.moodScanAllowed`); everyone else gets
+    "Supervisors and admins only…" (logged as 403) and does not see the tool in `tools/list`.
+    Inbound messages of a day (or ≤ 7 days) inside the inbox rail's visibility, grouped by
+    conversation (most active first), 300 chars each, ≤ 200 messages, flags (unanswered in a
+    row, waiting past `SLA_MINUTES`, keyword hints EN / Malay / Chinese). Phones never shown
+    (a name, else a masked number). The tool description tells the AI to summarise, not paste.
+  - `daily_brief` + prompt `daily-brief`: 4 reads in parallel (`/inbox/overview`,
+    `/conversations?assigned=me&open=true`, `/payments?status=PENDING`, `/logs/delivery?days=1`);
+    a part the person may not read says "You do not have access to …".
+  - `export_excel {list, filters?, fields?}`: conversations / contacts / payments / logs /
+    campaigns, paged through the same catalogue reads (new `offset` on `/payments`,
+    `/campaigns`, `/logs/messages` — `logRows` got an optional `offset`), cap 5,000 rows, a
+    dependency-free .xlsx (`src/lib/mcp/xlsx.ts`), money in RM (payments.amount is RM). **No
+    column carries customer message text.** Stored in R2 `FILES` under `mcp-exports/<sha256
+    of token>.xlsx`, link `GET /api/mcp/export/<token>` valid 15 minutes (capability link —
+    whoever holds it can download inside that window); objects older than a day are swept
+    on the next export.
+  - **Rate limit:** 30 tool calls / minute, 600 / day per person (email), counted from
+    `mcp_calls` on the existing `mcp_calls_email_idx (email, created_at)` — **no migration**.
+    Over the limit → normal `isError` result ("Too many requests — wait a minute" / "Daily
+    limit reached"), logged as 429 and not counted. `initialize` / `tools/list` / prompts are
+    free; the leak check uses `readEndpoint`, never `callTool`, so it is never limited. The
+    AI Connector page shows the limits.
+  - **Not built:** templates — they live under Settings (`requireModule("settings")`, a
+    connector-blocked prefix) and are read live from Meta. `/conversations` gained `assigned=me`
+    and `open=true` filters for the brief.
+  - **FAQ (owner's acceptance list, 2026-11-26)** — one tool call each:
+
+    | # | Question | Tool |
+    | --- | --- | --- |
+    | W1 | How fast are we replying today? Who is slow? | `reply_speed` |
+    | W2 | Who is waiting for a reply right now? | `reply_speed` (waiting past SLA, company-wide) / `inbox_overview` (longest waits in my visibility) |
+    | W3 | Which customers are unhappy or complaining? | `customer_mood_scan` — supervisors and admins only |
+    | E1 | What do I need to look at today? | `daily_brief` (prompt `daily-brief`) |
+    | E2 | Export X to Excel | `export_excel {list: conversations \| contacts \| payments \| logs \| campaigns}` |
+  - Tests: `scripts/smoke-mcp.mjs` (gate, grouping, flags, reply speed, brief, export columns,
+    xlsx with CRC check, limits) and `scripts/smoke-mcp-db.mjs` (every new tool through the real
+    handler on Postgres; agent refused / Super Admin allowed for the mood scan; export link
+    served, unknown and expired links refused; rate limit refusal + 429 not counted).
 - **Not yet proven on production:** a real Claude / ChatGPT connection, and the
   sign-in → back-to-Allow hop (needs a real ERP login). First production use creates
   the tables through ensure-mcp.
