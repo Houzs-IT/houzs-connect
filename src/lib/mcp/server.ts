@@ -45,6 +45,7 @@ import {
   EXPORT_TTL_MS,
   exportFileName,
   exportRows,
+  MOOD_SCAN_REFUSAL,
   moodScanAllowed,
   myToday,
   pickColumns,
@@ -53,6 +54,7 @@ import {
   type BriefPart,
 } from "./round3";
 import { storeExport } from "./export-store";
+import { addConversationLinks, buildDataGaps, CHAT_SUMMARY_MESSAGES, chatContentRefusal, PERIOD_SCHEMA, summariseCustomerChat } from "./round4";
 import { buildXlsx } from "./xlsx";
 
 export const SERVER_INFO = { name: "houzs-connect", title: "Houzs Connect", version: "1.0.0" };
@@ -67,11 +69,17 @@ const INSTRUCTIONS = `You are connected to Houzs Connect — the company's Whats
 Everything is READ-ONLY and limited to what this person can see in Houzs Connect. Never guess figures a call did not return.
 ANSWER FAST — use a quick answer first; it is one call and already summarised:
 - Inbox now (open / waiting for our reply, by channel and by person, longest waits, today's and this week's messages, contacts added): inbox_overview.
+- Who is waiting for a reply right now, longest first, and who has the chat: waiting_now.
 - How fast are we replying today, who is slow, who waits past the reply SLA right now: reply_speed.
+- Per person for a period (open chats now, replies, first reply time, on time): agent_workload {period}.
 - What do I need to look at today: daily_brief.
 - Response times / reply rate / who replied most, message volume vs the period before: service_performance {days: 7 | 30 | 90}.
 - Failed / undelivered messages: message_delivery. Customers in numbers: contacts_summary. Campaigns: campaign_summary.
 - Which customers are unhappy or complaining (supervisors and admins only): customer_mood_scan — summarise, never paste messages back.
+- Chat review for a period — who was not replied, who was and what we said, who keeps complaining, quality vs the period before (supervisors and admins only): chat_review {period}.
+- One customer's recent conversation by name / phone / order number (supervisors and admins only): customer_chat_summary {query}.
+- Data to clean up (contacts with no name / phone, chats with no one assigned): data_gaps.
+- period = today | week (Monday to now) | month | last_month | quarter | year | custom (from / to); each is compared with the period before (last week up to the same weekday, and so on).
 - A list as an Excel file: export_excel {list, filters?, fields?} returns a download link valid 15 minutes.
 - A customer, phone or order number: search {query}, then fetch {id} for the conversation or contact.
 Only when no quick answer fits: connect_get with a path from list_endpoints (e.g. /conversations?status=OPEN, /payments?status=PENDING, /logs/messages?days=1). Pass q / status / days / limit to keep replies small.
@@ -94,6 +102,15 @@ export const TOOLS: ({ name: string; module?: Module; supervisorOnly?: boolean }
     annotations: RO,
   },
   {
+    name: "waiting_now",
+    module: "inbox",
+    title: "Waiting for a reply now (quick answer)",
+    description:
+      "Customers waiting for our reply RIGHT NOW in ONE call (not closed, the customer wrote last), longest wait first: how long, unanswered messages, assigned agent, department, channel, the last message (short), a link. Only conversations this person can see.",
+    inputSchema: { type: "object", properties: { limit: { type: "number", description: "1-100, default 50" } }, additionalProperties: false },
+    annotations: RO,
+  },
+  {
     name: "service_performance",
     module: "dashboard",
     title: "Service performance (quick answer)",
@@ -109,6 +126,15 @@ export const TOOLS: ({ name: string; module?: Module; supervisorOnly?: boolean }
     description:
       "How fast we reply, in ONE call: average first human reply, average reply and reply rate for today, yesterday and the last 7 days (the Dashboard's own measurement), per member (who is slow), and every conversation waiting on us longer than the reply SLA (customer, how long, assigned to).",
     inputSchema: NO_ARGS,
+    annotations: RO,
+  },
+  {
+    name: "agent_workload",
+    module: "dashboard",
+    title: "Agent workload (quick answer)",
+    description:
+      "Per team member in ONE call: open and waiting chats right now, and for the period (default today) replies sent, conversations handled, average first reply and reply time, first reply on time vs the SLA — the Dashboard's agents report — plus the team's reply figures against the previous period.",
+    inputSchema: { type: "object", properties: { ...PERIOD_SCHEMA }, additionalProperties: false },
     annotations: RO,
   },
   {
@@ -154,10 +180,46 @@ export const TOOLS: ({ name: string; module?: Module; supervisorOnly?: boolean }
     annotations: RO,
   },
   {
+    name: "chat_review",
+    module: "inbox",
+    supervisorOnly: true,
+    title: "Chat review (supervisors and admins)",
+    description:
+      "SUPERVISORS AND ADMINS ONLY. Review the chats of a period (default today; week = Monday to now) in ONE call: conversations NOT replied by a person (longest wait first, with the customer's last message, short), conversations replied (with a short snippet of what we replied and who), customers who complain repeatedly, and a quality view — reply rate, first reply time, unresolved, negative mood, reply times per person — against the previous period. SUMMARISE for a supervisor; never paste the messages back.",
+    inputSchema: { type: "object", properties: { ...PERIOD_SCHEMA }, additionalProperties: false },
+    annotations: RO,
+  },
+  {
+    name: "customer_chat_summary",
+    module: "inbox",
+    supervisorOnly: true,
+    title: "One customer's chat (supervisors and admins)",
+    description:
+      "SUPERVISORS AND ADMINS ONLY. A customer's name, phone or order number (or a conversationId) → their most recent conversation this person can see, in ONE call: status, who has it, order ref, flags (unanswered in a row, waiting, complaint hints), the latest messages (clipped), internal notes, and other matching conversations. SUMMARISE it; never paste the messages back.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        query: { type: "string", description: "Customer name, phone or order number" },
+        conversationId: { type: "string", description: "A conversation id (from otherMatches or another answer) instead of query" },
+        messages: { type: "number", description: `Latest messages to read, 1-100 (default ${CHAT_SUMMARY_MESSAGES})` },
+      },
+      additionalProperties: false,
+    },
+    annotations: RO,
+  },
+  {
     name: "daily_brief",
     title: "My day (quick answer)",
     description:
       "What this person needs to look at today in ONE call: conversations assigned to them that wait for their reply, the inbox's longest waits, payment slips to check and failed messages. A part they may not read says so; the rest still answers.",
+    inputSchema: NO_ARGS,
+    annotations: RO,
+  },
+  {
+    name: "data_gaps",
+    title: "Data gaps (quick answer)",
+    description:
+      "Data to clean up in ONE call: contacts with no name (or only a number), no phone or a phone too short to be real, and not-closed conversations with no one assigned (with examples and links). A part this person may not read says so.",
     inputSchema: NO_ARGS,
     annotations: RO,
   },
@@ -289,7 +351,75 @@ const QUICK_PATHS: Record<string, (args: Record<string, unknown>) => { path: str
   contacts_summary: () => ({ path: "/contacts/summary", query: {} }),
   campaign_summary: () => ({ path: "/campaigns/summary", query: {} }),
   customer_mood_scan: (a) => ({ path: "/inbox/mood-scan", query: { date: a.date, from: a.from, to: a.to } }),
+  waiting_now: (a) => ({ path: "/inbox/waiting", query: a.limit === undefined ? {} : { limit: a.limit } }),
+  agent_workload: (a) => ({ path: "/dashboard/agents", query: { period: a.period, from: a.from, to: a.to } }),
 };
+
+/** Quick answers whose rows carry a conversationId: the reply gets each row's inbox link. */
+const LINKED = new Set(["waiting_now", "customer_mood_scan"]);
+
+/** A read's body with inbox links added, re-fitted under the reply cap. */
+function relink(r: ReadOutcome, body: unknown, origin: string): ReadOutcome {
+  const notes = r.removed.length ? [`Credential fields removed: ${r.removed.join(", ")}.`] : [];
+  return { ...r, result: text(fitReply(addConversationLinks(body, origin), notes).text) };
+}
+
+const strArg = (v: unknown, n = 200) => (typeof v === "string" ? v.trim().slice(0, n) : typeof v === "number" ? String(v) : "");
+
+/**
+ * chat_review: /inbox/chat-review (inbox visibility; the endpoint itself holds the
+ * supervisor gate) + /dashboard/agents for reply times in the Dashboard's own
+ * measurement — a person without the Dashboard gets that part as "no access".
+ */
+async function chatReviewTool(db: DB, id: Identity, args: Record<string, unknown>, origin: string): Promise<ReadOutcome> {
+  const q = { period: args.period, from: args.from, to: args.to };
+  const [rev, agents] = await Promise.all([readEndpoint(db, id, "/inbox/chat-review", q), readEndpoint(db, id, "/dashboard/agents", q)]);
+  if (rev.result.isError) return rev;
+  const a = briefPart(agents, "the Dashboard");
+  const ag = a.ok ? (a.value as Record<string, unknown>) : null;
+  const replyTimes = ag
+    ? {
+        timing: ag.timing,
+        team: ag.team,
+        previousPeriod: ag.previousPeriod,
+        byAgent: ((ag.byAgent as Record<string, unknown>[] | undefined) ?? []).slice(0, 15).map((p) => ({ name: p.name, replies: p.replies, avgFirstReply: p.avgFirstReply, avgReply: p.avgReply, firstReplyOnTime: p.firstReplyOnTime })),
+      }
+    : { unavailable: (a as { message: string }).message };
+  return relink(rev, { ...(rev.body as Record<string, unknown>), replyTimes }, origin);
+}
+
+/** customer_chat_summary: /conversations?q= (to find the customer) then /conversations/:id, both as the person. */
+async function customerChatSummary(db: DB, id: Identity, args: Record<string, unknown>, origin: string): Promise<ReadOutcome> {
+  const query = strArg(args.query, 100);
+  let pick = strArg(args.conversationId, 100);
+  const target = `customer_chat:${(query || pick).slice(0, 100)}`;
+  let matches: Record<string, unknown>[] = [];
+  if (!pick) {
+    if (!query) return { result: text("Give a customer name, phone or order number (query), or a conversationId.", true), status: 400, note: "no query", target, body: null, removed: [] };
+    const s = await readEndpoint(db, id, "/conversations", { q: query, limit: 6 });
+    if (s.result.isError) return { ...s, target };
+    matches = ((s.body as Record<string, unknown>)?.conversations as Record<string, unknown>[] | undefined) ?? [];
+    if (!matches.length) return { ...s, target, result: asJson({ found: false, message: `No conversation you can see in Service matches "${query}".` }), note: "no match" };
+    pick = String(matches[0].id);
+  }
+  const msgs = typeof args.messages === "number" ? Math.min(100, Math.max(1, Math.floor(args.messages))) : CHAT_SUMMARY_MESSAGES;
+  const t = await readEndpoint(db, id, `/conversations/${pick}`, { limit: msgs });
+  if (t.result.isError) return { ...t, target };
+  return relink({ ...t, target }, summariseCustomerChat(t.body, matches.filter((m) => String(m.id) !== pick)), origin);
+}
+
+/** data_gaps: three catalogue reads as the person; each keeps its own module gate. */
+async function dataGaps(db: DB, id: Identity, origin: string): Promise<unknown> {
+  const [contacts, overview, unassigned] = await Promise.all([
+    readEndpoint(db, id, "/contacts/gaps", {}),
+    readEndpoint(db, id, "/inbox/overview", {}),
+    readEndpoint(db, id, "/conversations", { assigned: "none", open: "true", limit: 10 }),
+  ]);
+  return addConversationLinks(
+    buildDataGaps({ contacts: briefPart(contacts, "Contacts"), overview: briefPart(overview, "the Service inbox"), unassigned: briefPart(unassigned, "the Service inbox") }),
+    origin
+  );
+}
 
 /** One read of a composite answer as a brief part: refused / failed reads become one plain line. */
 function briefPart(r: ReadOutcome, what: string): BriefPart {
@@ -399,10 +529,26 @@ async function callTool(db: DB, id: Identity, name: string, args: Record<string,
     // Per person (email), tool calls only; refused calls are logged as 429 and not counted.
     // The admin leak check reads through readEndpoint, never here, so it is never limited.
     const refused = rateLimitMessage(await countRecentCalls(db, id.me.email));
+    const def = TOOLS.find((tl) => tl.name === name);
     if (refused) {
       result = text(refused, true);
       status = 429;
       note = "rate limited";
+    } else if (def?.supervisorOnly && !moodScanAllowed(id.me.role)) {
+      // Chat content (owner 2026-11-26): customer_mood_scan's gate, before any read.
+      result = text(name === "customer_mood_scan" ? MOOD_SCAN_REFUSAL : chatContentRefusal(name), true);
+      status = 403;
+      note = "supervisors and admins only";
+      target = name;
+    } else if (name === "chat_review" || name === "customer_chat_summary") {
+      const r = name === "chat_review" ? await chatReviewTool(db, id, args, origin) : await customerChatSummary(db, id, args, origin);
+      result = r.result;
+      status = r.status;
+      note = r.note;
+      target = r.target;
+    } else if (name === "data_gaps") {
+      target = `data_gaps:${myToday()}`;
+      result = asJson(await dataGaps(db, id, origin));
     } else if (name === "daily_brief") {
       target = `daily_brief:${myToday()}`;
       result = asJson(await dailyBrief(db, id, origin));
@@ -447,7 +593,8 @@ async function callTool(db: DB, id: Identity, name: string, args: Record<string,
       result = text(JSON.stringify({ endpoints: eps }));
     } else if (name === "connect_get" || QUICK_PATHS[name]) {
       const q = QUICK_PATHS[name] ? QUICK_PATHS[name](args) : { path: args.path, query: args.query };
-      const r = await readEndpoint(db, id, q.path, q.query);
+      const r0 = await readEndpoint(db, id, q.path, q.query);
+      const r = LINKED.has(name) && !r0.result.isError ? relink(r0, r0.body, origin) : r0;
       result = r.result;
       status = r.status;
       note = r.note;

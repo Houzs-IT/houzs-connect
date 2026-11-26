@@ -27,7 +27,7 @@ works on a phone).
   company the person signed in to, so connect from the company's own address.
 - **Code:** `src/lib/mcp/` (core = pure, store = tables, reads = what can be read,
   server = JSON-RPC + identity, oauth = register/authorize/token, admin = page data +
-  leak check); routes `src/app/api/mcp/**`, discovery `src/app/.well-known/oauth-*`;
+  leak check; quick / round3 / round4 = the pure summarise logic of each round); routes `src/app/api/mcp/**`, discovery `src/app/.well-known/oauth-*`;
   page `src/app/(app)/settings/(center)/ai-connector/`; one Settings menu entry; the
   sign-in action returns to a pending Allow page (cookie `hc_mcp_return`, 10 min).
 - **Read-only + own permissions, by construction:** the `hcmcp_` token is accepted only
@@ -120,6 +120,76 @@ works on a phone).
     xlsx with CRC check, limits) and `scripts/smoke-mcp-db.mjs` (every new tool through the real
     handler on Postgres; agent refused / Super Admin allowed for the mood scan; export link
     served, unknown and expired links refused; rate limit refusal + 429 not counted).
+- **Round 4 — Connect items (2026-11-27, branch `feat/mcp-round4`, owner ask 2026-11-26).**
+  Read-only. Owner focus: 「看聊天记录 — who hasn't been replied to, who has been, what we
+  replied, which customers keep scolding us, how is quality」. Every read is a catalogue
+  endpoint run through `readEndpoint` (module gate, inbox visibility, redaction, call log,
+  leak check); the tool layer has no SQL. Pure parts + tests: `src/lib/mcp/round4.ts`.
+  - **`period` convention** (`round4.periodRange`, Malaysia calendar): `today` | `week`
+    (Monday → now) | `month` | `last_month` | `quarter` | `year` | `custom` (`from` / `to`,
+    ≤ 366 days). Previous period = the same stretch before it: yesterday up to the same time,
+    last Monday up to the same weekday and time, last month up to the same day (never past
+    its end), the whole month before `last_month`, the same number of days before `custom`.
+  - `waiting_now {limit?}` (inbox, `/inbox/waiting`): not-closed conversations whose newest
+    message is the customer's, inside the inbox rail's visibility, longest wait first — wait
+    measured from the customer's first message after our last outbound one; unanswered count,
+    assignee, department, channel, a 100-char preview (what the inbox rail shows), a link.
+  - `agent_workload {period}` (dashboard, `/dashboard/agents`): the Dashboard's own
+    `agentsReport` for the period (replies sent, conversations handled, avg first reply / reply,
+    on time vs `SLA_MINUTES`) + the team's `replyStats` vs the previous period + each person's
+    open / waiting chats right now (company-wide, like the Dashboard's live panel). People with
+    open chats and no replies are listed too. `agentsReport` gained an optional `to` (exclusive
+    end, for a past period) and now also returns its `replies`; the Dashboard's calls are
+    unchanged.
+  - `chat_review {period}` (inbox, **supervisors and admins only** — the mood scan's gate,
+    `round3.moodScanAllowed`), `/inbox/chat-review` + `/dashboard/agents`: the period's messages
+    inside the person's inbox visibility walked per conversation (≤ 20,000 messages; over that
+    the answer says so). **Replied** = a person (not a bot) wrote after the customer's latest
+    message in the period; **not replied** = otherwise (longest wait first, unanswered count,
+    "only a bot answered", the customer's last message clipped to 120); replied rows carry
+    who replied, first reply after (clock time) and a 160-char snippet of our latest reply.
+    **Repeat complainers** = complaint keywords (round 3's EN / Malay / Chinese list — hints)
+    on 2+ days or in 3+ messages, per contact across their conversations, ≤ 3 clipped samples.
+    **Quality**: customers who wrote, replied / not replied, reply rate, avg first reply,
+    first reply over SLA, still waiting now, unresolved (not closed), only-a-bot, negative mood,
+    against the previous period; reply times per person in the Dashboard's (business-hours)
+    measurement come from `/dashboard/agents` — a supervisor without the Dashboard module gets
+    that part as "no access". Lists ≤ 20 / 20 / 10. Phones never shown (name, else masked).
+  - `customer_chat_summary {query | conversationId, messages?}` (inbox, **supervisors and admins
+    only**): `/conversations?q=` (name / phone / order number, the person's visibility) →
+    `/conversations/:id` for the newest match; clipped messages (300), flags, order ref /
+    delivery date only (no other contact fields), last 5 internal notes, other matches. No phone.
+  - `data_gaps` (no module of its own; each part keeps its module): `/contacts/gaps` (new,
+    contacts — `contactsWhere` company scope: no name or only digits, no phone, phone under 9
+    digits; counts + 10 examples each), `/inbox/overview` (unassigned open / waiting) and
+    `/conversations?assigned=none&open=true` (new `assigned=none` filter) for examples with links.
+  - **Gate for chat content:** `server.callTool` refuses every `supervisorOnly` tool for any
+    role outside SUPER_ADMIN / OWNER / ADMIN / MANAGER **before any read** ("Supervisors and
+    admins only: <tool> …", logged 403), and `tools/list` hides them. `/inbox/chat-review` holds
+    the same check itself, so `connect_get` cannot go round it; the leak check reads it as the
+    staff account and must show "refused". `customer_chat_summary` composes reads every inbox
+    user already has (`/conversations`, `/conversations/:id`) — the gate is on the summary, as
+    the owner asked; it does not change what an agent's own `fetch` / `connect_get` returns.
+  - `customer_mood_scan` rows now carry the inbox link too (`url`).
+  - **Not built:** the Monday email brief / weekly data-gaps mail (D1/D4 cron, a separate
+    round); write actions (round 4b).
+  - **FAQ (round 4)** — one tool call each:
+
+    | # | Question | Tool |
+    | --- | --- | --- |
+    | W2 | Who is waiting for a reply right now? | `waiting_now` (longest first, with assignee) |
+    | W4 | How is each agent doing today / this week? | `agent_workload {period}` |
+    | W5 | Who did we not reply to this week, who did we, and what did we say? | `chat_review {period: "week"}` — supervisors and admins only |
+    | W6 | Which customers keep complaining? How is our service quality vs last week? | `chat_review {period}` — supervisors and admins only |
+    | W7 | What is going on with customer X (name / phone / order)? | `customer_chat_summary {query}` — supervisors and admins only |
+    | D4 | What data do we need to clean up? | `data_gaps` |
+  - Tests: `scripts/smoke-mcp.mjs` (period maths incl. Sunday / month-end / year-end, every
+    summariser, tool list per role) and `scripts/smoke-mcp-db.mjs` (an AGENT gets "Supervisors
+    and admins only" for `chat_review` and `customer_chat_summary`, logged 403, and through
+    `connect_get /inbox/chat-review`; `waiting_now` / `data_gaps` stay inside the agent's own
+    department; a Super Admin gets the review partition, our reply snippet, the repeat
+    complainer and the customer summary with no phone; the leak check shows chat review
+    refused for the staff account).
 - **Not yet proven on production:** a real Claude / ChatGPT connection, and the
   sign-in → back-to-Allow hop (needs a real ERP login). First production use creates
   the tables through ensure-mcp.

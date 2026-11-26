@@ -40,7 +40,7 @@ import { inboxScopes, unifiedConversationWhere } from "@/lib/inbox-group";
 import type { Module } from "@/lib/module-access";
 import type { CurrentMember } from "@/lib/current-member";
 import { contactDetail, contactsWhere, type Segment } from "@/app/(app)/contacts/queries";
-import { conversationStatus, messagesByAgent, messageVolume, replyStats, teamLoad } from "@/app/(app)/dashboard/queries";
+import { agentsReport, conversationStatus, messagesByAgent, messageVolume, replyStats, teamLoad } from "@/app/(app)/dashboard/queries";
 import { klDayKey, parsePeriod, periodWindow } from "@/app/(app)/dashboard/util";
 import { failureReasons, logRows, todayStats } from "@/app/(app)/logs/data";
 import { SLA_MINUTES } from "@/lib/sla";
@@ -64,6 +64,18 @@ import {
   type MoodConversation,
   type WaitingRow,
 } from "./round3";
+import {
+  buildChatReview,
+  chatContentRefusal,
+  customerLabel,
+  periodRange,
+  REVIEW_LIST,
+  REVIEW_WALK_CAP,
+  summariseAgentWorkload,
+  summariseWaitingNow,
+  walkConversations,
+  type ReviewConversation,
+} from "./round4";
 
 /** The person a connector call runs as: their member row in the company they connected from. */
 export type McpMember = CurrentMember;
@@ -266,6 +278,47 @@ export const ENDPOINTS: Endpoint[] = [
     params: { date: "YYYY-MM-DD (default today)", from: "YYYY-MM-DD", to: "YYYY-MM-DD (at most 7 days from from)" },
     run: moodScan,
   },
+  // ── Round 4 (owner 2026-11-26). Also listed BEFORE the :id patterns. ──
+  {
+    path: "/inbox/waiting",
+    module: "inbox",
+    description:
+      "QUICK ANSWER — customers waiting for our reply right now (not closed, the customer wrote last), longest wait first, as this person sees the inbox: how long, how many unanswered messages, assigned to, department, channel, the last message (short).",
+    params: { limit: "1-100 (default 50)" },
+    run: waitingNow,
+  },
+  {
+    path: "/dashboard/agents",
+    module: "dashboard",
+    description:
+      "QUICK ANSWER — per team member for a period: replies sent, conversations handled, average first reply and reply time, first reply on time vs the SLA (the Dashboard's agents report), open and waiting chats right now; the team's reply figures against the previous period.",
+    params: { period: "today | week | month | last_month | quarter | year | custom (default today)", from: "YYYY-MM-DD (custom)", to: "YYYY-MM-DD (custom)" },
+    async run({ db, me }, _p, q) {
+      const range = periodRange(q.period, q.from, q.to);
+      if ("error" in range) throw new ReadError(400, range.error);
+      const [report, prev, open, names] = await Promise.all([
+        agentsReport(me.companyId, { since: range.start }, undefined, range.end),
+        replyStats(me.companyId, range.previous.start, range.previous.end),
+        openByAgent(db, me.companyId),
+        memberNames(db, me.companyId),
+      ]);
+      return summariseAgentWorkload(range, report.list, report.replies, prev, open, names);
+    },
+  },
+  {
+    path: "/inbox/chat-review",
+    module: "inbox",
+    description:
+      "SUPERVISORS AND ADMINS ONLY — chat review for a period inside this person's inbox visibility: conversations NOT replied by a person (longest wait first), replied ones with a short snippet of our latest reply, customers who complain repeatedly, and a quality view (reply rate, first reply, unresolved, negative mood) against the previous period.",
+    params: { period: "today | week | month | last_month | quarter | year | custom (default today)", from: "YYYY-MM-DD (custom)", to: "YYYY-MM-DD (custom)" },
+    run: chatReview,
+  },
+  {
+    path: "/contacts/gaps",
+    module: "contacts",
+    description: "QUICK ANSWER — data gaps in this company's contacts: no name (or the name is just a number), no phone, a phone too short to be real; counts and examples.",
+    run: contactGaps,
+  },
   // ── Service (inbox) ──
   {
     path: "/conversations",
@@ -275,7 +328,7 @@ export const ENDPOINTS: Endpoint[] = [
       q: "search customer name, phone, order number (SO / ref) or message text",
       status: "OPEN | QUEUE | PENDING | CLOSED",
       unread: "true = only unread",
-      assigned: "me = only conversations assigned to this person",
+      assigned: "me = only conversations assigned to this person; none = only conversations with no one assigned",
       open: "true = only not closed",
       limit: "1-100 (default 20)",
       offset: "for paging",
@@ -292,7 +345,7 @@ export const ENDPOINTS: Endpoint[] = [
           match,
           STATUSES.includes(status) ? sql`${conversation.status} = ${status}` : undefined,
           String(q.unread) === "true" ? sql`${conversation.unreadCount} > 0` : undefined,
-          String(q.assigned) === "me" ? eq(conversation.assignedAgentId, ctx.me.id) : undefined,
+          String(q.assigned) === "me" ? eq(conversation.assignedAgentId, ctx.me.id) : String(q.assigned) === "none" ? sql`${conversation.assignedAgentId} is null` : undefined,
           String(q.open) === "true" ? sql`${conversation.status} <> 'CLOSED'` : undefined
         ),
         orderBy: [desc(conversation.lastMessageAt), desc(conversation.createdAt)],
@@ -897,6 +950,201 @@ async function waitingOverSla(db: DB, companyId: string): Promise<{ total: numbe
   return {
     total: Number(rows[0]?.total ?? 0),
     rows: rows.map((r) => ({ id: r.id, customer: displayName(r.name, r.phone), assignedTo: r.agent, department: r.dept, channel: r.channel, since: r.since })),
+  };
+}
+
+// ── round 4: waiting_now, agent_workload, chat_review, data_gaps ─────────
+
+/**
+ * waiting_now: not-closed conversations in the person's inbox visibility whose
+ * newest message is the customer's, ordered by when the wait began (the first
+ * customer message after our last outbound message).
+ */
+async function waitingNow(ctx: ReadCtx, _p: Record<string, string>, q: Query): Promise<unknown> {
+  const { db } = ctx;
+  const scope = await conversationScopeWhere(ctx);
+  const limit = intParam(q.limit, 50, 1, 100);
+  const lastOut = sql`(select max(m.created_at) from connect.message m where m.conversation_id = ${conversation.id} and m.direction = 'OUT')`;
+  const waitStart = sql<Date | string | null>`(select min(m.created_at) from connect.message m where m.conversation_id = ${conversation.id} and m.direction = 'IN' and m.created_at > coalesce(${lastOut}, '-infinity'::timestamptz))`;
+  const rows = await db
+    .select({
+      id: conversation.id,
+      status: conversation.status,
+      name: contact.name,
+      phone: contact.phone,
+      agent: member.name,
+      dept: department.name,
+      channel: channel.displayName,
+      since: waitStart,
+      unanswered: sql<number>`(select count(*) from connect.message m where m.conversation_id = ${conversation.id} and m.direction = 'IN' and m.created_at > coalesce(${lastOut}, '-infinity'::timestamptz))`.mapWith(Number),
+      lastBody: sql<string | null>`(select m.body from connect.message m where m.conversation_id = ${conversation.id} order by m.created_at desc limit 1)`,
+      total: sql<number>`count(*) over ()`.mapWith(Number),
+    })
+    .from(conversation)
+    .innerJoin(contact, eq(contact.id, conversation.contactId))
+    .leftJoin(member, eq(member.id, conversation.assignedAgentId))
+    .leftJoin(department, eq(department.id, conversation.assignedDepartmentId))
+    .leftJoin(channel, eq(channel.id, conversation.channelId))
+    .where(and(scope, sql`${conversation.status} <> 'CLOSED'`, sql`${lastDirection} = 'IN'`))
+    .orderBy(sql`${waitStart} asc nulls last`)
+    .limit(limit);
+  return summariseWaitingNow(
+    rows.map((r) => ({
+      id: r.id,
+      customer: displayName(r.name, r.phone),
+      status: r.status,
+      assignedTo: r.agent ?? null,
+      department: r.dept ?? null,
+      channel: r.channel ?? null,
+      waitingSince: r.since,
+      unanswered: r.unanswered,
+      lastMessage: clip(mediaCaption(r.lastBody), 100),
+    })),
+    rows[0]?.total ?? 0
+  );
+}
+
+/** Not-closed conversations per assignee right now, and how many wait on us — company-wide, like the Dashboard. */
+async function openByAgent(db: DB, companyId: string) {
+  return db
+    .select({
+      agentId: conversation.assignedAgentId,
+      open: sql<number>`count(*)`.mapWith(Number),
+      waiting: sql<number>`count(*) filter (where ${lastDirection} = 'IN')`.mapWith(Number),
+    })
+    .from(conversation)
+    .innerJoin(contact, eq(contact.id, conversation.contactId))
+    .where(and(eq(contact.companyId, companyId), sql`${conversation.status} <> 'CLOSED'`))
+    .groupBy(conversation.assignedAgentId);
+}
+
+/**
+ * chat_review (supervisors and admins — customer_mood_scan's gate): the
+ * period's messages inside the inbox rail's visibility, walked per
+ * conversation (round4.buildChatReview), with the customers' own messages for
+ * complaint hints and our latest reply for the replied list.
+ */
+async function chatReview(ctx: ReadCtx, _p: Record<string, string>, q: Query): Promise<unknown> {
+  if (!moodScanAllowed(ctx.me.role)) throw new ReadError(403, chatContentRefusal("chat_review"));
+  const range = periodRange(q.period, q.from, q.to);
+  if ("error" in range) throw new ReadError(400, range.error);
+  const { db } = ctx;
+  const scope = await conversationScopeWhere(ctx);
+  const inWindow = (s: Date, e: Date) => and(scope, sql`${message.createdAt} >= ${s.toISOString()}::timestamptz`, sql`${message.createdAt} < ${e.toISOString()}::timestamptz`);
+  const walkOf = (s: Date, e: Date) =>
+    db
+      .select({ conversationId: message.conversationId, direction: message.direction, isBot: message.isBot, at: message.createdAt, senderId: message.sentByMemberId })
+      .from(message)
+      .innerJoin(conversation, eq(conversation.id, message.conversationId))
+      .where(inWindow(s, e))
+      .orderBy(asc(message.createdAt))
+      .limit(REVIEW_WALK_CAP + 1);
+  const [walk, prevWalk, inbound, names] = await Promise.all([
+    walkOf(range.start, range.end),
+    walkOf(range.previous.start, range.previous.end),
+    db
+      .select({ conversationId: message.conversationId, at: message.createdAt, body: message.body })
+      .from(message)
+      .innerJoin(conversation, eq(conversation.id, message.conversationId))
+      .where(and(inWindow(range.start, range.end), eq(message.direction, "IN")))
+      .orderBy(desc(message.createdAt))
+      .limit(3000),
+    memberNames(db, ctx.me.companyId),
+  ]);
+  const truncated = walk.length > REVIEW_WALK_CAP;
+  const cur = walk.slice(0, REVIEW_WALK_CAP);
+  const lines = walkConversations(cur);
+  const wrote = [...lines.entries()].filter(([, w]) => w.lastIn != null);
+  const ids = [...wrote]
+    .sort((a, b) => (b[1].lastIn ?? 0) - (a[1].lastIn ?? 0))
+    .slice(0, 3000)
+    .map(([id]) => id);
+  // Our latest reply only for the replied conversations the answer lists.
+  const repliedIds = wrote
+    .filter(([, w]) => w.lastHuman != null && w.lastHuman > (w.lastIn ?? 0))
+    .sort((a, b) => (b[1].lastHuman ?? 0) - (a[1].lastHuman ?? 0))
+    .slice(0, REVIEW_LIST)
+    .map(([id]) => id);
+  const [convos, lastReplies] = await Promise.all([
+    ids.length
+      ? db
+          .select({
+            id: conversation.id,
+            contactId: conversation.contactId,
+            status: conversation.status,
+            name: contact.name,
+            phone: contact.phone,
+            agent: member.name,
+            dept: department.name,
+            lastDir: lastDirection,
+          })
+          .from(conversation)
+          .innerJoin(contact, eq(contact.id, conversation.contactId))
+          .leftJoin(member, eq(member.id, conversation.assignedAgentId))
+          .leftJoin(department, eq(department.id, conversation.assignedDepartmentId))
+          .where(and(scope, inArray(conversation.id, ids)))
+      : Promise.resolve([]),
+    repliedIds.length
+      ? db
+          .selectDistinctOn([message.conversationId], { conversationId: message.conversationId, at: message.createdAt, body: message.body, senderId: message.sentByMemberId })
+          .from(message)
+          .where(and(inArray(message.conversationId, repliedIds), eq(message.direction, "OUT"), eq(message.isBot, false), sql`${message.createdAt} < ${range.end.toISOString()}::timestamptz`))
+          .orderBy(message.conversationId, desc(message.createdAt))
+      : Promise.resolve([]),
+  ]);
+  const map = new Map<string, ReviewConversation>(
+    convos.map((c) => [
+      c.id,
+      {
+        id: c.id,
+        contactId: c.contactId,
+        customer: customerLabel(c.name, c.phone),
+        status: c.status,
+        assignedTo: c.agent ?? null,
+        department: c.dept ?? null,
+        lastFromCustomer: String(c.lastDir) === "IN",
+      },
+    ])
+  );
+  return buildChatReview(range, {
+    walk: cur,
+    prevWalk: prevWalk.slice(0, REVIEW_WALK_CAP),
+    convos: map,
+    inbound: inbound.map((m) => ({ conversationId: m.conversationId, at: m.at, text: mediaCaption(m.body) || "" })),
+    lastReplies: lastReplies.map((r) => ({ conversationId: r.conversationId, at: r.at, text: mediaCaption(r.body) || "", senderId: r.senderId })),
+    names,
+    truncated: truncated || ids.length < wrote.length,
+  });
+}
+
+/** data_gaps (contacts): the Contacts page's company scope, contacts missing a name or a usable phone. */
+async function contactGaps({ db, me }: ReadCtx): Promise<unknown> {
+  const base = contactsWhere(me.companyId, {});
+  const noName = sql`(coalesce(btrim(${contact.name}), '') = '' or ${contact.name} ~ ${"^\\+?[0-9 -]+$"})`;
+  const noPhone = sql`coalesce(btrim(${contact.phone}), '') = ''`;
+  const shortPhone = sql`length(regexp_replace(${contact.phone}, ${"[^0-9]"}, '', 'g')) between 1 and 8`;
+  const pick = { id: contact.id, name: contact.name, phone: contact.phone, createdAt: contact.createdAt };
+  const [counts, noNameRows, shortRows] = await Promise.all([
+    db
+      .select({
+        total: sql<number>`count(*)`.mapWith(Number),
+        noName: sql<number>`count(*) filter (where ${noName})`.mapWith(Number),
+        noPhone: sql<number>`count(*) filter (where ${noPhone})`.mapWith(Number),
+        shortPhone: sql<number>`count(*) filter (where ${shortPhone})`.mapWith(Number),
+      })
+      .from(contact)
+      .where(base),
+    db.select(pick).from(contact).where(and(base, noName)).orderBy(desc(contact.createdAt)).limit(10),
+    db.select(pick).from(contact).where(and(base, shortPhone)).orderBy(desc(contact.createdAt)).limit(10),
+  ]);
+  const c0 = counts[0];
+  const row = (r: { id: string; name: string | null; phone: string; createdAt: Date }) => ({ contactId: r.id, name: r.name || null, phone: r.phone, addedAt: r.createdAt });
+  return {
+    total: c0?.total ?? 0,
+    noName: { count: c0?.noName ?? 0, examples: noNameRows.map(row) },
+    noPhone: c0?.noPhone ?? 0,
+    phoneTooShort: { count: c0?.shortPhone ?? 0, examples: shortRows.map(row) },
+    note: "No name = empty, or the name is only digits (WhatsApp showed no profile name). Phone too short = fewer than 9 digits.",
   };
 }
 

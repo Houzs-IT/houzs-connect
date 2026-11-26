@@ -329,6 +329,157 @@ assert(srv.toolsFor(allMods, "MANAGER").some((t) => t.name === "customer_mood_sc
 assert(srv.toolsFor(allMods, "ADMIN").every((t) => !("supervisorOnly" in t) && !("module" in t)), "no internal fields sent");
 assert(srv.toolsFor(["inbox"], "ADMIN").every((t) => !["reply_speed", "message_delivery", "contacts_summary", "campaign_summary"].includes(t.name)), "module-bound quick answers follow modules");
 
+// ── Round 4 (owner 2026-11-26): period convention, waiting_now, agent_workload, chat_review, customer_chat_summary, data_gaps ──
+const r4 = await import("../src/lib/mcp/round4.ts");
+// Friday 2026-11-27, 12:00 Malaysia time.
+const FRI = Date.parse("2026-11-27T04:00:00Z");
+const prd = (p, from, to, now = FRI) => r4.periodRange(p, from, to, now);
+const span = (r) => `${r.from}..${r.to} prev ${r.previous.from}..${r.previous.to}`;
+assert(span(prd()) === "2026-11-27..2026-11-27 prev 2026-11-26..2026-11-26" && prd().period === "today", `default = today vs yesterday (${span(prd())})`);
+assert(prd("today").previous.end.getTime() - prd("today").previous.start.getTime() === FRI - prd("today").start.getTime(), "today vs yesterday up to the same time");
+assert(span(prd("week")) === "2026-11-23..2026-11-27 prev 2026-11-16..2026-11-20", `week = Monday to now vs last Monday to the same weekday (${span(prd("week"))})`);
+assert(prd("week").previous.end.toISOString() === "2026-11-20T04:00:00.000Z", "last week ends at the same weekday and time");
+assert(span(prd("week", null, null, Date.parse("2026-11-29T15:00:00Z"))) === "2026-11-23..2026-11-29 prev 2026-11-16..2026-11-22", "Sunday still belongs to the week that started Monday");
+assert(span(prd("week", null, null, Date.parse("2026-11-29T17:00:00Z"))).startsWith("2026-11-30..2026-11-30"), "Monday 01:00 MYT starts a new week");
+assert(span(prd("month")) === "2026-11-01..2026-11-27 prev 2026-10-01..2026-10-27", `month to date (${span(prd("month"))})`);
+assert(span(prd("month", null, null, Date.parse("2026-03-31T04:00:00Z"))) === "2026-03-01..2026-03-31 prev 2026-02-01..2026-02-28", "previous month never runs past its own end");
+assert(span(prd("last_month")) === "2026-10-01..2026-10-31 prev 2026-09-01..2026-09-30", `last month, whole (${span(prd("last_month"))})`);
+assert(span(prd("last_month", null, null, Date.parse("2026-01-15T04:00:00Z"))) === "2025-12-01..2025-12-31 prev 2025-11-01..2025-11-30", "last month across a year end");
+assert(span(prd("quarter")) === "2026-10-01..2026-11-27 prev 2026-07-01..2026-08-27", `quarter to date (${span(prd("quarter"))})`);
+assert(span(prd("year")) === "2026-01-01..2026-11-27 prev 2025-01-01..2025-11-27", `year to date (${span(prd("year"))})`);
+assert(span(prd("custom", "2026-11-01", "2026-11-10")) === "2026-11-01..2026-11-10 prev 2026-10-22..2026-10-31", `custom vs the same number of days before (${span(prd("custom", "2026-11-01", "2026-11-10"))})`);
+assert(prd(undefined, "2026-11-20").period === "custom" && prd(undefined, "2026-11-20").to === "2026-11-27", "from alone = custom up to today");
+assert(prd("custom", "2026-11-20", "2027-01-01").to === "2026-11-27", "custom never runs into the future");
+assert("error" in prd("fortnight") && "error" in prd("custom") && "error" in prd("custom", "2026-11-10", "2026-11-01") && "error" in prd("custom", "2024-01-01", "2026-11-01"), "bad period / missing from / reversed / over 366 days refused");
+assert(r4.PERIODS.join() === "today,week,month,last_month,quarter,year,custom", "the seven periods");
+
+// Links next to every conversationId
+const linked = r4.addConversationLinks({ a: [{ conversationId: "c1" }, { conversationId: "c 2", url: "keep" }], b: { conversationId: 5 } }, "https://x.test");
+assert(linked.a[0].url === "https://x.test/inbox/open/c1" && linked.a[1].url === "keep" && linked.b.url === undefined, "links added beside string conversationIds only");
+assert(r4.customerLabel("Wong", "60111111111") === "Wong" && r4.customerLabel("+60 11-1111 1111", "60111111111") === "60•••••1111" && r4.customerLabel(null, "60111111111") === "60•••••1111", "customer label: name, else a masked phone");
+assert(r4.chatContentRefusal("chat_review").startsWith("Supervisors and admins only: chat_review"), "chat-content refusal wording matches the mood scan's");
+
+// waiting_now
+const wn = r4.summariseWaitingNow(
+  [
+    { id: "w1", customer: "Wong", status: "OPEN", assignedTo: null, department: "Delivery", channel: "Main", waitingSince: new Date(FRI - 3 * 3600_000), unanswered: 3, lastMessage: "Hello?" },
+    { id: "w2", customer: "Lim", status: "QUEUE", assignedTo: "Agent A", department: null, channel: "Main", waitingSince: new Date(FRI - 10 * 60_000), unanswered: 1, lastMessage: "" },
+  ],
+  2,
+  FRI
+);
+assert(wn.waitingNow === 2 && wn.overSla === 1 && wn.unassigned === 1 && wn.byAssignee["(unassigned)"] === 1, "waiting_now counts");
+assert(wn.longestFirst[0].conversationId === "w1" && wn.longestFirst[0].waiting === "3h" && wn.longestFirst[0].overSla && wn.longestFirst[0].assignedTo === "(unassigned)", `waiting_now longest first (${JSON.stringify(wn.longestFirst[0])})`);
+assert(!wn.longestFirst[1].overSla && wn.longestFirst[1].lastMessage === null, "under the SLA, empty preview dropped");
+assert(r4.summariseWaitingNow(wn.longestFirst.slice(0, 1).map(() => ({ id: "x", customer: "x", status: "OPEN", assignedTo: null, department: null, channel: null, waitingSince: null, unanswered: 1, lastMessage: "" })), 9, FRI).overSla === "0+", "a capped list says +");
+
+// agent_workload
+const rt = (asked, answered, first) => ({ asked, answered, answeredHuman: answered, avgFirst: first, avgReply: first, businessHours: false });
+const aw = r4.summariseAgentWorkload(
+  prd("week"),
+  [{ id: "a", name: "Agent A", dept: "Delivery", assigned: 4, open: 2, closed: 2, replied: 12, first: 600, onTime: true, avg: 300 }],
+  rt(10, 9, 600),
+  rt(8, 8, 1200),
+  [{ agentId: "a", open: 3, waiting: 1 }, { agentId: "b", open: 2, waiting: 2 }, { agentId: null, open: 5, waiting: 4 }],
+  new Map([["a", "Agent A"], ["b", "Agent B"]])
+);
+assert(aw.period === "week" && aw.previous.from === "2026-11-16" && aw.team.replyRatePct === 90 && aw.change.avgFirstReplyPct === -50, `agent_workload team vs previous (${JSON.stringify(aw.change)})`);
+assert(aw.byAgent[0].name === "Agent A" && aw.byAgent[0].openNow === 3 && aw.byAgent[0].replies === 12 && aw.byAgent[0].avgFirstReply === "10m", `agent row (${JSON.stringify(aw.byAgent[0])})`);
+assert(aw.byAgent[1].name === "Agent B" && aw.byAgent[1].replies === 0 && aw.byAgent[1].waitingNow === 2, "someone sitting on chats without replying still shows");
+assert(aw.unassignedNow.open === 5 && aw.unassignedNow.waiting === 4, "unassigned right now");
+
+// chat_review: walk + lists + complainers + quality
+const TM = (min) => new Date(FRI - min * 60_000);
+const rwalk = [
+  { conversationId: "v1", direction: "IN", isBot: false, at: TM(300), senderId: null },
+  { conversationId: "v1", direction: "OUT", isBot: true, at: TM(299), senderId: null },
+  { conversationId: "v1", direction: "IN", isBot: false, at: TM(120), senderId: null },
+  { conversationId: "v2", direction: "IN", isBot: false, at: TM(200), senderId: null },
+  { conversationId: "v2", direction: "OUT", isBot: false, at: TM(190), senderId: "a" },
+  { conversationId: "v3", direction: "IN", isBot: false, at: TM(100), senderId: null },
+  { conversationId: "v3", direction: "OUT", isBot: false, at: TM(30), senderId: "a" },
+  { conversationId: "v3", direction: "IN", isBot: false, at: TM(20), senderId: null },
+  { conversationId: "v4", direction: "OUT", isBot: false, at: TM(10), senderId: "a" },
+];
+const lines = r4.walkConversations([...rwalk].reverse());
+assert(lines.get("v1").unanswered === 2 && lines.get("v1").bot === 1 && lines.get("v1").lastHuman === null, "walk: bot replies do not answer");
+assert(lines.get("v3").unanswered === 1 && lines.get("v3").waitStart === TM(20).getTime(), "walk: a new customer message after our reply starts a new wait");
+const rc = (id, contactId, status, lastFromCustomer, agent = null) => [id, { id, contactId, customer: `Cust ${id}`, status, assignedTo: agent, department: null, lastFromCustomer }];
+const review = r4.buildChatReview(
+  prd("week"),
+  {
+    walk: rwalk,
+    prevWalk: [
+      { conversationId: "p1", direction: "IN", isBot: false, at: TM(10_000), senderId: null },
+      { conversationId: "p1", direction: "OUT", isBot: false, at: TM(9_990), senderId: "a" },
+    ],
+    convos: new Map([rc("v1", "k1", "OPEN", true), rc("v2", "k2", "CLOSED", false, "Agent A"), rc("v3", "k1", "OPEN", true, "Agent A"), rc("v4", "k4", "OPEN", false)]),
+    inbound: [
+      { conversationId: "v1", at: TM(300), text: "Where is my sofa? So late" },
+      { conversationId: "v1", at: TM(120), text: "Still waiting, I want a refund" },
+      { conversationId: "v3", at: TM(100), text: "The table arrived damaged" },
+      { conversationId: "v3", at: TM(20), text: "ok thanks" },
+      { conversationId: "v2", at: TM(200), text: "What time is delivery?" },
+    ],
+    lastReplies: [{ conversationId: "v2", at: TM(190), text: "Your delivery is at 3pm tomorrow, our driver will call before arriving at your place", senderId: "a" }],
+    names: new Map([["a", "Agent A"]]),
+    truncated: false,
+  },
+  FRI
+);
+assert(review.quality.customersWhoWrote === 3 && review.quality.replied === 1 && review.quality.notReplied === 2, `chat_review partition (${JSON.stringify(review.quality)})`);
+assert(review.notReplied.longestFirst.map((r) => r.conversationId).join() === "v1,v3", "not replied, longest wait first");
+const nr1 = review.notReplied.longestFirst[0];
+assert(nr1.customerMessagesUnanswered === 2 && nr1.onlyABotAnswered && nr1.waitingNow && nr1.waiting === "5h" && nr1.lastCustomerMessage === "Still waiting, I want a refund", `not replied row (${JSON.stringify(nr1)})`);
+assert(review.notReplied.longestFirst[1].waiting === "20m" && !review.notReplied.longestFirst[1].onlyABotAnswered, "waiting measured from the message after our last reply");
+const rp = review.replied.latestFirst[0];
+assert(rp.conversationId === "v2" && rp.repliedBy === "Agent A" && rp.firstReplyAfter === "10m" && rp.ourLastReply.startsWith("Your delivery is at 3pm") && rp.ourLastReply.length <= 161, `replied row with a snippet (${JSON.stringify(rp)})`);
+assert(review.repeatComplainers.length === 1 && review.repeatComplainers[0].customer === "Cust v1" && review.repeatComplainers[0].complaintMessages === 3 && review.repeatComplainers[0].conversations === 2 && review.repeatComplainers[0].stillWaiting, `repeat complainer across two conversations (${JSON.stringify(review.repeatComplainers)})`);
+assert(review.quality.negativeMood === 2 && review.quality.unresolved === 2 && review.quality.stillWaitingNow === 2 && review.quality.onlyABotAnswered === 1 && review.quality.firstReplyOverSla === 1, `quality view (${JSON.stringify(review.quality)})`);
+assert(review.previousPeriod.customersWhoWrote === 1 && review.previousPeriod.replyRatePct === 100 && review.change.customersWhoWrotePct === 200, "against the previous period");
+assert(!JSON.stringify(review).includes("_sort") && review.instructions.includes("Do not paste"), "no internal fields; summarise instruction");
+
+// customer_chat_summary
+const chat = r4.summariseCustomerChat(
+  {
+    id: "v1",
+    status: "OPEN",
+    assignedTo: null,
+    department: "Delivery",
+    tags: ["VIP"],
+    customer: { name: "Wong Ah Kow", phone: "60111111111", fields: { ref_1: "SO-1", address: "x" } },
+    messages: [
+      { at: TM(60).toISOString(), from: "Agent A", text: "Hi, how can I help?" },
+      { at: TM(40).toISOString(), from: "customer", text: "My sofa is broken" },
+      { at: TM(35).toISOString(), from: "customer", text: "x".repeat(400) },
+    ],
+    internalNotes: [{ at: TM(50).toISOString(), by: "Agent A", text: "Called" }],
+  },
+  [{ id: "v9", customer: "Wong Ah Kow", phone: "60111111111", status: "CLOSED" }],
+  FRI
+);
+assert(chat.customer === "Wong Ah Kow" && chat.orderRef === "SO-1" && chat.assignedTo === "(unassigned)" && !("address" in chat), "chat summary header (order ref only, no address)");
+assert(chat.flags.unansweredInARow === 2 && chat.flags.waiting === "40m" && chat.flags.overSla && chat.flags.keywordHints.includes("broken"), `chat flags (${JSON.stringify(chat.flags)})`);
+assert(chat.messages[2].text.length === 301 && chat.otherMatches[0].conversationId === "v9" && !JSON.stringify(chat).includes("60111111111"), "messages clipped, other matches, no phone number");
+
+// data_gaps
+const gaps = r4.buildDataGaps({
+  contacts: { ok: true, value: { total: 10, noName: { count: 2, examples: [] } } },
+  overview: { ok: true, value: { notClosed: 7, byAgent: [{ name: "(unassigned)", open: 3, waiting: 2 }] } },
+  unassigned: { ok: true, value: { conversations: [{ id: "c1", customer: "Wong", status: "OPEN", department: null, waitingOnUs: true }] } },
+});
+assert(gaps.contacts.total === 10 && gaps.conversations.noAgentAssigned === 3 && gaps.conversations.noAgentAssignedAndWaiting === 2 && gaps.conversations.examples[0].department === "(no department)", "data_gaps sections");
+assert(r4.buildDataGaps({ contacts: { ok: false, message: "You do not have access to Contacts in Houzs Connect." }, overview: { ok: true, value: {} }, unassigned: { ok: true, value: {} } }).contacts.unavailable.includes("Contacts"), "a part without access says so");
+
+// Round 4 tool list: chat-content tools only to supervisors / admins, module-bound tools follow modules.
+for (const name of ["chat_review", "customer_chat_summary", "customer_mood_scan"]) {
+  for (const role of ["AGENT", "SALES", "VIEWER", "", null]) assert(srv.toolsFor(allMods, role).every((t) => t.name !== name), `${name} hidden from ${role}`);
+  for (const role of ["SUPER_ADMIN", "OWNER", "ADMIN", "MANAGER"]) assert(srv.toolsFor(allMods, role).some((t) => t.name === name), `${name} listed to ${role}`);
+}
+assert(srv.toolsFor(["contacts", "dashboard"], "MANAGER").every((t) => !["chat_review", "customer_chat_summary", "waiting_now"].includes(t.name)), "chat tools need the inbox module");
+assert(srv.toolsFor(["inbox"], "AGENT").some((t) => t.name === "waiting_now") && !srv.toolsFor(["inbox"], "AGENT").some((t) => t.name === "agent_workload"), "waiting_now follows inbox, agent_workload follows dashboard");
+assert(srv.toolsFor([], "AGENT").some((t) => t.name === "data_gaps"), "data_gaps is listed (each part keeps its own module gate)");
+
 // ── Runtime DDL == migration 0027 ──
 const { MCP_DDL } = await import("../src/db/ensure-mcp.ts");
 const mig = readFileSync(resolve(root, "src/db/migrations/0027_mcp_connector.sql"), "utf8");
