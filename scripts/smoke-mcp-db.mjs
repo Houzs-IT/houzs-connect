@@ -184,7 +184,7 @@ assert(x.status === 202, "a notification → 202");
 x = await rpc(tok.access_token, { jsonrpc: "2.0", id: 2, method: "tools/list" });
 assert(
   x.body.result.tools.map((t) => t.name).join() ===
-    "inbox_overview,service_performance,reply_speed,message_delivery,contacts_summary,campaign_summary,daily_brief,export_excel,search,fetch,whoami,list_modules,list_endpoints,connect_get",
+    "inbox_overview,waiting_now,service_performance,reply_speed,agent_workload,message_delivery,contacts_summary,campaign_summary,daily_brief,data_gaps,export_excel,search,fetch,whoami,list_modules,list_endpoints,connect_get",
   `quick answers, search / fetch, then the general tools (${x.body.result.tools.map((t) => t.name).join()})`
 );
 assert(x.body.result.tools.every((t) => t.annotations.readOnlyHint === true && !("module" in t)), "all tools read-only; no internal fields sent");
@@ -245,6 +245,37 @@ t = await call(tok.access_token, "customer_mood_scan");
 assert(t.isError && t.content[0].text.startsWith("Supervisors and admins only"), `mood scan refused for an agent (${t.content[0].text})`);
 const moodLog = await sql.unsafe(`select status, ok from connect.mcp_calls where member_id = '${id("a")}' and tool = 'customer_mood_scan' order by created_at desc limit 1`);
 assert(moodLog[0]?.status === 403 && moodLog[0]?.ok === false, "refused mood scan logged as 403");
+
+// ── Round 4 as an AGENT (owner 2026-11-26: the connector follows Connect's RBAC exactly) ──
+t = await call(tok.access_token, "waiting_now");
+const wnow = J(t);
+assert(
+  !t.isError && wnow.waitingNow === 1 && wnow.longestFirst[0].conversationId === id("v1") && wnow.longestFirst[0].unansweredMessages === 2 && wnow.longestFirst[0].overSla && wnow.longestFirst[0].url === `${ORIGIN}/inbox/open/${id("v1")}`,
+  `waiting_now: own inbox visibility, longest first, linked (${t.content[0].text.slice(0, 300)})`
+);
+assert(!t.content[0].text.includes(id("v2")), "waiting_now never shows another department's chat");
+t = await call(tok.access_token, "agent_workload", { period: "week" });
+const awl = J(t);
+assert(!t.isError && awl.period === "week" && awl.unassignedNow.open === 2 && awl.team.customersWhoWrote >= 2, `agent_workload: the Dashboard's company-wide figures (${t.content[0].text.slice(0, 300)})`);
+t = await call(tok.access_token, "agent_workload", { period: "fortnight" });
+assert(t.isError && t.content[0].text.includes("period must be one of"), "agent_workload refuses an unknown period");
+for (const name of ["chat_review", "customer_chat_summary"]) {
+  t = await call(tok.access_token, name, name === "chat_review" ? { period: "week" } : { query: "Wong" });
+  assert(t.isError && t.content[0].text.startsWith(`Supervisors and admins only: ${name}`), `${name}: an agent gets "no access" (${t.content[0].text})`);
+  assert(!/sofa|Wong/.test(t.content[0].text), `${name}: no chat content in the refusal`);
+  const lg = await sql.unsafe(`select status, ok from connect.mcp_calls where member_id = '${id("a")}' and tool = '${name}' order by created_at desc limit 1`);
+  assert(lg[0]?.status === 403 && lg[0]?.ok === false, `refused ${name} logged as 403`);
+}
+t = await call(tok.access_token, "connect_get", { path: "/inbox/chat-review", query: { period: "week" } });
+assert(t.isError && t.content[0].text.startsWith("Supervisors and admins only"), "the /inbox/chat-review endpoint holds the same gate through connect_get");
+await sql.unsafe(`insert into connect.contact (id, company_id, name, phone) values ('${id("c3")}', '${id("co")}', null, '12345')`);
+t = await call(tok.access_token, "data_gaps");
+const dg = J(t);
+assert(
+  !t.isError && dg.contacts.noName.count === 1 && dg.contacts.phoneTooShort.examples[0].contactId === id("c3") && dg.conversations.noAgentAssigned === 1 && dg.conversations.examples[0].url === `${ORIGIN}/inbox/open/${id("v1")}`,
+  `data_gaps: contacts + own unassigned chats (${t.content[0].text.slice(0, 400)})`
+);
+assert(!t.content[0].text.includes(id("v2")), "data_gaps never shows another department's chat");
 
 t = await call(tok.access_token, "daily_brief");
 const brief = J(t);
@@ -367,6 +398,38 @@ assert(!t.content[0].text.includes("60111111111") && !t.content[0].text.includes
 t = await call(ownerTok.access_token, "customer_mood_scan", { from: "2026-01-01", to: "2026-01-31" });
 assert(t.isError && t.content[0].text.includes("At most 7 days"), "mood scan range capped at 7 days");
 
+// ── Round 4 as a Super Admin: chat review and one customer's chat ──
+assert(x.body.result.tools.some((tl) => tl.name === "chat_review") && x.body.result.tools.some((tl) => tl.name === "customer_chat_summary"), "chat-content tools listed to a Super Admin");
+await sql.unsafe(`insert into connect.message (id, conversation_id, direction, body, sent_by_member_id, is_bot) values
+  ('${id("r1")}', '${id("v2")}', 'OUT', 'Your sofa arrives on Friday between 2 and 4pm', '${id("own")}', false)`);
+await sql.unsafe(`insert into connect.message (id, conversation_id, direction, body, created_at) values
+  ('${id("k1")}', '${id("v1")}', 'IN', 'Still waiting, this is so late', now() - interval '3 minutes'),
+  ('${id("k2")}', '${id("v1")}', 'IN', 'I want a refund', now() - interval '2 minutes'),
+  ('${id("k3")}', '${id("v1")}', 'IN', 'Very disappointed', now() - interval '1 minute')`);
+const rng = { period: "custom", from: r3.shiftDay(r3.myToday(), -1), to: r3.myToday() };
+t = await call(ownerTok.access_token, "chat_review", rng);
+const rv = J(t);
+assert(!t.isError && rv.quality.customersWhoWrote === 2 && rv.quality.replied === 1 && rv.quality.notReplied === 1, `chat_review partition (${t.content[0].text.slice(0, 400)})`);
+const nr = rv.notReplied.longestFirst[0];
+assert(nr.conversationId === id("v1") && nr.assignedTo === "Agent A" && nr.customerMessagesUnanswered === 5 && nr.waitingNow && nr.url === `${ORIGIN}/inbox/open/${id("v1")}`, `not replied: who, how many, linked (${JSON.stringify(nr)})`);
+const rpl = rv.replied.latestFirst[0];
+assert(rpl.conversationId === id("v2") && rpl.repliedBy === "Owner" && rpl.ourLastReply.startsWith("Your sofa arrives"), `replied, with what we replied (${JSON.stringify(rpl)})`);
+assert(rv.repeatComplainers[0]?.customer === "Wong Ah Kow" && rv.repeatComplainers[0].complaintMessages >= 3 && rv.quality.negativeMood === 1, `repeat complainer (${JSON.stringify(rv.repeatComplainers)})`);
+assert(rv.replyTimes?.team && Array.isArray(rv.replyTimes.byAgent), "reply times in the Dashboard's measurement");
+assert(!t.content[0].text.includes("60111111111") && !t.content[0].text.includes("60122222222"), "no phone numbers in chat_review");
+t = await call(ownerTok.access_token, "chat_review", { period: "custom", from: "2026-02-01", to: "2026-01-01" });
+assert(t.isError && t.content[0].text.includes("from must be on or before to"), "chat_review refuses a reversed range");
+t = await call(ownerTok.access_token, "customer_chat_summary", { query: "Wong" });
+const cs = J(t);
+assert(!t.isError && cs.conversationId === id("v1") && cs.customer === "Wong Ah Kow" && cs.orderRef === `SO-${tag}` && cs.flags.unansweredInARow === 5 && cs.flags.keywordHints.includes("refund"), `customer_chat_summary (${t.content[0].text.slice(0, 400)})`);
+assert(!t.content[0].text.includes("60111111111") && !t.content[0].text.includes("SHOULD-NOT-LEAK"), "customer_chat_summary: no phone number, credential field stripped");
+t = await call(ownerTok.access_token, "customer_chat_summary", { query: "60122222222" });
+assert(!t.isError && J(t).conversationId === id("v2") && J(t).messages.some((m) => m.text.startsWith("Your sofa arrives")), "found by phone, with our reply");
+t = await call(ownerTok.access_token, "customer_chat_summary", { query: "nobody-like-this" });
+assert(!t.isError && J(t).found === false, "no match says so");
+t = await call(ownerTok.access_token, "customer_chat_summary", {});
+assert(t.isError && t.content[0].text.startsWith("Give a customer"), "customer_chat_summary needs a query");
+
 // Rate limit: counted per person from mcp_calls; over it → a normal isError result, logged as 429, not counted.
 await ageCalls();
 const ownerEmail = owner.email.toLowerCase();
@@ -406,6 +469,9 @@ assert(!("error" in lc) && lc.rows.length >= 10, "leak check ran over the list e
 const pay = lc.rows.find((row) => row.path === "/payments");
 assert(pay.outcome === "opened" && pay.sensitive.includes("amount") && pay.sensitive.includes("phone"), "leak check names money / people fields");
 assert(!JSON.stringify(lc).includes("1234.5") && !JSON.stringify(lc).includes("60111111111"), "leak check reports names, never values");
+const chatRow = lc.rows.find((row) => row.path === "/inbox/chat-review");
+assert(chatRow?.outcome === "refused" && chatRow.status === 403, `leak check: chat review refused for an agent (${JSON.stringify(chatRow)})`);
+for (const pth of ["/inbox/waiting", "/dashboard/agents", "/contacts/gaps"]) assert(lc.rows.find((row) => row.path === pth)?.outcome === "opened", `leak check reads ${pth} as the agent`);
 const live = await sql.unsafe(`select count(*)::int as n from connect.mcp_tokens where client_id = '${core.LEAK_CLIENT_ID}' and revoked_at is null`);
 assert(live[0].n === 0, "the leak-check token is revoked afterwards");
 
