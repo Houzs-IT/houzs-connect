@@ -14,7 +14,11 @@ export type ActivityAction =
   | "watcher_removed"
   | "merged"
   | "blocked"
-  | "unblocked";
+  | "unblocked"
+  // AI Connector round 4b (detail.via = "AI Connector"): a confirmed reply, internal note or Remarks line.
+  | "replied"
+  | "note_added"
+  | "remarks_updated";
 
 export type ActivityEntry = {
   companyId: string;

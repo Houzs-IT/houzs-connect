@@ -1,7 +1,7 @@
-// The AI Connector tables (migration 0027), self-applied at runtime.
+// The AI Connector tables (migrations 0027 + 0028), self-applied at runtime.
 //
 // Same reason as the other ensure* modules: production does not run
-// `pnpm db:migrate` (tasks/HANDOFF.md §0). Migration 0027 is the record; these
+// `pnpm db:migrate` (tasks/HANDOFF.md §0). Migrations 0027 / 0028 are the record; these
 // are its statements, all IF NOT EXISTS. scripts/smoke-mcp.mjs checks the two
 // stay in step.
 
@@ -22,6 +22,10 @@ export const MCP_DDL: string[] = [
   "CREATE TABLE IF NOT EXISTS \"connect\".\"mcp_calls\" (\n  \"id\" text PRIMARY KEY NOT NULL,\n  \"token_id\" text,\n  \"member_id\" text NOT NULL,\n  \"email\" text,\n  \"company_id\" text,\n  \"client_id\" text,\n  \"tool\" text NOT NULL,\n  \"target\" text,\n  \"status\" integer,\n  \"ok\" boolean NOT NULL,\n  \"note\" text,\n  \"ms\" integer,\n  \"created_at\" timestamp with time zone DEFAULT now() NOT NULL\n)",
   "CREATE INDEX IF NOT EXISTS \"mcp_calls_created_idx\" ON \"connect\".\"mcp_calls\" (\"created_at\")",
   "CREATE INDEX IF NOT EXISTS \"mcp_calls_email_idx\" ON \"connect\".\"mcp_calls\" (\"email\", \"created_at\")",
+  // Round 4b (migration 0028): the admin's action switches + pending proposals.
+  "CREATE TABLE IF NOT EXISTS \"connect\".\"mcp_settings\" (\n  \"key\" text PRIMARY KEY NOT NULL,\n  \"enabled\" boolean DEFAULT false NOT NULL,\n  \"updated_by_member_id\" text,\n  \"updated_at\" timestamp with time zone DEFAULT now() NOT NULL\n)",
+  "CREATE TABLE IF NOT EXISTS \"connect\".\"mcp_pending_actions\" (\n  \"id\" text PRIMARY KEY NOT NULL,\n  \"token_id\" text NOT NULL,\n  \"member_id\" text NOT NULL,\n  \"email\" text NOT NULL,\n  \"kind\" text NOT NULL,\n  \"payload\" jsonb,\n  \"summary\" text,\n  \"created_at\" timestamp with time zone DEFAULT now() NOT NULL,\n  \"expires_at\" timestamp with time zone NOT NULL,\n  \"used_at\" timestamp with time zone,\n  \"cancelled_at\" timestamp with time zone,\n  \"outcome_status\" integer,\n  \"outcome_note\" text\n)",
+  "CREATE INDEX IF NOT EXISTS \"mcp_pending_actions_email_idx\" ON \"connect\".\"mcp_pending_actions\" (\"email\", \"used_at\")",
 ];
 
 let ensured: Promise<void> | null = null;

@@ -7,18 +7,22 @@ import { getDb } from "@/db/client";
 import {
   contact,
   contactTag,
-  conversation,
   conversationTag,
-  member,
   message,
-  note,
   payment,
   quickReply,
   tag,
 } from "@/db/schema";
 import { logActivity } from "@/lib/activity";
-import { setConversationClosedAt } from "@/db/ensure-conversation-closed-at";
 import { recordInbound, sendOutbound } from "@/lib/whatsapp/transport";
+import {
+  addConversationNoteCore,
+  assignConversationCore,
+  authorizeConversationFor,
+  sendReplyCore,
+  setConversationStatusCore,
+  type ConversationStatus,
+} from "@/lib/inbox-writes";
 import { countPlaceholders, listTemplates, templateConfig } from "@/lib/whatsapp/templates";
 import {
   handleCustomerReply,
@@ -44,11 +48,9 @@ async function authorizeConversation(conversationId: string) {
   const me = await getCurrentMember();
   if (!me) return null;
   const db = getDb();
-  const convo = await db.query.conversation.findFirst({
-    where: eq(conversation.id, conversationId),
-    with: { contact: true },
-  });
-  if (!convo || convo.contact.companyId !== me.companyId) return null;
+  // The rule itself is shared with the AI Connector's confirmed actions (lib/inbox-writes.ts).
+  const convo = await authorizeConversationFor(db, me, conversationId);
+  if (!convo) return null;
   return { me, db, convo };
 }
 
@@ -65,7 +67,7 @@ export async function sendMessage(formData: FormData) {
   const { me, db } = auth;
 
   if (kind === "note") {
-    await db.insert(note).values({ conversationId, memberId: me.id, body });
+    await addConversationNoteCore(db, conversationId, me.id, body);
   } else {
     // Go through sendOutbound, which is the only path that actually reaches
     // Meta. This used to insert the row here and stop: every reply an operator
@@ -82,15 +84,9 @@ export async function sendMessage(formData: FormData) {
           columns: { id: true },
         })
       : null;
-    await sendOutbound(conversationId, body, {
-      isBot: false,
-      sentByMemberId: me.id,
-      replyTo: quoted ? replyTo : undefined,
-    });
-    await db
-      .update(conversation)
-      .set({ unreadCount: 0 })
-      .where(eq(conversation.id, conversationId));
+    // lib/inbox-writes.ts: sendOutbound + clear unread — the AI Connector's
+    // confirmed reply runs this same core.
+    await sendReplyCore(db, conversationId, me.id, body, quoted ? replyTo : undefined);
   }
   revalidatePath(`/inbox/${conversationId}`);
   revalidatePath("/inbox");
@@ -178,21 +174,7 @@ export async function assignConversation(formData: FormData) {
 
   const auth = await authorizeConversation(conversationId);
   if (!auth) return;
-  const { db } = auth;
-  await db.update(conversation).set(set).where(eq(conversation.id, conversationId));
-  if (formData.has("assignedAgentId")) {
-    const toName = set.assignedAgentId
-      ? (await db.query.member.findFirst({ where: eq(member.id, set.assignedAgentId), columns: { name: true } }))?.name ?? null
-      : null;
-    await logActivity(db, {
-      companyId: auth.convo.contact.companyId,
-      actorMemberId: auth.me.id,
-      entityType: "conversation",
-      entityId: conversationId,
-      action: set.assignedAgentId ? "assigned" : "unassigned",
-      detail: { to: toName },
-    });
-  }
+  await assignConversationCore(auth.db, auth.me, auth.convo, set);
   revalidatePath(`/inbox/${conversationId}`);
   revalidatePath("/inbox");
 }
@@ -205,26 +187,7 @@ export async function setConversationStatus(formData: FormData) {
 
   const auth = await authorizeConversation(conversationId);
   if (!auth) return;
-  const { db } = auth;
-  await db
-    .update(conversation)
-    .set({
-      status: status as "OPEN" | "CLOSED" | "QUEUE" | "PENDING",
-      ...(status === "CLOSED" ? { unreadCount: 0 } : {}),
-    })
-    .where(eq(conversation.id, conversationId));
-  // Stamp closed_at on close (cleared on reopen) so the dashboard can measure
-  // resolution time. Raw-SQL column kept out of the Drizzle schema — see
-  // ensure-conversation-closed-at.ts.
-  await setConversationClosedAt(db, conversationId, status === "CLOSED");
-  await logActivity(db, {
-    companyId: auth.convo.contact.companyId,
-    actorMemberId: auth.me.id,
-    entityType: "conversation",
-    entityId: conversationId,
-    action: "status",
-    detail: { status },
-  });
+  await setConversationStatusCore(auth.db, auth.me, auth.convo, status as ConversationStatus);
   revalidatePath(`/inbox/${conversationId}`);
   revalidatePath("/inbox");
 }

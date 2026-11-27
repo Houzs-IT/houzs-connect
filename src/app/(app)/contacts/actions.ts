@@ -19,6 +19,7 @@ import {
 } from "@/db/schema";
 import { getCurrentMember } from "@/lib/current-member";
 import { logActivity } from "@/lib/activity";
+import { saveContactRemarksCore } from "@/lib/inbox-writes";
 import { saveMemberContactCols } from "@/lib/member-prefs";
 import { attrs } from "@/lib/format";
 import {
@@ -222,22 +223,8 @@ export async function setContactRemarks(formData: FormData) {
   const remarks = String(formData.get("remarks") ?? "").trim().slice(0, 2000);
   if (!id) return;
 
-  const target = await c.db.query.contact.findFirst({
-    where: and(eq(contact.id, id), eq(contact.companyId, c.companyId)),
-  });
-  if (!target) return;
-
-  const next: Record<string, unknown> = {
-    ...(target.attributes as Record<string, unknown> | null),
-  };
-  // An emptied box clears the note rather than storing "".
-  if (remarks) next.remarks = remarks;
-  else delete next.remarks;
-
-  await c.db
-    .update(contact)
-    .set({ attributes: next })
-    .where(and(eq(contact.id, id), eq(contact.companyId, c.companyId)));
+  // lib/inbox-writes.ts — the AI Connector's confirmed contact note saves through this same core.
+  if (!(await saveContactRemarksCore(c.db, c.companyId, id, remarks))) return;
   revalidatePath("/contacts");
   revalidatePath("/inbox");
 }
