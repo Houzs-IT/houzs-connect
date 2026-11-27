@@ -155,7 +155,7 @@ async function main() {
       // in case from the seeded row to prove case-insensitive reconciliation.
       { id: 1, email: "Alice@Houzs.com", name: "Alice", phone: "011", status: "active", role_name: "Owner" },
       // Sales exec granted ONLY company 2 -> lands in 2990 alone.
-      { id: 2, email: "bob@houzs.com", name: "Bob", phone: null, status: "active", role_name: "Sales Executive" },
+      { id: 2, email: "bob@houzs.com", name: "Bob", phone: null, status: "active", role_name: "Sales Person" },
       // Dave granted ONLY company 1 (HOUZS), where a login-created row already
       // exists for him -> must be reconciled by (company, email), not duplicated.
       { id: 4, email: "dave@houzs.com", name: "Dave", phone: null, status: "active", role_name: "Manager" },
@@ -235,6 +235,12 @@ async function main() {
   assert(replay.members.deactivate.length === 0, "idempotent replay: no new deactivations");
   // Updates are allowed on replay (field refresh) but must not duplicate rows.
   assert(replay.members.update.length === 4, `idempotent replay: expected 4 member updates, got ${replay.members.update.length}`);
+
+  // ERP role → Connect role: exact names only; an unlisted name gets the least access.
+  const { roleFromErp } = await import("../src/lib/erp-auth.ts");
+  for (const [name, want] of [["Owner", "OWNER"], ["IT Admin", "ADMIN"], [" sales person ", "SALES"], ["Credit Controller", "VIEWER"], ["Site Supervisor", "VIEWER"], ["Auditor", "VIEWER"], ["Head Office Owner", "VIEWER"], [null, "VIEWER"]]) {
+    assert(roleFromErp(name) === want, `roleFromErp(${name}) should be ${want}, got ${roleFromErp(name)}`);
+  }
 
   console.log("ORG-SYNC SMOKE PASS:");
   console.log(`  companies:  +${plan.companies.insert.length} insert, ~${plan.companies.update.length} update`);

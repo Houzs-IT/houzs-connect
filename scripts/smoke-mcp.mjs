@@ -185,7 +185,7 @@ const as = core.authorizationServerMetadata("https://c.example");
 assert(as.code_challenge_methods_supported.join() === "S256" && as.token_endpoint_auth_methods_supported.join() === "none", "auth-server metadata: S256, public clients");
 assert(as.registration_endpoint === "https://c.example/api/mcp/oauth/register", "registration endpoint");
 assert(core.MCP_PROTOCOL_VERSIONS.join() === "2025-06-18,2025-03-26,2024-11-05", "protocol versions");
-assert(core.isMcpAdminRole("SUPER_ADMIN") && core.isMcpAdminRole("OWNER") && !core.isMcpAdminRole("ADMIN") && !core.isMcpAdminRole("AGENT"), "admin roles");
+assert(core.isMcpAdminRole("SUPER_ADMIN") && !core.isMcpAdminRole("OWNER") && !core.isMcpAdminRole("ADMIN") && !core.isMcpAdminRole("AGENT"), "admin roles");
 assert(core.esc(`<a href="x">'&`) === "&lt;a href=&quot;x&quot;&gt;&#39;&amp;", "HTML escaping");
 assert(core.appLabel("Claude") === "Claude" && core.appLabel("ChatGPT connector") === "ChatGPT" && core.appLabel("") === "AI app", "app labels");
 
