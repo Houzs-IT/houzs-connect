@@ -15,10 +15,13 @@ function assert(cond, msg) {
 const { MODULES, resolveModules, homeFor } = await import("../src/lib/module-access.ts");
 
 // Starting points.
-// Everyone starts with every module; Roles, Team, Access and the switcher are held back by role elsewhere.
-for (const r of ["SUPER_ADMIN", "OWNER", "ADMIN", "MANAGER", "AGENT", "SALES", "VIEWER", "DRIVER", null]) {
+// Everyone but drivers starts with every module; Roles, Team, Access and the switcher are held back by role elsewhere.
+for (const r of ["SUPER_ADMIN", "OWNER", "ADMIN", "MANAGER", "AGENT", "SALES", "VIEWER", null]) {
   assert(resolveModules(r, []).length === MODULES.length, `${r} starts with every module`);
 }
+assert(resolveModules("DRIVER", []).join() === "inbox,internal", "a driver starts with the two chats only");
+assert(homeFor(resolveModules("DRIVER", [])) === "/inbox", "a driver lands on Service");
+assert(resolveModules("DRIVER", [{ module: "contacts", allowed: true }]).includes("contacts"), "a Super Admin can tick more back for a driver");
 
 // Ticks over the role.
 let m = resolveModules("AGENT", [{ module: "payments", allowed: false }, { module: "payments", allowed: true }]);
