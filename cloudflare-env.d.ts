@@ -82,6 +82,12 @@ interface CloudflareEnv {
   // scheduler is off until the secret is set on BOTH this Worker and the cron one.
   CRON_SECRET?: string;
 
+  // AI Connector round 4d (morning brief + urgent alerts), src/lib/mail.ts:
+  // RESEND_API_KEY is a secret; BRIEF_MAIL_FROM a var in wrangler.toml. Either
+  // missing => nothing is sent and Settings -> AI Connector says so.
+  RESEND_API_KEY?: string;
+  BRIEF_MAIL_FROM?: string;
+
   // R2 bucket for Internal staff-chat attachments (images + files). prod ->
   // houzs-connect-files, staging -> houzs-connect-files-staging, and a local
   // (miniflare) bucket under `next dev`. See src/app/(app)/internal/media and

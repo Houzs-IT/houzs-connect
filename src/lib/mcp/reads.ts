@@ -284,7 +284,7 @@ export const ENDPOINTS: Endpoint[] = [
     module: "inbox",
     description:
       "QUICK ANSWER — customers waiting for our reply right now (not closed, the customer wrote last), longest wait first, as this person sees the inbox: how long, how many unanswered messages, assigned to, department, channel, the last message (short).",
-    params: { limit: "1-100 (default 50)" },
+    params: { limit: "1-100 (default 50)", assigned: "me = only conversations assigned to this person" },
     run: waitingNow,
   },
   {
@@ -964,6 +964,8 @@ async function waitingNow(ctx: ReadCtx, _p: Record<string, string>, q: Query): P
   const { db } = ctx;
   const scope = await conversationScopeWhere(ctx);
   const limit = intParam(q.limit, 50, 1, 100);
+  // assigned=me (round 4d: an agent's own waiting chats) only narrows the person's own scope.
+  const mine = q.assigned === "me" ? sql`${conversation.assignedAgentId} = ${ctx.me.id}` : undefined;
   const lastOut = sql`(select max(m.created_at) from connect.message m where m.conversation_id = ${conversation.id} and m.direction = 'OUT')`;
   const waitStart = sql<Date | string | null>`(select min(m.created_at) from connect.message m where m.conversation_id = ${conversation.id} and m.direction = 'IN' and m.created_at > coalesce(${lastOut}, '-infinity'::timestamptz))`;
   const rows = await db
@@ -985,7 +987,7 @@ async function waitingNow(ctx: ReadCtx, _p: Record<string, string>, q: Query): P
     .leftJoin(member, eq(member.id, conversation.assignedAgentId))
     .leftJoin(department, eq(department.id, conversation.assignedDepartmentId))
     .leftJoin(channel, eq(channel.id, conversation.channelId))
-    .where(and(scope, sql`${conversation.status} <> 'CLOSED'`, sql`${lastDirection} = 'IN'`))
+    .where(and(scope, mine, sql`${conversation.status} <> 'CLOSED'`, sql`${lastDirection} = 'IN'`))
     .orderBy(sql`${waitStart} asc nulls last`)
     .limit(limit);
   return summariseWaitingNow(

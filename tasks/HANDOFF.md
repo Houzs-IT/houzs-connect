@@ -265,6 +265,50 @@ works on a phone).
     message row as the agent after confirm, single use, another person cannot confirm, switch
     off between propose and confirm, assign + resolve, remarks appended, activity + call log,
     cache hit with `structuredContent.link`, supervisor prompts).
+- **Round 4d — morning brief email + urgent alerts (branch `feat/mcp-4d`, owner 2026-11-26
+  「加 全部一起做」).** Mirrors Hookka PR #1635.
+  - **Opt-in, per person, OFF by default:** Settings → AI Connector → "Morning brief & alerts"
+    (`BriefSettings.tsx`, shown only to people who may use the connector). Brief on/off, time
+    (Malaysia, on the hour / half hour, default 08:00), weekdays or every day; alerts on/off.
+    One row per member (= per company) in `mcp_brief_subscriptions`. Buttons: Preview (built
+    as you, not sent), Send me a test brief (own email only, one per 10 minutes). The alert
+    levels are shown read-only; they live in ONE place: `src/lib/mcp/proactive.ts`
+    `PROACTIVE_CONFIG`.
+  - **Built AS the person:** `proactive-run.ts withPersonToken` issues a connector token for
+    the member (client `mcpc_morning_brief`, internal: refused by OAuth, hidden from
+    connected apps) and revokes it in `finally` — the leak check's pattern. The brief is
+    `daily_brief` (+ `data_gaps` on Mondays = D4) through `handleRpc`, so it is gated,
+    rate-limited and logged in `mcp_calls` like any Claude question. Alerts read through
+    `readEndpoint`. No service account.
+  - **Alerts (D2), 08:00–22:00 MYT, each person at most every 30 min:** supervisors / admins
+    (`round3.moodScanAllowed`: SUPER_ADMIN, OWNER, ADMIN, MANAGER) — any customer in their
+    inbox waiting > 30 min (`/inbox/waiting`), ≥ 5 conversations with complaint words today
+    (`/inbox/chat-review?period=today`), a repeat complainer in the last 7 days (chat_review's
+    rule). Everyone else — their OWN assigned chats waiting > 30 min (`/inbox/waiting?assigned=me`,
+    a new param that only narrows the person's own scope). Debounce: `mcp_proactive_keys`, one
+    claim per person + key + Malaysia day (complainers: once per 7 days).
+  - **No phone numbers in email:** every customer label goes through `safeCustomer` (name, else
+    masked number); snippets ≤ 60 chars with digit runs masked; failed-message rows and contact
+    gaps are counted, never listed.
+  - **Schedule:** the existing cron (`cron-worker/`, every 2 min → `POST /api/cron`) now also
+    calls `runProactiveTick`. Bounded: ≤ 5 briefs + ≤ 5 alert checks per tick, 10 s budget,
+    one person at a time; one brief per person per day (key `brief`), at most 3 attempts.
+  - **Email:** Connect had no sender; new `src/lib/mail.ts` (Resend, as HRIS PR #115). Needs
+    the `RESEND_API_KEY` secret on the Worker (`wrangler secret put RESEND_API_KEY`);
+    `BRIEF_MAIL_FROM` is in `wrangler.toml`. Without the key: nothing is sent, the tick skips
+    before any query, the settings card says so. Staging (`CONNECT_PREVIEW=1`) never sends.
+    Every email is logged in `mcp_proactive_sends` (kind, items, provider id, status) — never
+    the body. Unsubscribe: `/api/mcp/unsubscribe?t=…` shows one button; only the POST turns it
+    off (mail scanners pre-open links).
+  - Tables: migration `0029_mcp_proactive` + `ensure-mcp.ts` (runtime self-apply).
+  - Tests: `scripts/smoke-mcp-proactive.mjs` (pure, in CI — 82 assertions: opt-in, due times,
+    bounded ticks, alerts per role, debounce, HTML escaping / no phones / unsubscribe, mail
+    switch with a fake fetch) and a 4d section in `scripts/smoke-mcp-db.mjs` (a real tick as an
+    AGENT with a fake sender: one brief + one alert, tokens revoked, idempotent second tick,
+    preview, rate-limited test brief, access removed → no mail, unsubscribe).
+  - **Not yet proven on production:** no real email has been sent (no key set; never sent from
+    a test). To try it after deploy + key: Settings → AI Connector → turn on → "Send me a test
+    brief".
 - **Not yet proven on production:** a real Claude / ChatGPT connection, and the
   sign-in → back-to-Allow hop (needs a real ERP login). First production use creates
   the tables through ensure-mcp.

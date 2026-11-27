@@ -19,6 +19,11 @@ export const MCP_PROTOCOL_VERSIONS = ["2025-06-18", "2025-03-26", "2024-11-05"];
 /** The pending "Allow?" request carried across the sign-in page (login/actions.ts). */
 export const MCP_RETURN_COOKIE = "hc_mcp_return";
 export const LEAK_CLIENT_ID = "mcpc_leak_check";
+/** Round 4d: the short-lived token a morning brief / alert check reads with (proactive-run.ts). */
+export const PROACTIVE_CLIENT_ID = "mcpc_morning_brief";
+/** Clients Connect itself uses: never usable through OAuth, never listed as a connected app. */
+export const INTERNAL_CLIENT_IDS = [LEAK_CLIENT_ID, PROACTIVE_CLIENT_ID];
+export const isInternalClient = (clientId: string): boolean => INTERNAL_CLIENT_IDS.includes(clientId);
 
 /** Bearer-only endpoints (no cookies), so any origin may call them — e.g. a browser-based MCP inspector. */
 export const CORS_HEADERS: Record<string, string> = {

@@ -5,7 +5,7 @@
 
 import type { DB } from "@/db/client";
 import type { CurrentMember } from "@/lib/current-member";
-import { CORS_HEADERS, LEAK_CLIENT_ID, appLabel, esc, pkceS256, validCodeChallenge, validCodeVerifier, validRedirectUri } from "./core";
+import { CORS_HEADERS, appLabel, isInternalClient, esc, pkceS256, validCodeChallenge, validCodeVerifier, validRedirectUri } from "./core";
 import {
   consumeCode,
   createAuthRequest,
@@ -70,7 +70,7 @@ export async function startAuthorize(db: DB, url: URL): Promise<AuthorizeStart> 
   const clientId = q("client_id");
   const redirectUri = q("redirect_uri");
   if (!clientId || !redirectUri) return { kind: "error", response: plain("Invalid request: missing client or redirect address.") };
-  const cl = clientId === LEAK_CLIENT_ID ? null : await getClient(db, clientId);
+  const cl = isInternalClient(clientId) ? null : await getClient(db, clientId);
   if (!cl) return { kind: "error", response: plain("This AI app is not registered. Remove the connector and add it again.") };
   // Never redirect to an address the client did not register (no open redirect).
   if (!cl.redirectUris.includes(redirectUri)) return { kind: "error", response: plain("Invalid request: the return address does not match this app.") };
@@ -187,7 +187,7 @@ export async function handleToken(db: DB, req: Request): Promise<Response> {
   }
   const err = (error: string, desc: string, status = 400) => json({ error, error_description: desc }, status);
   const clientId = f.client_id || "";
-  if (!clientId || clientId === LEAK_CLIENT_ID || !(await getClient(db, clientId))) return err("invalid_client", "Unknown client", 401);
+  if (!clientId || isInternalClient(clientId) || !(await getClient(db, clientId))) return err("invalid_client", "Unknown client", 401);
 
   let memberId: string;
   let issued: { accessToken: string; refreshToken: string; expiresIn: number; tokenId: string };
