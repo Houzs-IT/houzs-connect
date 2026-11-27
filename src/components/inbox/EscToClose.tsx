@@ -17,7 +17,10 @@ import { useRouter } from "next/navigation";
  * menus, the searchable selects, the composer's panels, and the modals — so this
  * handler steps aside whenever one of those owns the press, and only then exits:
  *   • defaultPrevented — a select or the composer already handled it;
- *   • an open modal ([role="dialog"]) or menu/select ([aria-expanded="true"]);
+ *   • an open modal ([role="dialog"]) or menu/select ([aria-expanded="true"]) —
+ *     EXCEPT an inline disclosure marked [data-esc-passthrough] (the contact name's
+ *     panel toggle): it is open by default and is not a popup that owns Esc, so
+ *     without the exclusion Esc never exited while the panel was shown;
  *   • focus sitting in a text field — don't yank an operator out mid-draft.
  */
 export function EscToClose() {
@@ -27,7 +30,9 @@ export function EscToClose() {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape" || e.defaultPrevented) return;
       // A modal or an open menu/select owns Escape: let it close itself first.
-      if (document.querySelector('[role="dialog"], [aria-expanded="true"]')) return;
+      // [data-esc-passthrough] opts an inline disclosure out — the contact-panel
+      // toggle is aria-expanded by default and is not a popup that owns Escape.
+      if (document.querySelector('[role="dialog"], [aria-expanded="true"]:not([data-esc-passthrough])')) return;
       // Typing somewhere (the composer, a search box): Escape is not "leave".
       const el = document.activeElement as HTMLElement | null;
       if (

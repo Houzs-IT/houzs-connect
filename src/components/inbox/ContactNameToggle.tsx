@@ -29,6 +29,9 @@ export function ContactNameToggle({
       title={label}
       aria-label={label}
       aria-expanded={!panelCollapsed}
+      // Not a popup: this disclosure is open by default, so EscToClose must not
+      // treat its aria-expanded as "a menu is open" and swallow Esc-to-close.
+      data-esc-passthrough
       className={className}
     >
       {children}
