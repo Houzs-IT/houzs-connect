@@ -667,7 +667,10 @@ async function callTool(db: DB, id: Identity, name: string, args: Record<string,
   try {
     // Per person (email), tool calls only; refused calls are logged as 429 and not counted.
     // The admin leak check reads through readEndpoint, never here, so it is never limited.
-    const refused = rateLimitMessage(await countRecentCalls(db, id.me.email));
+    // This request's earlier calls are not in mcp_calls yet (logged after the answer), so add them.
+    const c = await countRecentCalls(db, id.me.email);
+    const inRequest = logs.filter((l) => l.status !== 429).length;
+    const refused = rateLimitMessage({ minute: c.minute + inRequest, day: c.day + inRequest });
     const def = TOOLS.find((tl) => tl.name === name);
     const cacheKey = CACHED_TOOLS.has(name) ? AnswerCache.key({ memberId: id.me.id, role: id.me.role, modules: id.modules, tool: name, args }) : "";
     const cached = cacheKey ? answerCache.get(cacheKey) : undefined;
@@ -894,6 +897,9 @@ export async function handleRpc(db: DB, id: Identity, m: RpcReq, origin = "", lo
 
 export { CORS_HEADERS };
 
+/** Messages in one JSON-RPC batch. */
+export const MAX_BATCH = 10;
+
 const json = (body: unknown, status = 200, extra: Record<string, string> = {}) =>
   new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json", "Cache-Control": "no-store", ...CORS_HEADERS, ...extra } });
 
@@ -918,7 +924,7 @@ export async function handleMcpPost(db: DB, req: Request, origin: string, defer?
     return json({ jsonrpc: "2.0", id: null, error: { code: -32700, message: "Parse error" } }, 400);
   }
   const msgs = Array.isArray(body) ? (body as RpcReq[]) : [body as RpcReq];
-  if (msgs.length > 20) return json({ jsonrpc: "2.0", id: null, error: { code: -32600, message: "Too many messages in one batch" } }, 400);
+  if (msgs.length > MAX_BATCH) return json({ jsonrpc: "2.0", id: null, error: { code: -32600, message: "Too many messages in one batch" } }, 400);
   const out: unknown[] = [];
   const logs: McpCallRow[] = [];
   for (const m of msgs) {
