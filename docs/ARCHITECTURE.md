@@ -60,6 +60,20 @@ Campaigns. QuickReplies. DriverEvents. WebhookEvents (ERP/driver-app inbound).
 department, assigned to a team they're on, or owned by someone who reports up to them
 (transitive via `managerId`). OWNER/ADMIN see all. DRIVER sees only their delivery jobs.
 
+## 6a. AI Connector (MCP) — where the code lives
+
+Read-only Claude / ChatGPT access with each person's own login (details and FAQ:
+`tasks/HANDOFF.md` → "AI Connector").
+
+| File | What |
+| --- | --- |
+| `src/app/api/mcp/**`, `src/app/.well-known/oauth-*` | routes: JSON-RPC, OAuth, export download, discovery |
+| `src/lib/mcp/server.ts` | tools list, `callTool`, the supervisor gate for chat content, composite tools |
+| `src/lib/mcp/reads.ts` | the catalogue of read endpoints — the ONLY place connector SQL lives, each reusing the page's own predicate |
+| `src/lib/mcp/quick.ts`, `round3.ts`, `round4.ts` | pure summarise logic per round (round 4: `period`, waiting_now, agent_workload, chat_review, customer_chat_summary, data_gaps) |
+| `src/lib/mcp/core.ts`, `store.ts`, `oauth.ts`, `admin.ts` | pure helpers, tables, OAuth, admin page + leak check |
+| `scripts/smoke-mcp.mjs`, `scripts/smoke-mcp-db.mjs` | pure and real-Postgres tests (CI) |
+
 ## 7. Build phases
 
 - **Phase 0 — Foundation (DONE):** repo, schema, DB, Houzs seed (8 members/org chart,

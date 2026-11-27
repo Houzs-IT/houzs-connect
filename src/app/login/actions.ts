@@ -7,9 +7,11 @@ import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { isAccessRemoved, roleOverride } from "@/lib/team-access";
 import { getDb } from "@/db/client";
 import { bypassReadCache } from "@/db/fresh";
+import { verifyTurnstile } from "@/lib/turnstile";
 import { company, member } from "@/db/schema";
 import { brandForCompany, brandForHost, companyOrigin, pickLoginRow } from "@/lib/company-brand";
 import { askErp, configuredErps, erpOrder, OTHER_ERPS, type OtherErp } from "@/lib/erp-logins";
+import { MCP_RETURN_COOKIE } from "@/lib/mcp/core";
 import {
   verifyErpPassword,
   roleFromErp,
@@ -63,6 +65,16 @@ export async function login(
     else if (a.kind === "stopped") return { error: a.message };
     else return { error: `Cannot reach ${OTHER_ERPS[system].name} right now. Try again in a moment.`, twoStep: prev.twoStep };
   } else {
+    // Bot check (Cloudflare Turnstile) on the email/password step. Enforced only
+    // when the secret is set on the Worker; the code step above carries no token.
+    if (env.TURNSTILE_SECRET_KEY) {
+      const ok = await verifyTurnstile(
+        env.TURNSTILE_SECRET_KEY,
+        String(formData.get("cf-turnstile-response") ?? ""),
+        (await headers()).get("cf-connecting-ip")
+      );
+      if (!ok) return { error: "Verification failed. Please try again." };
+    }
     const email = String(formData.get("email") ?? "").trim().toLowerCase();
     const password = String(formData.get("password") ?? "");
     if (!email || !password) return { error: "Enter your email and password." };
@@ -154,6 +166,12 @@ export async function login(
   const token = await signSession(m.id, secret);
   const jar = await cookies();
   jar.set(SESSION_COOKIE, token, SESSION_COOKIE_OPTIONS);
+  // Signed in to approve an AI app (AI Connector, api/mcp/oauth/authorize): back to its Allow page.
+  const mcpReturn = jar.get(MCP_RETURN_COOKIE)?.value ?? "";
+  if (mcpReturn) {
+    jar.delete(MCP_RETURN_COOKIE);
+    if (/^mcpa_[A-Za-z0-9_-]{10,64}$/.test(mcpReturn)) redirect(`/api/mcp/oauth/authorize?request=${mcpReturn}`);
+  }
   redirect("/inbox");
 }
 

@@ -387,8 +387,12 @@ export async function supportStats(companyId: string, w: PeriodWindow) {
   };
 }
 
-/** One row per active member who replied to a customer in the window: reply count, conversations + reply times. Members who did not reply are left out. */
-export async function agentsReport(companyId: string, w: PeriodWindow, deptId?: string) {
+/**
+ * One row per active member who replied to a customer in the window: reply count, conversations + reply times. Members who did not reply are left out.
+ * `to` (optional, exclusive) closes the window — the AI Connector's agent_workload reads a past period
+ * (e.g. last month) with it; the Dashboard always reads up to now. `replies` is the window's own replyStats.
+ */
+export async function agentsReport(companyId: string, w: Pick<PeriodWindow, "since">, deptId?: string, to?: Date) {
   const db = getDb();
   const [members, depts, rows, sends, replies] = await Promise.all([
     db.query.member.findMany({
@@ -418,7 +422,8 @@ export async function agentsReport(companyId: string, w: PeriodWindow, deptId?: 
         and(
           eq(contact.companyId, companyId),
           isNotNull(conversation.assignedAgentId),
-          gte(conversation.lastMessageAt, w.since)
+          gte(conversation.lastMessageAt, w.since),
+          to ? lt(conversation.lastMessageAt, to) : undefined
         )
       )
       .groupBy(conversation.assignedAgentId),
@@ -436,11 +441,12 @@ export async function agentsReport(companyId: string, w: PeriodWindow, deptId?: 
           eq(message.direction, "OUT"),
           eq(message.isBot, false),
           isNotNull(message.sentByMemberId),
-          gte(message.createdAt, w.since)
+          gte(message.createdAt, w.since),
+          to ? lt(message.createdAt, to) : undefined
         )
       )
       .groupBy(message.sentByMemberId),
-    replyStats(companyId, w.since),
+    replyStats(companyId, w.since, to),
   ]);
   const deptName = new Map(depts.map((d) => [d.id, d.name]));
   const byAgent = new Map(rows.map((r) => [r.agentId, r]));
@@ -468,7 +474,7 @@ export async function agentsReport(companyId: string, w: PeriodWindow, deptId?: 
     // is about who worked the inbox, so idle members (replied 0) are left out.
     .filter((a) => a.replied > 0)
     .sort((a, b) => b.replied - a.replied || b.assigned - a.assigned || a.name.localeCompare(b.name));
-  return { list, depts };
+  return { list, depts, replies };
 }
 
 // ─────────────────────────── Delivery follow-up ───────────────────────────

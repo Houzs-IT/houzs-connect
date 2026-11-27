@@ -8,6 +8,7 @@ import { optInOutFlow } from "./optInOut";
 import { balanceReminderFlow } from "./balance";
 import { repliedCheckFlow } from "./repliedCheck";
 import { serviceArrangementFlow } from "./serviceArrangement";
+import { EASTMY_FLOWS } from "./eastMalaysia";
 import {
   reminder1ServiceFlow,
   reminder2ServiceFlow,
@@ -48,6 +49,7 @@ export const REBUILD_FLOWS: SeedFlow[] = [
   serviceCaseReceivedFlow,
   overdueOrderFlow,
   serviceArrangementFlow,
+  ...EASTMY_FLOWS,
 ];
 
 /**

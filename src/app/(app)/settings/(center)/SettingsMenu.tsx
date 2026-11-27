@@ -45,6 +45,8 @@ export async function SettingsMenu() {
             { href: "/settings/profile", label: L.profile, sub: me.name, icon: "☺", tone: "blue" },
             { href: "/settings/security", label: L.security, sub: L.fromErp, icon: "⚿", tone: "pink" },
             { href: "/settings/notifications", label: L.notifications, sub: L.nBrowser, icon: "♪", tone: "orange" },
+            // AI Connector (lib/mcp): everyone's own status; the admin's approvals and log.
+            { href: "/settings/ai-connector", label: "AI Connector", sub: "Claude · ChatGPT", icon: "✦", tone: "purple" },
           ],
         },
         // Without the company's settings (Settings → Access), only their own.

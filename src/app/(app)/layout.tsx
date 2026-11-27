@@ -8,6 +8,7 @@ import { CommandPalette } from "@/components/shell/CommandPalette";
 import { PresencePing } from "@/components/shell/PresencePing";
 import { NotifyPoller } from "@/components/shell/NotifyPoller";
 import { UpdateBanner } from "@/components/shell/UpdateBanner";
+import { StagingViewAs } from "@/components/shell/StagingViewAs";
 import { touchPresence } from "@/lib/presence";
 import { getDensityCompact, getLang, getMenuCollapsed, getPanelCollapsed, getTheme } from "@/lib/i18n/server";
 import { getDb } from "@/db/client";
@@ -103,8 +104,9 @@ export default async function AppLayout({
       {theme ? <style>{theme}</style> : null}
       <div data-shell className="flex h-dvh flex-col overflow-hidden">
         {staging ? (
-          <div className="shrink-0 bg-amber-400 px-3 py-0.5 text-center text-xs font-semibold text-amber-950">
-            STAGING - test data only, WhatsApp is off
+          <div className="flex shrink-0 flex-wrap items-center justify-center gap-x-4 bg-amber-400 px-3 py-0.5 text-center text-xs font-semibold text-amber-950">
+            <span>STAGING - test data only, WhatsApp is off</span>
+            <StagingViewAs />
           </div>
         ) : null}
         <div className="flex min-h-0 flex-1">
