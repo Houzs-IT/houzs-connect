@@ -185,7 +185,7 @@ assert(x.status === 202, "a notification → 202");
 x = await rpc(tok.access_token, { jsonrpc: "2.0", id: 2, method: "tools/list" });
 assert(
   x.body.result.tools.map((t) => t.name).join() ===
-    "inbox_overview,waiting_now,service_performance,reply_speed,agent_workload,message_delivery,contacts_summary,campaign_summary,daily_brief,data_gaps,export_excel,search,fetch,how_to,module_overview,glossary,explain_error,onboarding,whoami,list_modules,list_endpoints,connect_get",
+    "inbox_overview,waiting_now,service_performance,reply_speed,agent_workload,message_delivery,contacts_summary,campaign_summary,daily_brief,data_gaps,export_excel,search,fetch,how_to,module_overview,glossary,explain_error,onboarding,explain_screen,where_is,show_me,whoami,list_modules,list_endpoints,connect_get",
   `quick answers, search / fetch, then the general tools (${x.body.result.tools.map((t) => t.name).join()})`
 );
 assert(x.body.result.tools.every((t) => t.annotations.readOnlyHint === true && !("module" in t)), "all tools read-only; no internal fields sent");

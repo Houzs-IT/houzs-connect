@@ -342,6 +342,27 @@ works on a phone).
     equal the app's `requireModule` / `requireAdmin`, errors are the app's own text, flows
     name a role on every step, supervisor-only + explain-only hold, ranking (EN + 中文).
     `smoke-mcp-db.mjs` runs `how_to` through the real handler and checks the gap log.
+  - **Round 5b (branch `feat/mcp-howto-screens`): `explain_screen {path|labels}`, `where_is
+    {thing}`, `show_me {guide_id+step | path+label | label}`.** Screen map:
+    `src/lib/mcp/howto-screen.ts` (12 screens, tabs + buttons, gates from `PAGE_GATES`).
+    show_me returns the plain WebP (`public/help-shots/*.webp`, an MCP image block — never
+    SVG) + the button's box + a 15-minute annotated link (`/api/mcp/shot`, page / label /
+    expiry signed with HMAC-SHA256 under `SESSION_SECRET`; the page is an `<img>` with a CSS
+    red box and arrow, no script) + the live `?highlight=` link. Only pages the person can
+    open; the chat-review guide only for supervisors. how_to / where_is / explain_screen mark
+    steps that have a picture (`showMe`).
+  - Screenshots: `pnpm capture:help-shots` (`scripts/capture-help-shots.mjs`). Connect renders
+    on the server, so data cannot be intercepted in the browser; instead the script starts a
+    THROWAWAY local Postgres (initdb, trust, localhost) under `.verify/`, migrates it, seeds
+    `scripts/help-shots-demo.ts` (invented "(demo)" people, 60100000xxx phones, example.com;
+    refuses a non-localhost DB), writes a temporary `.dev.vars` (refuses if you have one),
+    runs `next dev`, signs in with a locally minted session cookie as the demo Super Admin,
+    aborts every non-localhost request in Playwright, boxes labels with the same
+    `highlight-match.ts` the live helper uses, writes WebPs (1200 px) and
+    `src/lib/mcp/howto-shots-data.ts`, then deletes the DB and `.dev.vars`. Tools are not app
+    dependencies: `npm install --prefix .verify/tools --no-save playwright sharp esbuild`;
+    needs PostgreSQL binaries (`PG_BIN`). Re-run after a UI change — the smoke fails on a
+    stale box (a label that is no longer a target or no longer in `src/`).
   - Round 5 findings (app, not fixed here — owner to decide): (1) `/inbox`, `/contacts`,
     `/internal` and `/settings/auto-assign` have no `requireModule` guard: unticking a module
     hides the rail entry but the page still opens by URL (a DRIVER can open `/contacts`).

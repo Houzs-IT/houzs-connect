@@ -65,6 +65,9 @@ import { cancelWrite, confirmWrite, KIND_MODULES, proposeWrite, type WriteDeps }
 import { connectExec } from "./write-exec";
 import { HOWTO_INSTRUCTIONS, HOWTO_PROMPT_TOOL, HOWTO_PROMPTS, HOWTO_TOOLS, howtoPromptText, isHowtoTool, runHowtoTool } from "./howto";
 import { capsFor, type Viewer } from "./howto-types";
+import { runScreenTool, SCREEN_TOOLS } from "./howto-screen";
+import { hasShot, resolveShot, SHOW_ME_TOOL, showMeText, signShotLink, type ShotHit } from "./howto-shots";
+import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { AnswerCache, CACHED_TOOLS, parseAnswer, PROMPT_TOOL, QUICK_OUTPUT_SCHEMA, ROLE_PROMPTS, rolePromptText, STRUCTURED_TOOLS, withLinks } from "./round4c";
 
 export const SERVER_INFO = { name: "houzs-connect", title: "Houzs Connect", version: "1.0.0" };
@@ -285,6 +288,8 @@ export const TOOLS: ToolDef[] = [
   },
   // Round 5: process help — no Connect data, every person (canDo follows their own access).
   ...HOWTO_TOOLS.map((t) => ({ ...t }) as ToolDef),
+  ...SCREEN_TOOLS.map((t) => ({ ...t }) as ToolDef),
+  { ...SHOW_ME_TOOL } as ToolDef,
   { name: "whoami", title: "Who am I connected as", description: "The Houzs Connect account this connection uses: name, company, role and which modules it can read.", inputSchema: NO_ARGS, annotations: RO },
   { name: "list_modules", title: "List modules", description: "The Houzs Connect modules this person can read, with how many read endpoints each has.", inputSchema: NO_ARGS, annotations: RO },
   {
@@ -675,6 +680,51 @@ async function howtoViewer(db: DB, id: Identity): Promise<Viewer> {
   return { role: id.me.role, modules: id.modules, caps: capsFor(id.me.role, saved), company: (await companyName(db, id.me.companyId).catch(() => "")) ?? "" };
 }
 
+/** Round 5b: the screenshot's bytes, from the Worker's static assets (public/help-shots), base64. Null when not reachable. */
+async function shotImage(origin: string, file: string): Promise<string | null> {
+  const url = `${origin}/help-shots/${encodeURIComponent(file)}`;
+  try {
+    const assets = (getCloudflareContext().env as unknown as { ASSETS?: { fetch: (r: Request) => Promise<Response> } }).ASSETS;
+    const res = assets ? await assets.fetch(new Request(url)) : await fetch(url);
+    if (!res.ok) return null;
+    const bytes = new Uint8Array(await res.arrayBuffer());
+    let bin = "";
+    for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+    return btoa(bin);
+  } catch {
+    return null;
+  }
+}
+
+/** Round 5b: show_me — the WebP (image content, never SVG), the box, a 15-minute annotated link, the live link. */
+async function showMe(id: Identity, viewer: Viewer, args: Record<string, unknown>, origin: string): Promise<{ result: ToolResult; status: number; target: string; note: string }> {
+  const hit: ShotHit | null = resolveShot(args, viewer);
+  if (!hit) {
+    return {
+      result: text("No screenshot for that yet (or it is a page you cannot open). Give the steps from how_to with their links instead — each link highlights the button on the live page.", true),
+      status: 404,
+      target: `show_me ${String(args.guide_id ?? args.path ?? args.label ?? "").slice(0, 80)}`,
+      note: "no shot",
+    };
+  }
+  let secret = "";
+  try {
+    secret = (getCloudflareContext().env as unknown as { SESSION_SECRET?: string }).SESSION_SECRET ?? "";
+  } catch {
+    /* scripts: no Worker env */
+  }
+  const link = secret ? await signShotLink(origin, hit, secret) : null;
+  const data = await shotImage(origin, hit.shot.file);
+  const meta = { type: "text" as const, text: JSON.stringify(showMeText(hit, origin, link)) };
+  return {
+    // The image block rides in content as MCP allows; nothing downstream reads it (show_me is never cached or structured).
+    result: { content: data ? [meta, { type: "image", data, mimeType: "image/webp" } as unknown as typeof meta] : [meta] },
+    status: 200,
+    target: `show_me ${hit.page} ${hit.label}`.slice(0, 200),
+    note: data ? "" : "image not loaded",
+  };
+}
+
 async function callTool(db: DB, id: Identity, name: string, args: Record<string, unknown>, origin: string, logs: McpCallRow[], defer?: (p: Promise<unknown>) => void): Promise<ToolResult> {
   const t0 = Date.now();
   let status = 200;
@@ -733,7 +783,19 @@ async function callTool(db: DB, id: Identity, name: string, args: Record<string,
       result = text(o.text, !o.ok);
     } else if (isHowtoTool(name)) {
       // Round 5: pure help — no Connect data; a question no guide answers is logged (note "no-guide").
-      const o = runHowtoTool({ viewer: await howtoViewer(db, id), origin }, name, args);
+      const o = runHowtoTool({ viewer: await howtoViewer(db, id), origin, hasShot }, name, args);
+      result = o.result;
+      status = o.status;
+      note = o.note;
+      target = o.target;
+    } else if (name === "explain_screen" || name === "where_is") {
+      const o = runScreenTool({ viewer: await howtoViewer(db, id), origin, hasShot }, name, args);
+      result = o?.result ?? text(`Unknown tool: ${name}`, true);
+      status = o?.status ?? 400;
+      note = o?.note ?? "";
+      target = o?.target ?? name;
+    } else if (name === "show_me") {
+      const o = await showMe(id, await howtoViewer(db, id), args, origin);
       result = o.result;
       status = o.status;
       note = o.note;

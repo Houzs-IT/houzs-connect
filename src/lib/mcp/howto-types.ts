@@ -229,3 +229,9 @@ export function connectLink(origin: string, page: string, highlight: string | nu
   const sep = page.includes("?") ? "&" : "?";
   return `${origin}${page}${sep}highlight=${encodeURIComponent(highlight)}`;
 }
+
+/**
+ * The page a guide step is photographed on (show_me). A Service step without its own page happens
+ * inside an open conversation, so it is looked up on "/inbox/:id".
+ */
+export const stepShotPage = (guidePage: string, step: { page: string | null }): string | null => step.page ?? (guidePage.startsWith("/inbox") ? "/inbox/:id" : null);

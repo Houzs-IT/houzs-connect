@@ -211,4 +211,79 @@ for (const g of HOWTO_GUIDES.filter((x) => /campaign|broadcast/.test(x.id) && x.
   assert(new Set(ref.ERRORS.map((e) => e.id)).size === ref.ERRORS.length, "error ids unique");
 }
 
+// ── round 5b: explain_screen / where_is / show_me ──
+{
+  const S = await import("../src/lib/mcp/howto-screen.ts");
+  const SH = await import("../src/lib/mcp/howto-shots.ts");
+  const { repoFileExists, repoFileSize } = await import("./lib/frontend-honesty.mjs");
+  const bad = [];
+  for (const sc of S.SCREENS) {
+    if (!routeExists(sc.path) || !T.routeOf(sc.path)) bad.push(`${sc.path}: not a page with a gate`);
+    for (const l of [sc.sidebar, ...sc.tabs, ...sc.actions.map((a) => a.label)]) if (!labelInSource(l)) bad.push(`${sc.path}: "${l}"`);
+  }
+  none(bad, "screen map: every page exists, every tab / button label exists in src/");
+
+  const allMods = [...ALL_MODULES];
+  const v = (role, modules = allMods) => ({ role, modules, caps: T.capsFor(role, []), company: "Demo Co" });
+  const ctx = (viewer) => ({ viewer, origin: "https://connect.example", hasShot: SH.hasShot });
+  const j = (o) => JSON.parse(o.result.content[0].text);
+  let x = j(S.runScreenTool(ctx(v("AGENT")), "where_is", { thing: "where do I assign a chat to someone" }));
+  assert(x.places[0].press === "Assign", `where_is assign → Assign (${x.places.map((p) => p.press)})`);
+  x = j(S.runScreenTool(ctx(v("AGENT")), "where_is", { thing: "overdue chats" }));
+  assert(x.places[0].press === "Overdue" && x.places[0].link.includes("highlight=Overdue"), "where_is overdue → the Overdue tab, highlighted");
+  x = j(S.runScreenTool(ctx(v("AGENT")), "explain_screen", { path: "https://connect.example/inbox/abc123" }));
+  assert(x.screen.path === "/inbox/:id", "explain_screen maps a conversation URL to the conversation screen");
+  x = j(S.runScreenTool(ctx(v("AGENT")), "explain_screen", { labels: ["Invite person", "Access requests"] }));
+  assert(x.screen.path === "/settings/team" && x.screen.canOpen === false && x.screen.note, "explain_screen by labels; Team & access closed to an agent");
+  assert(S.runScreenTool(ctx(v("AGENT")), "where_is", {}).status === 400, "where_is needs a thing");
+
+  // Screenshots: fresh, on disk, inside the picture, demo only.
+  const targets = SH.helpShotTargets();
+  const tByPage = new Map(targets.map((t) => [t.page, new Set(t.labels)]));
+  const sbad = [];
+  for (const [page, shot] of Object.entries(SH.SHOTS)) {
+    if (!tByPage.has(page)) sbad.push(`${page}: no longer a target page`);
+    if (!repoFileExists(`public/help-shots/${shot.file}`) || repoFileSize(`public/help-shots/${shot.file}`) < 2000) sbad.push(`${page}: ${shot.file} missing`);
+    if (!/\.webp$/.test(shot.file)) sbad.push(`${page}: not a WebP`);
+    for (const [label, [bx, by, bw, bh]] of Object.entries(shot.boxes)) {
+      if (!tByPage.get(page)?.has(label)) sbad.push(`${page}: stale box "${label}"`);
+      if (!labelInSource(label)) sbad.push(`${page}: "${label}" not in src/`);
+      if (bx < 0 || by < 0 || bw <= 0 || bh <= 0 || bx + bw > shot.w + 1 || by + bh > shot.h + 1) sbad.push(`${page}: box "${label}" outside the picture`);
+    }
+  }
+  none(sbad, "show_me boxes stay fresh (current pages and labels, files on disk, inside the picture)");
+  const shotPages = Object.keys(SH.SHOTS);
+  assert(shotPages.length >= 10, `screenshots captured for the main screens (${shotPages.length})`);
+  for (const must of [["/inbox", "Overdue"], ["/inbox/:id", "Assign"], ["/inbox/:id", "Resolve"], ["/settings/ai-connector", "AI Connector"]]) assert(SH.hasShot(must[0], must[1]), `a screenshot boxes "${must[1]}" on ${must[0]}`);
+
+  // show_me resolution follows the person's access.
+  const agent = v("AGENT");
+  let hit = SH.resolveShot({ guide_id: "assign-conversation", step: 2 }, agent);
+  assert(hit && hit.page === "/inbox/:id" && hit.label === "Assign", "show_me guide step → the Assign box in an open conversation");
+  hit = SH.resolveShot({ path: "/inbox", label: "Overdue" }, agent);
+  assert(hit && hit.label === "Overdue", "show_me path + label");
+  assert(SH.resolveShot({ path: "/settings/team", label: "Invite person" }, agent) === null, "show_me never shows a page the person cannot open");
+  assert(SH.resolveShot({ guide_id: "chat-review" }, agent) === null, "show_me hides supervisor-only guides from agents");
+  hit = SH.resolveShot({ label: "Assign" }, agent);
+  assert(hit && hit.label === "Assign", "show_me by label alone");
+  const t = SH.showMeText(hit, "https://connect.example", "https://connect.example/api/mcp/shot?x");
+  assert(t.box.imageWidth > 0 && t.note.includes("test data") && t.annotatedImage, "show_me text: box, test-data note, annotated link");
+
+  // The 15-minute link: signed, expires, the box comes from the data.
+  const link = await SH.signShotLink("https://connect.example", hit, "s3cret", 1_767_225_600_000);
+  const q = new URL(link).searchParams;
+  assert((await SH.verifyShotLink(q, "s3cret", 1_767_225_600_000 + 60_000)).label === "Assign", "a fresh shot link verifies");
+  assert((await SH.verifyShotLink(q, "s3cret", 1_767_225_600_000 + 16 * 60_000)) === "expired", "a shot link expires after 15 minutes");
+  assert((await SH.verifyShotLink(q, "other", 1_767_225_600_000)) === "invalid", "a shot link with the wrong key is refused");
+  const forged = new URLSearchParams(q);
+  forged.set("l", "Resolve");
+  assert((await SH.verifyShotLink(forged, "s3cret", 1_767_225_600_000)) === "invalid", "changing the label breaks the signature");
+  const html = SH.annotatedHtml(hit, "/help-shots/x.webp");
+  assert(!/<svg|<script/i.test(html) && html.includes("<img") && html.includes("test data"), "the annotated page is an <img> + CSS box, no SVG, no script");
+  assert(SH.SHOW_ME_TOOL.annotations.readOnlyHint === true, "show_me is read-only");
+  // Help data never names a real person: the demo seed only uses invented names.
+  const seed = (await import("node:fs")).readFileSync(new URL("./help-shots-demo.ts", import.meta.url), "utf8");
+  assert(!/@(gmail|houzscentury)\.com/.test(seed) && /\(demo\)/.test(seed), "the screenshot seed holds only invented demo people");
+}
+
 console.log(`smoke-mcp-howto: ${n} assertions passed (${HOWTO_GUIDES.length} guides, ${ref.GLOSSARY.length} terms, ${ref.ERRORS.length} errors)`);

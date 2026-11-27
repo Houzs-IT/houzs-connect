@@ -16,7 +16,7 @@
 // ---------------------------------------------------------------------------
 import { HOWTO_GUIDES } from "./howto-guides";
 import { ERRORS, GLOSSARY, MODULES, ONBOARDING } from "./howto-ref";
-import { blockedNote, canDoGuide, canOpenPage, connectLink, guideVisible, type HowtoGuide, type Viewer } from "./howto-types";
+import { blockedNote, canDoGuide, canOpenPage, connectLink, guideVisible, stepShotPage, type HowtoGuide, type Viewer } from "./howto-types";
 
 type ToolResult = { content: { type: "text"; text: string }[]; isError?: boolean };
 /** What a help tool hands back to server.ts: the result and the mcp_calls fields. */
@@ -117,7 +117,7 @@ export function guideView(g: HowtoGuide, ctx: HowtoCtx) {
       text: s.text,
       ...(s.page ? { link: connectLink(ctx.origin, s.page, s.highlight) ?? s.page } : {}),
       ...(s.highlight ? { press: s.highlight } : {}),
-      ...(s.page && ctx.hasShot?.(s.page, s.highlight) ? { showMe: { guide_id: g.id, step: i + 1 } } : {}),
+      ...(s.highlight && ctx.hasShot?.(stepShotPage(g.page, s) ?? "", s.highlight) ? { showMe: { guide_id: g.id, step: i + 1 } } : {}),
     })),
   };
 }
@@ -312,7 +312,7 @@ export function runHowtoTool(ctx: HowtoCtx, name: string, args: Record<string, u
 }
 
 /** The help part of the server instructions. */
-export const HOWTO_INSTRUCTIONS = `HELP (no Connect data, always available): "how do I / where do I / steps to ..." -> how_to {question}; give the steps in the person's language, keep the quoted button names in English as the screen shows them, and give each step's link (it highlights the button). If canDo is false, say what the note says. A guide with explainOnly is explained only — never offer to do it. Never invent a rule. "What is X for" -> module_overview; "what does X mean" -> glossary; an error message -> explain_error {text}; someone new -> onboarding {role}.`;
+export const HOWTO_INSTRUCTIONS = `HELP (no Connect data, always available): "how do I / where do I / steps to ..." -> how_to {question}; give the steps in the person's language, keep the quoted button names in English as the screen shows them, and give each step's link (it highlights the button). If canDo is false, say what the note says. A step with showMe has a screenshot: call show_me {guide_id, step} when the person wants to see where to click. A guide with explainOnly is explained only — never offer to do it. Never invent a rule. "What is X for" -> module_overview; "what does X mean" -> glossary; an error message -> explain_error {text}; someone new -> onboarding {role}; "what is this screen" -> explain_screen {path | labels}; "where do I find X" -> where_is {thing}.`;
 
 /** Ready-made prompts for the help tools. */
 export const HOWTO_PROMPTS = [
