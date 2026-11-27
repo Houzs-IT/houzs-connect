@@ -16,10 +16,8 @@ import { ensureAutomationRunColumns } from "@/db/ensure-automation-run";
 import { removeRepliedEnrollments } from "@/lib/drip";
 import { startRun, resumeRun, supersedeRuns } from "./engine";
 import {
-  DATE_PROPOSAL_AUTOMATIONS,
   DELIVERY_DATE_HISTORY_KEY,
-  appendDeliveryDate,
-  lastEntryMatches,
+  applyErpDateEffects,
   parseDeliveryDateHistory,
 } from "./delivery-history";
 import { getOrCreateConversation } from "@/lib/whatsapp/transport";
@@ -104,21 +102,26 @@ export async function handleErpWebhook(payload: ErpWebhookPayload) {
   });
   const prevAttrs = attrs(existing?.attributes);
   const mergedAttrs: Record<string, unknown> = { ...prevAttrs, ...(payload.attributes ?? {}) };
-  // Record an ERP-proposed delivery/service date into the durable history, but
-  // ONLY when this webhook is an opener that actually asks the customer to
-  // confirm/amend a date (DATE_PROPOSAL_AUTOMATIONS). Reminders, driver events
-  // and the periodic `__erp_contact_sync__` carry the current date along too, and
-  // recording those would fill the history with dates the customer was never
-  // asked about. Deduped against the last entry so a repeat opener is a no-op.
-  const erpDate = payload.attributes?.delivery_date_1?.trim();
-  if (erpDate && DATE_PROPOSAL_AUTOMATIONS.has(payload.automation ?? "")) {
-    const history = parseDeliveryDateHistory(
+  // Delivery-date side effects of this webhook (see applyErpDateEffects):
+  //  - record the ERP-proposed date into the durable history, but ONLY for an
+  //    opener that asks the customer to confirm/amend (DATE_PROPOSAL_AUTOMATIONS);
+  //    reminders, driver events and `__erp_contact_sync__` just carry the date
+  //    along and must not be recorded. Deduped so a repeat opener is a no-op.
+  //  - for Postpone, override {client_delivery_date} (the "original" date it shows)
+  //    with the last date the customer was actually told, from that history: the
+  //    ERP's single Delivery Date column already holds the NEW date by Send Now
+  //    time, so the old date it injects is stale or the wrong column (HC-SO-003885
+  //    sent the Sales Exemption Expiry Date). Connect's history — behind the inbox
+  //    "Proposed Dates" panel — is the only reliable record of it.
+  const dateEffects = applyErpDateEffects({
+    automation: payload.automation ?? "",
+    attributes: payload.attributes,
+    history: parseDeliveryDateHistory(
       (existing?.attributes as Record<string, unknown> | null)?.[DELIVERY_DATE_HISTORY_KEY]
-    );
-    if (!lastEntryMatches(history, erpDate, "erp")) {
-      mergedAttrs[DELIVERY_DATE_HISTORY_KEY] = appendDeliveryDate(history, erpDate, "erp");
-    }
-  }
+    ),
+  });
+  if (dateEffects.clientDeliveryDate) mergedAttrs.client_delivery_date = dateEffects.clientDeliveryDate;
+  if (dateEffects.history) mergedAttrs[DELIVERY_DATE_HISTORY_KEY] = dateEffects.history;
   const contact = existing
     ? (
         await db
