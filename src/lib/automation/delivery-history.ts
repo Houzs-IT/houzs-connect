@@ -15,6 +15,9 @@ export const DELIVERY_DATE_HISTORY_KEY = "delivery_date_history";
 /** Attribute keys whose non-empty writes count as a customer-proposed date. */
 export const CUSTOMER_DATE_KEYS = new Set(["amended_delivery_date"]);
 
+/** The ERP automation name for an ERP-initiated postponement (postpone.ts). */
+export const POSTPONE_AUTOMATION = "Postpone";
+
 /**
  * ERP automations whose webhook actually PROPOSES a date to the customer — the
  * openers that send a "Confirm Date / Amend Date" message. Only these count as
@@ -22,11 +25,18 @@ export const CUSTOMER_DATE_KEYS = new Set(["amended_delivery_date"]);
  * `__erp_contact_sync__`) merely carries the current date along and must not be
  * recorded, or the history fills with dates the customer was never asked about.
  * Names must match the ERP's automation names (connect.automation.name).
+ *
+ * The confirm/amend openers carry the proposed date in `delivery_date_1`;
+ * Postpone carries its NEW date in `new_delivery_date` instead (applyErpDateEffects
+ * picks the right key). Postpone is included so its new date is recorded too — and
+ * because the history is the only reliable record of the date the customer was last
+ * told, Postpone also reads it back for the "original date" it shows.
  */
 export const DATE_PROPOSAL_AUTOMATIONS = new Set([
   "New Delivery Follow-up",
   "New Amend",
   "Service Arrangement",
+  POSTPONE_AUTOMATION,
 ]);
 
 /** The last entry already records this date+source — avoids consecutive repeats. */
@@ -75,4 +85,56 @@ export function appendDeliveryDate(
   source: DeliveryDateEntry["source"]
 ): DeliveryDateEntry[] {
   return [...history, { date, source, at: new Date().toISOString() }];
+}
+
+/**
+ * The last date the ERP scheduled and announced to the customer (source "erp").
+ * Postpone shows this as its "original" date — the date WE committed to — rather
+ * than a customer's un-accepted amend REQUEST (which also lands in the history, as
+ * source "customer") or the ERP's injected value (already overwritten with the new
+ * date by Send Now time). Undefined when the history holds no ERP date yet.
+ */
+export function lastScheduledDate(history: DeliveryDateEntry[]): string | undefined {
+  for (let i = history.length - 1; i >= 0; i--) {
+    if (history[i].source === "erp") return history[i].date;
+  }
+  return undefined;
+}
+
+/**
+ * The delivery-date side effects of one ERP webhook, computed from the contact's
+ * current history. Pure (no DB, no clock beyond appendDeliveryDate's stamp) so the
+ * rule can be reasoned about and tested on its own; dispatch.ts merges the result
+ * onto the contact.
+ *
+ *  - `clientDeliveryDate` — set ONLY for Postpone: the original date to show, taken
+ *    from the history's last ERP-scheduled entry rather than the ERP's injected
+ *    (unreliable) `client_delivery_date`. Absent when the history holds no ERP date
+ *    (dispatch then keeps whatever the ERP sent, the old behaviour).
+ *  - `history` — the new history after recording this webhook's proposed date, or
+ *    absent when nothing is recorded (not a proposal opener, no date, or a repeat
+ *    of the last entry). The confirm/amend openers propose in `delivery_date_1`;
+ *    Postpone proposes its new date in `new_delivery_date`.
+ */
+export function applyErpDateEffects(args: {
+  automation: string;
+  attributes: Record<string, string> | undefined;
+  history: DeliveryDateEntry[];
+}): { clientDeliveryDate?: string; history?: DeliveryDateEntry[] } {
+  const { automation, attributes, history } = args;
+  const out: { clientDeliveryDate?: string; history?: DeliveryDateEntry[] } = {};
+
+  if (automation === POSTPONE_AUTOMATION) {
+    const original = lastScheduledDate(history);
+    if (original) out.clientDeliveryDate = original;
+  }
+
+  const proposed = (
+    automation === POSTPONE_AUTOMATION ? attributes?.new_delivery_date : attributes?.delivery_date_1
+  )?.trim();
+  if (proposed && DATE_PROPOSAL_AUTOMATIONS.has(automation) && !lastEntryMatches(history, proposed, "erp")) {
+    out.history = appendDeliveryDate(history, proposed, "erp");
+  }
+
+  return out;
 }
