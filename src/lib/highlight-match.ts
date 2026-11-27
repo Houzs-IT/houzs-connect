@@ -33,6 +33,13 @@ const ownText = (el: Element): string => {
   return el.textContent ?? "";
 };
 
+/** Only the element's direct text nodes: a tab "Overdue" with a count badge child still reads "Overdue". */
+const directText = (el: Element): string =>
+  Array.from(el.childNodes)
+    .filter((n) => n.nodeType === 3)
+    .map((n) => n.textContent ?? "")
+    .join(" ");
+
 const matches = (candidate: string, want: string): boolean => {
   if (!candidate) return false;
   return normLabel(candidate) === normLabel(want) || tight(candidate) === tight(want);
@@ -51,7 +58,7 @@ export function findHighlightTarget(root: ParentNode, labels: string | readonly 
   const all = shown.some(laidOut) ? shown.filter(laidOut) : shown;
   for (const label of wants) {
     const byAttr = all.find((el) => ["aria-label", "title", "placeholder"].some((a) => matches(el.getAttribute(a) ?? "", label)));
-    const byText = all.filter((el) => matches(ownText(el), label));
+    const byText = all.filter((el) => matches(ownText(el), label) || matches(directText(el), label));
     const deepest = byText.filter((el) => !byText.some((o) => o !== el && el.contains(o)));
     const first: Element | undefined = deepest.length ? deepest[0] : undefined;
     const pick = deepest.find((el) => el.closest(INTERACTIVE)) ?? first ?? byAttr;
