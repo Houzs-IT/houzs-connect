@@ -5,6 +5,8 @@ import { webhookEvent } from "@/db/schema";
 import { resumeDueDelays, sendDueScheduledCampaigns } from "@/lib/automation/sweeper";
 import { sendWhatsAppUsageToHub } from "@/lib/billing-hub";
 import { advanceDueDripEnrollments } from "@/lib/drip";
+import { originFor } from "@/lib/mcp/core";
+import { runProactiveTick } from "@/lib/mcp/proactive-run";
 import { sweepPendingPaymentPushes } from "@/lib/sync/erp-payments";
 
 /**
@@ -15,7 +17,9 @@ import { sweepPendingPaymentPushes } from "@/lib/sync/erp-payments";
  * request context where getDb() and secrets behave exactly as in any request (a
  * Worker scheduled() handler cannot call getDb() directly). It runs the time-based
  * sweeps: resume Delay runs that are due, send scheduled campaigns that are
- * due, and once a day send the WhatsApp spend per company to the IT Hub. Each sweep is isolated so one failing does not block the others, and a
+ * due, once a day send the WhatsApp spend per company to the IT Hub, and the AI
+ * Connector's morning briefs / urgent alerts (round 4d, lib/mcp/proactive-run.ts;
+ * skipped entirely while email is not configured). Each sweep is isolated so one failing does not block the others, and a
  * summary is written to System Logs (webhook_event, source "cron").
  *
  * Guard: header `x-cron-key` must equal env.CRON_SECRET. Unset => 503 (fail
@@ -67,6 +71,14 @@ export async function POST(req: NextRequest) {
     errors.hubUsage = e instanceof Error ? e.message : String(e);
   }
 
+  // AI Connector round 4d: morning briefs + urgent alerts, each read AS the person.
+  // Bounded per tick; does nothing while RESEND_API_KEY / BRIEF_MAIL_FROM are unset.
+  try {
+    summary.proactive = await runProactiveTick(getDb(), env, originFor(req.headers.get("host"), req.url));
+  } catch (e) {
+    errors.proactive = e instanceof Error ? e.message : String(e);
+  }
+
   const hadError = Object.keys(errors).length > 0;
   // One System Logs row per tick that actually did something or failed — a tick
   // that resumed nothing and sent nothing writes nothing, so the log stays readable.
@@ -75,6 +87,9 @@ export async function POST(req: NextRequest) {
     (summary.campaigns as { campaigns?: number })?.campaigns ||
     (summary.drip as { sent?: number })?.sent ||
     (summary.erpPayments as { attempted?: number })?.attempted ||
+    (summary.proactive as { briefsSent?: number })?.briefsSent ||
+    (summary.proactive as { briefsFailed?: number })?.briefsFailed ||
+    (summary.proactive as { alertEmails?: number })?.alertEmails ||
     hadError;
   if (didWork) {
     try {

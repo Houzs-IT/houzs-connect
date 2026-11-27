@@ -576,6 +576,82 @@ for (const pth of ["/inbox/waiting", "/dashboard/agents", "/contacts/gaps"]) ass
 const live = await sql.unsafe(`select count(*)::int as n from connect.mcp_tokens where client_id = '${core.LEAK_CLIENT_ID}' and revoked_at is null`);
 assert(live[0].n === 0, "the leak-check token is revoked afterwards");
 
+// ── Round 4d: morning brief + urgent alerts, built AS the person (owner 2026-11-26) ──
+// A fake sender captures each email: nothing leaves this machine.
+{
+  const P = await import("../src/lib/mcp/proactive.ts");
+  const ps = await import("../src/lib/mcp/proactive-store.ts");
+  const pr = await import("../src/lib/mcp/proactive-run.ts");
+  const outbox = [];
+  const fakeSend = async (m) => {
+    outbox.push(m);
+    return { ok: true, id: `fake_${outbox.length}` };
+  };
+  await ageCalls(); // the brief runs tools through the connector: keep this script's burst out of the rate limit
+  server.clearAnswerCache();
+  const MAIL_ON = { RESEND_API_KEY: "test-key", BRIEF_MAIL_FROM: "Houzs Connect <brief@example.com>" };
+  // Agent A has a chat assigned to them, waiting 2 hours.
+  await sql.unsafe(`insert into connect.conversation (id, channel_id, contact_id, assigned_department_id, assigned_agent_id, last_message_at) values ('${id("v9")}', '${id("ch")}', '${id("c2")}', '${id("d1")}', '${id("a")}', now() - interval '2 hours')`);
+  await sql.unsafe(`insert into connect.message (id, conversation_id, direction, body, created_at) values ('${id("m9")}', '${id("v9")}', 'IN', 'Call me at 60122222222 about my order', now() - interval '2 hours')`);
+
+  assert(!(await ps.activeSubscribers(appDb)).some((s) => s.memberId === id("a")), "nobody gets email by default");
+  assert((await pr.runProactiveTick(appDb, {}, ORIGIN)).skipped === "email not configured", "no key → the tick skips");
+
+  await ps.saveSubscription(appDb, { memberId: id("a"), briefEnabled: true, briefTime: "08:00", briefDays: "daily", alertsEnabled: true }, agentA.email);
+  const subsA = (await ps.activeSubscribers(appDb)).find((s) => s.memberId === id("a"));
+  assert(subsA && subsA.role === "AGENT" && subsA.briefEnabled && subsA.alertsEnabled, "an approved agent who opted in is a subscriber");
+
+  // 10:00 Malaysia time today: the 08:00 brief is due and alerts are checked.
+  const at = new Date(`${r3.myToday()}T02:00:00Z`);
+  const t1 = await pr.runProactiveTick(appDb, MAIL_ON, ORIGIN, at, fakeSend);
+  assert(t1.briefsSent === 1 && t1.alertEmails === 1, `tick: one brief + one alert email (${JSON.stringify(t1)})`);
+  const briefMail = outbox.find((m) => m.subject.includes("morning brief"));
+  const alertMail = outbox.find((m) => m.subject.includes("alert"));
+  assert(briefMail && briefMail.to === agentA.email.toLowerCase() && briefMail.html.includes("/api/mcp/unsubscribe?t="), "brief to the person's own email, with an unsubscribe link");
+  assert(alertMail && alertMail.html.includes(`/inbox/open/${id("v9")}`) && alertMail.html.includes("Your chats waiting"), "the agent's alert is their own waiting chat");
+  assert(!alertMail.html.includes("Customers waiting too long"), "an agent gets no supervisor alert");
+  for (const m of outbox) assert(!m.html.includes("60111111111") && !m.html.includes("60122222222") && !m.text.includes("60122222222"), "no phone number in any email");
+  const liveB = await sql.unsafe(`select count(*)::int as n from connect.mcp_tokens where client_id = '${core.PROACTIVE_CLIENT_ID}' and revoked_at is null`);
+  assert(liveB[0].n === 0, "the brief's short-lived tokens are revoked afterwards");
+  const briefCalls = await sql.unsafe(`select tool from connect.mcp_calls where client_id = '${core.PROACTIVE_CLIENT_ID}' and member_id = '${id("a")}'`);
+  assert(briefCalls.some((c) => c.tool === "daily_brief"), "the brief ran daily_brief through the connector, logged as the person");
+  const sends = await sql.unsafe(`select * from connect.mcp_proactive_sends where member_id = '${id("a")}' order by created_at`);
+  assert(sends.length === 2 && sends.every((s) => s.status === "sent" && s.provider_id), "each email is logged");
+  assert(!Object.keys(sends[0]).some((k) => /html|body|text|subject/.test(k)), "the send log has no body");
+  assert(!(await admin.myConnector(appDb, agentA)).apps.some((a) => a.app.includes("brief")), "the brief's token is not shown as a connected app");
+
+  // Idempotent: the same tick again sends nothing (brief claimed today; the alert key too).
+  const t2 = await pr.runProactiveTick(appDb, MAIL_ON, ORIGIN, new Date(at.getTime() + 31 * 60_000), fakeSend);
+  assert(t2.briefsSent === 0 && t2.alertEmails === 0 && outbox.length === 2, `second tick sends nothing new (${JSON.stringify(t2)})`);
+
+  // Preview: built as the person, not sent.
+  const pv = await pr.previewBrief(appDb, { memberId: id("a"), email: agentA.email, name: agentA.name, company: "Smoke Co" }, ORIGIN, true);
+  assert(pv.ok && pv.html.includes("Monday: data to clean up") && outbox.length === 2, "preview built as the person, with the data gaps, nothing sent");
+  // Test brief: rate-limited to one per 10 minutes.
+  const me = { memberId: id("a"), email: agentA.email, name: agentA.name, company: "Smoke Co" };
+  const tb1 = await pr.sendTestBrief(appDb, MAIL_ON, me, ORIGIN, fakeSend);
+  const tb2 = await pr.sendTestBrief(appDb, MAIL_ON, me, ORIGIN, fakeSend);
+  assert(tb1.ok && !tb2.ok && tb2.error.includes("10 minutes") && outbox.length === 3 && outbox[2].subject.startsWith("[Test] "), "test brief to self, rate-limited");
+  assert(!(await pr.sendTestBrief(appDb, {}, me, ORIGIN, fakeSend)).ok, "no key → no test brief");
+
+  // A person whose AI Connector access is removed gets nothing, even if still opted in.
+  await ps.saveSubscription(appDb, { memberId: id("b"), briefEnabled: true, briefTime: "08:00", briefDays: "daily", alertsEnabled: false }, `${tag}-b@example.com`);
+  assert((await ps.activeSubscribers(appDb)).some((s) => s.memberId === id("b")), "approved B opted in");
+  await sql.unsafe(`delete from connect.mcp_access where email = '${tag}-b@example.com'`);
+  assert(!(await ps.activeSubscribers(appDb)).some((s) => s.memberId === id("b")), "access removed → no longer a subscriber");
+  await store.grantAccess(appDb, `${tag}-b@example.com`, owner.id);
+
+  // Unsubscribe link: brief and alerts off.
+  const ut = await ps.unsubscribeToken(appDb, id("a"));
+  assert(ps.UNSUB_TOKEN_RE.test(ut), "unsubscribe token made on first save");
+  assert((await ps.unsubscribeWithToken(appDb, "x".repeat(32))) === null, "an unknown token does nothing");
+  assert((await ps.unsubscribeWithToken(appDb, ut))?.memberId === id("a"), "the link unsubscribes its holder");
+  const after = await ps.getSubscription(appDb, id("a"));
+  assert(after && !after.briefEnabled && !after.alertsEnabled, "brief and alerts both off");
+  assert(!(await ps.activeSubscribers(appDb)).some((s) => s.memberId === id("a")), "an unsubscribed person is not a subscriber");
+  void P;
+}
+
 // ── 7. Disconnect + access removal ──
 const mine = await admin.myConnector(appDb, agentA);
 assert(mine.allowed && mine.apps.length >= 1, "my connected apps listed");

@@ -481,17 +481,18 @@ assert(srv.toolsFor(["inbox"], "AGENT").some((t) => t.name === "waiting_now") &&
 // Round 4c P1: a composite tool is listed only when at least one of its modules is on (each part still keeps its own gate).
 assert(!srv.toolsFor([], "AGENT").some((t) => t.name === "data_gaps") && srv.toolsFor(["contacts"], "AGENT").some((t) => t.name === "data_gaps"), "data_gaps needs contacts or inbox");
 
-// ── Runtime DDL == migrations 0027 + 0028 ──
+// ── Runtime DDL == migrations 0027 + 0028 + 0029 ──
 const { MCP_DDL } = await import("../src/db/ensure-mcp.ts");
 const CR = String.fromCharCode(13);
-const mig = ["0027_mcp_connector", "0028_mcp_actions"].map((f) => readFileSync(resolve(root, `src/db/migrations/${f}.sql`), "utf8").split(CR).join("")).join(String.fromCharCode(10));
-for (const t of ["mcp_access", "mcp_access_requests", "mcp_oauth_clients", "mcp_auth_requests", "mcp_oauth_codes", "mcp_tokens", "mcp_calls", "mcp_settings", "mcp_pending_actions"]) {
+const mig = ["0027_mcp_connector", "0028_mcp_actions", "0029_mcp_proactive"].map((f) => readFileSync(resolve(root, `src/db/migrations/${f}.sql`), "utf8").split(CR).join("")).join(String.fromCharCode(10));
+for (const t of ["mcp_access", "mcp_access_requests", "mcp_oauth_clients", "mcp_auth_requests", "mcp_oauth_codes", "mcp_tokens", "mcp_calls", "mcp_settings", "mcp_pending_actions", "mcp_brief_subscriptions", "mcp_proactive_keys", "mcp_proactive_sends"]) {
   assert(MCP_DDL.some((s) => s.startsWith(`CREATE TABLE IF NOT EXISTS "connect"."${t}"`)), `ensure creates ${t}`);
 }
 for (const s of MCP_DDL) assert(mig.includes(s), `migration carries: ${s.slice(0, 60)}`);
 const journal = JSON.parse(readFileSync(resolve(root, "src/db/migrations/meta/_journal.json"), "utf8"));
 assert(journal.entries.some((e) => e.tag === "0027_mcp_connector"), "0027 is in the journal");
 assert(journal.entries.some((e) => e.tag === "0028_mcp_actions"), "0028 is in the journal");
+assert(journal.entries.some((e) => e.tag === "0029_mcp_proactive"), "0029 is in the journal");
 
 // ── Read-only by construction: nothing reachable from the MCP handlers imports a "use server" module ──
 function resolveImport(from, spec) {

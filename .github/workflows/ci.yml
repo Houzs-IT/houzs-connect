@@ -66,6 +66,13 @@ jobs:
       - name: AI Connector actions smoke test (pure, no DB)
         run: node scripts/smoke-mcp-actions.mjs
 
+      # AI Connector round 4d: opt-in off by default, brief due times, bounded
+      # ticks, alerts per role (agents never get supervisor alerts), the once-a-day
+      # debounce, the email HTML (escaped, no phone numbers, unsubscribe link) and
+      # the mail switch (nothing is sent without RESEND_API_KEY or on a preview copy).
+      - name: AI Connector proactive smoke test (pure, no DB, no network)
+        run: node scripts/smoke-mcp-proactive.mjs
+
       # AI Connector end to end against the real Postgres: OAuth → token → MCP
       # tools, own visibility + modules, blocked paths, refresh, disconnect, leak check.
       - name: AI Connector smoke test (real Postgres)

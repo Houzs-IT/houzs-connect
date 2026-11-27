@@ -204,6 +204,13 @@
       "when": 1793000000000,
       "tag": "0028_mcp_actions",
       "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1793100000000,
+      "tag": "0029_mcp_proactive",
+      "breakpoints": true
     }
   ]
 }

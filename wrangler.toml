@@ -97,6 +97,12 @@ RECEIPT_AI = "on"
 # values as CONNECT_LOGIN_KEY on each ERP (CONNECT-0003).
 HOOKKA_LOGIN_URL = "https://erp.hookka.com"
 CONTS_LOGIN_URL = "https://erp.theconts.com"
+# AI Connector round 4d: the morning brief / urgent alerts are emailed from this
+# address through Resend (src/lib/mail.ts), the same provider + verified domain
+# as the ERP Mail Center and HRIS. Nothing is sent until the RESEND_API_KEY
+# secret is also on this Worker. Not repeated under [env.staging]: staging never
+# emails.
+BRIEF_MAIL_FROM = "Houzs Connect <hello@houzscentury.com>"
 
 [observability]
 enabled = true

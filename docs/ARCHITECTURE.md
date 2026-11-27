@@ -76,7 +76,8 @@ Connector").
 | `src/lib/mcp/actions.ts`, `write-actions.ts`, `write-exec.ts` | round 4b: switches + single-use proposals (tables `mcp_settings`, `mcp_pending_actions`, migration 0028), propose → confirm with the write fence, and the real I/O |
 | `src/lib/inbox-writes.ts` | the inbox's write cores (reply, internal note, assign, status, Remarks) shared by the server actions and the connector's confirmed actions — one write path |
 | `src/lib/mcp/core.ts`, `store.ts`, `oauth.ts`, `admin.ts` | pure helpers, tables, OAuth, admin page (incl. the AI actions switches) + leak check |
-| `scripts/smoke-mcp.mjs`, `scripts/smoke-mcp-actions.mjs`, `scripts/smoke-mcp-db.mjs` | pure, pure (4b / 4c with fakes) and real-Postgres tests (CI) |
+| `src/lib/mcp/proactive.ts`, `proactive-store.ts`, `proactive-run.ts`, `src/lib/mail.ts` | round 4d: morning brief + urgent alerts — pure logic + the ONE threshold config (`PROACTIVE_CONFIG`), tables (`mcp_brief_subscriptions`, `mcp_proactive_keys`, `mcp_proactive_sends`, migration 0029), the tick (run from `/api/cron`, each person read AS themselves with a short-lived token), Resend sender (off without `RESEND_API_KEY`); unsubscribe page `src/app/api/mcp/unsubscribe` |
+| `scripts/smoke-mcp.mjs`, `scripts/smoke-mcp-actions.mjs`, `scripts/smoke-mcp-proactive.mjs`, `scripts/smoke-mcp-db.mjs` | pure, pure (4b / 4c with fakes), pure (4d) and real-Postgres tests (CI) |
 
 ## 7. Build phases
 

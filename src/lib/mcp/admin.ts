@@ -3,7 +3,7 @@
 import { sql } from "drizzle-orm";
 import type { DB } from "@/db/client";
 import { ensureAccessTables } from "@/db/ensure-access";
-import { LEAK_CLIENT_ID, SECRET_KEY, SENSITIVE_KEY, appLabel, isMcpAdminRole, jsonKeys } from "./core";
+import { INTERNAL_CLIENT_IDS, LEAK_CLIENT_ID, SECRET_KEY, SENSITIVE_KEY, appLabel, isMcpAdminRole, jsonKeys } from "./core";
 import { listEndpointPaths } from "./reads";
 import { EXPORT_ROW_CAP, EXPORT_TTL_MS, RATE_LIMITS } from "./round3";
 import { mcpIdentity, readEndpoint } from "./server";
@@ -35,7 +35,7 @@ export async function myConnector(db: DB, me: { email: string; role: string }): 
     q(db, sql`
       select t.id, t.created_at, t.last_used_at, c.client_name
       from connect.mcp_tokens t left join connect.mcp_oauth_clients c on c.client_id = t.client_id
-      where t.email = ${email} and t.revoked_at is null and t.refresh_expires_at > now() and t.client_id <> ${LEAK_CLIENT_ID}
+      where t.email = ${email} and t.revoked_at is null and t.refresh_expires_at > now() and t.client_id not in (${sql.join(INTERNAL_CLIENT_IDS.map((c) => sql`${c}`), sql`, `)})
       order by t.created_at desc
     `),
   ]);
@@ -66,7 +66,7 @@ export async function adminOverview(db: DB): Promise<AdminOverview> {
     q(db, sql`select
       (select count(*)::int from connect.mcp_calls where created_at > now() - interval '24 hours') as calls,
       (select count(*)::int from connect.mcp_calls where created_at > now() - interval '24 hours' and not ok) as refused,
-      (select count(distinct email)::int from connect.mcp_tokens where revoked_at is null and refresh_expires_at > now() and client_id <> ${LEAK_CLIENT_ID}) as people,
+      (select count(distinct email)::int from connect.mcp_tokens where revoked_at is null and refresh_expires_at > now() and client_id not in (${sql.join(INTERNAL_CLIENT_IDS.map((c) => sql`${c}`), sql`, `)})) as people,
       (select count(*)::int from connect.mcp_access_requests where status = 'pending') as waiting`),
     q(db, sql`
       select r.id, r.email, r.name, r.reason, r.created_at, co.name as company
@@ -79,7 +79,7 @@ export async function adminOverview(db: DB): Promise<AdminOverview> {
       left join connect.mcp_oauth_clients c on c.client_id = t.client_id
       left join connect.member m on m.id = t.member_id
       left join connect.company co on co.id = m.company_id
-      where t.revoked_at is null and t.refresh_expires_at > now() and t.client_id <> ${LEAK_CLIENT_ID}
+      where t.revoked_at is null and t.refresh_expires_at > now() and t.client_id not in (${sql.join(INTERNAL_CLIENT_IDS.map((c) => sql`${c}`), sql`, `)})
       order by t.last_used_at desc nulls last, t.created_at desc
     `),
     q(db, sql`select x.email, x.approved_at, ${NAME_OF} as name from connect.mcp_access x where now() is not null order by 3, 1`),
