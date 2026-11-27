@@ -290,6 +290,25 @@ export function AiConnectorClient({
         </SetCard>
       )}
 
+      {/* Admin: round 5 gap log — help questions no guide answers yet */}
+      {o && (
+        <SetCard icon="?" tone="orange" title="Questions with no guide yet" sub="What people asked the AI's help (how to, glossary, errors) that no guide answered, last 30 days. Numbers and emails are removed.">
+          {o.gaps.length === 0 && <div className={empty}>None yet.</div>}
+          {o.gaps.length > 0 && (
+            <div className="max-h-[320px] overflow-auto border-t border-[var(--color-border-subtle)]">
+              {o.gaps.map((g) => (
+                <div key={`${g.tool}:${g.question}`} className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5 border-b border-[var(--color-border-subtle)] px-4 py-2 text-[12.5px] last:border-b-0">
+                  <span className="w-[110px] shrink-0 text-[var(--color-faint)]">{when(g.lastAt)}</span>
+                  <span className="shrink-0 font-code text-[12px] text-[var(--color-muted)]">{g.tool}</span>
+                  <span className="min-w-0 flex-1 break-words text-[var(--color-ink)]">{g.question}</span>
+                  <span className="shrink-0 rounded-full bg-[var(--color-surface-2)] px-2 py-px text-[10.5px] font-semibold text-[var(--color-muted)]">×{g.times}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </SetCard>
+      )}
+
       {/* Admin: leak check */}
       {o && (
         <SetCard

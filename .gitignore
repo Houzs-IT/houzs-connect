@@ -55,3 +55,7 @@ dev.db-journal
 
 # one-time CF token handoff (never committed)
 _cf-token.txt
+
+# AI Connector help-shot capture: tools + throwaway DB (scripts/capture-help-shots.mjs)
+.verify/
+scripts/.help-shot-targets-*.ts

@@ -16,6 +16,7 @@
     "db:studio": "node node_modules/drizzle-kit/bin.cjs studio",
     "db:seed": "node node_modules/tsx/dist/cli.mjs scripts/seed.ts",
     "db:seed:flows": "node node_modules/tsx/dist/cli.mjs scripts/seed-flows.ts",
+    "capture:help-shots": "node scripts/capture-help-shots.mjs",
     "staging:setup": "node node_modules/tsx/dist/cli.mjs scripts/staging-setup.ts"
   },
   "dependencies": {

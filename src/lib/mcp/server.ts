@@ -30,7 +30,7 @@
 // worked out once per request; the call log is one insert per request, written
 // after the answer (waitUntil) instead of before it.
 
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import type { DB } from "@/db/client";
 import { member } from "@/db/schema";
 import { bypassReadCache } from "@/db/fresh";
@@ -63,6 +63,11 @@ import { buildXlsx } from "./xlsx";
 import { ACTION_TTL_MS, ACTIONS_PER_DAY, pgActionStore, readSwitches, WRITE_KINDS, WRITE_LABELS, type Switches, type WriteKind } from "./actions";
 import { cancelWrite, confirmWrite, KIND_MODULES, proposeWrite, type WriteDeps } from "./write-actions";
 import { connectExec } from "./write-exec";
+import { HOWTO_INSTRUCTIONS, HOWTO_PROMPT_TOOL, HOWTO_PROMPTS, HOWTO_TOOLS, howtoPromptText, isHowtoTool, runHowtoTool } from "./howto";
+import { capsFor, type Viewer } from "./howto-types";
+import { runScreenTool, SCREEN_TOOLS } from "./howto-screen";
+import { hasShot, resolveShot, SHOW_ME_TOOL, showMeText, signShotLink, type ShotHit } from "./howto-shots";
+import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { AnswerCache, CACHED_TOOLS, parseAnswer, PROMPT_TOOL, QUICK_OUTPUT_SCHEMA, ROLE_PROMPTS, rolePromptText, STRUCTURED_TOOLS, withLinks } from "./round4c";
 
 export const SERVER_INFO = { name: "houzs-connect", title: "Houzs Connect", version: "1.0.0" };
@@ -95,7 +100,8 @@ A field missing from a reply means it is empty. Times are UTC ISO unless a reply
 If a call says "Not available to your role", tell the person they do not have access to that part of Houzs Connect.
 Message templates live in Settings, which the connector never reads.
 Each person may make ${RATE_LIMITS.perMinute} tool calls a minute and ${RATE_LIMITS.perDay} a day; over that a call says so — wait instead of retrying at once.
-ACTIONS (only the ones the admin switched on are listed): propose_chat_reply (a WhatsApp reply — it SENDS TO THE CUSTOMER), propose_conversation_assign (assign / reassign / resolve a chat), propose_contact_note (a line in a contact's Remarks, or a staff-only note on a chat). They do NOTHING yet — they return a summary and a confirmationId. Show the person that summary word for word and ask them to confirm. Only call confirm_action after they explicitly say yes; if they say no or want changes, call cancel_action (and propose again). Never confirm on your own, never confirm something the person has not seen. A confirmation is single use and expires after ${ACTION_TTL_MS / 60_000} minutes; each person may confirm ${ACTIONS_PER_DAY} actions a day. Connect's own rules still apply: a typed reply only inside the 24-hour window (otherwise a template is sent from the inbox), only chats this person can see. Nothing else can be changed: no campaigns, broadcasts, deletes or contact imports.`;
+ACTIONS (only the ones the admin switched on are listed): propose_chat_reply (a WhatsApp reply — it SENDS TO THE CUSTOMER), propose_conversation_assign (assign / reassign / resolve a chat), propose_contact_note (a line in a contact's Remarks, or a staff-only note on a chat). They do NOTHING yet — they return a summary and a confirmationId. Show the person that summary word for word and ask them to confirm. Only call confirm_action after they explicitly say yes; if they say no or want changes, call cancel_action (and propose again). Never confirm on your own, never confirm something the person has not seen. A confirmation is single use and expires after ${ACTION_TTL_MS / 60_000} minutes; each person may confirm ${ACTIONS_PER_DAY} actions a day. Connect's own rules still apply: a typed reply only inside the 24-hour window (otherwise a template is sent from the inbox), only chats this person can see. Nothing else can be changed: no campaigns, broadcasts, deletes or contact imports.
+${HOWTO_INSTRUCTIONS}`;
 
 const RO = { readOnlyHint: true, destructiveHint: false, openWorldHint: false };
 const NO_ARGS = { type: "object", properties: {}, additionalProperties: false };
@@ -280,6 +286,10 @@ export const TOOLS: ToolDef[] = [
     inputSchema: { type: "object", properties: { id: { type: "string", description: "An id from search" } }, required: ["id"], additionalProperties: false },
     annotations: RO,
   },
+  // Round 5: process help — no Connect data, every person (canDo follows their own access).
+  ...HOWTO_TOOLS.map((t) => ({ ...t }) as ToolDef),
+  ...SCREEN_TOOLS.map((t) => ({ ...t }) as ToolDef),
+  { ...SHOW_ME_TOOL } as ToolDef,
   { name: "whoami", title: "Who am I connected as", description: "The Houzs Connect account this connection uses: name, company, role and which modules it can read.", inputSchema: NO_ARGS, annotations: RO },
   { name: "list_modules", title: "List modules", description: "The Houzs Connect modules this person can read, with how many read endpoints each has.", inputSchema: NO_ARGS, annotations: RO },
   {
@@ -658,6 +668,63 @@ async function fetchRecord(db: DB, id: Identity, rawId: unknown, origin: string)
   return { ...r, result: asJson(body) };
 }
 
+/**
+ * Round 5: the person as the help tools see them — role, modules, their company's
+ * role-matrix capabilities (connect.role_permission over lib/permissions.ts
+ * DEFAULTS, the same as can()) and company name. A missing table = the defaults.
+ */
+async function howtoViewer(db: DB, id: Identity): Promise<Viewer> {
+  const saved = id.me.role === "SUPER_ADMIN"
+    ? []
+    : await (db.execute(sql`select capability, allowed from connect.role_permission where company_id = ${id.me.companyId} and role = ${id.me.role === "OWNER" ? "ADMIN" : id.me.role}`) as unknown as Promise<{ capability: string; allowed: boolean }[]>).catch(() => []);
+  return { role: id.me.role, modules: id.modules, caps: capsFor(id.me.role, saved), company: (await companyName(db, id.me.companyId).catch(() => "")) ?? "" };
+}
+
+/** Round 5b: the screenshot's bytes, from the Worker's static assets (public/help-shots), base64. Null when not reachable. */
+async function shotImage(origin: string, file: string): Promise<string | null> {
+  const url = `${origin}/help-shots/${encodeURIComponent(file)}`;
+  try {
+    const assets = (getCloudflareContext().env as unknown as { ASSETS?: { fetch: (r: Request) => Promise<Response> } }).ASSETS;
+    const res = assets ? await assets.fetch(new Request(url)) : await fetch(url);
+    if (!res.ok) return null;
+    const bytes = new Uint8Array(await res.arrayBuffer());
+    let bin = "";
+    for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+    return btoa(bin);
+  } catch {
+    return null;
+  }
+}
+
+/** Round 5b: show_me — the WebP (image content, never SVG), the box, a 15-minute annotated link, the live link. */
+async function showMe(id: Identity, viewer: Viewer, args: Record<string, unknown>, origin: string): Promise<{ result: ToolResult; status: number; target: string; note: string }> {
+  const hit: ShotHit | null = resolveShot(args, viewer);
+  if (!hit) {
+    return {
+      result: text("No screenshot for that yet (or it is a page you cannot open). Give the steps from how_to with their links instead — each link highlights the button on the live page.", true),
+      status: 404,
+      target: `show_me ${String(args.guide_id ?? args.path ?? args.label ?? "").slice(0, 80)}`,
+      note: "no shot",
+    };
+  }
+  let secret = "";
+  try {
+    secret = (getCloudflareContext().env as unknown as { SESSION_SECRET?: string }).SESSION_SECRET ?? "";
+  } catch {
+    /* scripts: no Worker env */
+  }
+  const link = secret ? await signShotLink(origin, hit, secret) : null;
+  const data = await shotImage(origin, hit.shot.file);
+  const meta = { type: "text" as const, text: JSON.stringify(showMeText(hit, origin, link)) };
+  return {
+    // The image block rides in content as MCP allows; nothing downstream reads it (show_me is never cached or structured).
+    result: { content: data ? [meta, { type: "image", data, mimeType: "image/webp" } as unknown as typeof meta] : [meta] },
+    status: 200,
+    target: `show_me ${hit.page} ${hit.label}`.slice(0, 200),
+    note: data ? "" : "image not loaded",
+  };
+}
+
 async function callTool(db: DB, id: Identity, name: string, args: Record<string, unknown>, origin: string, logs: McpCallRow[], defer?: (p: Promise<unknown>) => void): Promise<ToolResult> {
   const t0 = Date.now();
   let status = 200;
@@ -714,6 +781,25 @@ async function callTool(db: DB, id: Identity, name: string, args: Record<string,
       status = o.status;
       target = o.target;
       result = text(o.text, !o.ok);
+    } else if (isHowtoTool(name)) {
+      // Round 5: pure help — no Connect data; a question no guide answers is logged (note "no-guide").
+      const o = runHowtoTool({ viewer: await howtoViewer(db, id), origin, hasShot }, name, args);
+      result = o.result;
+      status = o.status;
+      note = o.note;
+      target = o.target;
+    } else if (name === "explain_screen" || name === "where_is") {
+      const o = runScreenTool({ viewer: await howtoViewer(db, id), origin, hasShot }, name, args);
+      result = o?.result ?? text(`Unknown tool: ${name}`, true);
+      status = o?.status ?? 400;
+      note = o?.note ?? "";
+      target = o?.target ?? name;
+    } else if (name === "show_me") {
+      const o = await showMe(id, await howtoViewer(db, id), args, origin);
+      result = o.result;
+      status = o.status;
+      note = o.note;
+      target = o.target;
     } else if (cached) {
       // Round 4c P4: same person, role, modules and arguments within 60 s — the gates above already ran.
       result = cached;
@@ -841,8 +927,8 @@ export function toolsFor(modules: Module[], role?: string | null, sw: Switches |
 
 /** Prompts for this person (round 4c P2): a prompt shows when the tool it relies on does. */
 function promptsFor(modules: Module[], role: string | null | undefined) {
-  return [DAILY_BRIEF_PROMPT, ...PROMPTS, ...ROLE_PROMPTS].filter((p) => {
-    const t = TOOLS.find((x) => x.name === PROMPT_TOOL[p.name]);
+  return [DAILY_BRIEF_PROMPT, ...PROMPTS, ...ROLE_PROMPTS, ...HOWTO_PROMPTS].filter((p) => {
+    const t = TOOLS.find((x) => x.name === (PROMPT_TOOL[p.name] ?? HOWTO_PROMPT_TOOL[p.name]));
     return !t || toolAllowed(t, modules, role, null);
   });
 }
@@ -882,7 +968,7 @@ export async function handleRpc(db: DB, id: Identity, m: RpcReq, origin = "", lo
         ? null
         : name === DAILY_BRIEF_PROMPT.name
           ? DAILY_BRIEF_TEXT
-          : (rolePromptText(name) ?? promptText(name, (m.params?.arguments as Record<string, unknown> | undefined) ?? {}));
+          : (rolePromptText(name) ?? howtoPromptText(name, (m.params?.arguments as Record<string, unknown> | undefined) ?? {}) ?? promptText(name, (m.params?.arguments as Record<string, unknown> | undefined) ?? {}));
       if (body === null) return { jsonrpc: "2.0", id: m.id ?? null, error: { code: -32602, message: `Unknown prompt: ${name.slice(0, 60)}` } };
       return reply({ description: shown?.description ?? "", messages: [{ role: "user", content: { type: "text", text: body } }] });
     }
