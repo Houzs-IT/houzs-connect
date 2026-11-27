@@ -8,6 +8,7 @@ import { listEndpointPaths } from "./reads";
 import { EXPORT_ROW_CAP, EXPORT_TTL_MS, RATE_LIMITS } from "./round3";
 import { mcpIdentity, readEndpoint } from "./server";
 import { hasMcpAccess, issueTokens, mcpDb, revokeToken } from "./store";
+import { ACTION_TTL_MS, ACTIONS_PER_DAY, readSwitches, WRITE_KINDS, WRITE_LABELS, type Switches, type WriteKind } from "./actions";
 
 type Row = Record<string, unknown>;
 const q = async (db: DB, x: ReturnType<typeof sql>): Promise<Row[]> => (await db.execute(x)) as unknown as Row[];
@@ -54,12 +55,14 @@ export type AdminOverview = {
   allowed: { email: string; name: string; approvedAt: string | null }[];
   calls: { id: string; name: string; company: string; app: string; tool: string; target: string; status: number; ok: boolean; note: string; ms: number; at: string | null }[];
   staff: { email: string; name: string; companies: string; admin: boolean }[];
+  /** Round 4b: the action switches (all off until turned on here). */
+  actions: { switches: Switches; kinds: { kind: WriteKind; title: string; sub: string }[]; perDay: number; ttlMinutes: number; confirmedToday: number };
 };
 
 export async function adminOverview(db: DB): Promise<AdminOverview> {
   await mcpDb(db);
   await ensureAccessTables(db).catch(() => {});
-  const [stats, requests, connected, allowed, calls, staff] = await Promise.all([
+  const [stats, requests, connected, allowed, calls, staff, switches, confirmed] = await Promise.all([
     q(db, sql`select
       (select count(*)::int from connect.mcp_calls where created_at > now() - interval '24 hours') as calls,
       (select count(*)::int from connect.mcp_calls where created_at > now() - interval '24 hours' and not ok) as refused,
@@ -98,6 +101,8 @@ export async function adminOverview(db: DB): Promise<AdminOverview> {
         and lower(m.email) not in (select email from connect.access_removed)
       group by lower(m.email) order by 2
     `).catch(() => [] as Row[]),
+    readSwitches(db),
+    q(db, sql`select count(*)::int as n from connect.mcp_pending_actions where used_at > now() - interval '24 hours'`),
   ]);
   return {
     stats: { connectedPeople: n(stats[0], "people"), callsToday: n(stats[0], "calls"), refusedToday: n(stats[0], "refused"), waiting: n(stats[0], "waiting") },
@@ -127,6 +132,13 @@ export async function adminOverview(db: DB): Promise<AdminOverview> {
       at: iso(r.created_at),
     })),
     staff: staff.map((r) => ({ email: s(r, "email"), name: s(r, "name"), companies: s(r, "companies"), admin: r.admin === true })),
+    actions: {
+      switches,
+      kinds: WRITE_KINDS.map((kind) => ({ kind, ...WRITE_LABELS[kind] })),
+      perDay: ACTIONS_PER_DAY,
+      ttlMinutes: ACTION_TTL_MS / 60_000,
+      confirmedToday: n(confirmed[0], "n"),
+    },
   };
 }
 

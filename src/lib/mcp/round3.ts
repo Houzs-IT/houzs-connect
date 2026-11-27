@@ -204,7 +204,7 @@ export function summariseCampaigns(rows: Obj[]) {
     totals: { audience, sent, failed },
     latest: rows.slice(0, 10).map((c) => {
       const s = obj(c.stats);
-      return { name: c.name, template: c.template, status: c.status, scheduledAt: c.scheduleAt ?? null, audience: num(s.total) || null, sent: num(s.sent) || null, failed: num(s.failed) || null, createdAt: c.createdAt };
+      return { ...(c.id ? { id: c.id } : {}), name: c.name, template: c.template, status: c.status, scheduledAt: c.scheduleAt ?? null, audience: num(s.total) || null, sent: num(s.sent) || null, failed: num(s.failed) || null, createdAt: c.createdAt };
     }),
   };
 }

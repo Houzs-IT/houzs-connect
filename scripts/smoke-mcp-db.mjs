@@ -169,6 +169,7 @@ const ageCalls = () => sql.unsafe("update connect.mcp_calls set created_at = cre
 const callNow = async (token, name, args = {}) => (await rpc(token, { jsonrpc: "2.0", id: 9, method: "tools/call", params: { name, arguments: args } })).body.result;
 const call = async (token, name, args = {}) => {
   await ageCalls();
+  server.clearAnswerCache(); // round 4c P4: each step reads fresh; the cache has its own test below
   return callNow(token, name, args);
 };
 
@@ -189,7 +190,7 @@ assert(
 );
 assert(x.body.result.tools.every((t) => t.annotations.readOnlyHint === true && !("module" in t)), "all tools read-only; no internal fields sent");
 x = await rpc(tok.access_token, { jsonrpc: "2.0", id: 2, method: "prompts/list" });
-assert(x.body.result.prompts.map((p) => p.name).join() === "daily-brief,inbox_today,service_review,find_customer", "prompts/list");
+assert(x.body.result.prompts.map((p) => p.name).join() === "daily-brief,inbox_today,service_review,find_customer,my_queue", `prompts/list for an agent: no supervisor prompts (${x.body.result.prompts.map((p) => p.name).join()})`);
 x = await rpc(tok.access_token, { jsonrpc: "2.0", id: 2, method: "prompts/get", params: { name: "find_customer", arguments: { who: "Wong" } } });
 assert(x.body.result.messages[0].role === "user" && x.body.result.messages[0].content.text.includes('"Wong"'), "prompts/get expands a prompt");
 x = await rpc(tok.access_token, { jsonrpc: "2.0", id: 2, method: "prompts/get", params: { name: "nope" } });
@@ -366,6 +367,97 @@ assert(!x.body.result.tools.some((tl) => tl.name === "service_performance") && x
 t = await call(tok.access_token, "service_performance");
 assert(t.isError && t.content[0].text.startsWith("Not available to your role"), "and refuses it if called anyway");
 
+// ── Round 4b write actions, end to end as Agent A (owner 2026-11-26) ──
+// A separate chat (v5, Delivery — Agent A sees it) so the later chat_review /
+// mood-scan figures are untouched; it is removed again at the end.
+const actions = await import("../src/lib/mcp/actions.ts");
+await sql.unsafe(`insert into connect.contact (id, company_id, name, phone, attributes) values ('${id("c5")}', '${id("co")}', 'Chan Write', '60155555555', '{"remarks":"Existing remark"}')`);
+await sql.unsafe(`insert into connect.conversation (id, channel_id, contact_id, assigned_department_id, last_message_at) values ('${id("v5")}', '${id("ch")}', '${id("c5")}', '${id("d1")}', now())`);
+const outCount = async (cv) => (await sql.unsafe(`select count(*)::int as n from connect.message where conversation_id = '${cv}' and direction = 'OUT'`))[0].n;
+const pendingCount = async () => (await sql.unsafe(`select count(*)::int as n from connect.mcp_pending_actions where member_id = '${id("a")}'`))[0].n;
+const listNames = async (token) => (await rpc(token, { jsonrpc: "2.0", id: 2, method: "tools/list" })).body.result.tools.map((tl) => tl.name);
+
+// Off by default: nothing listed, a direct call refused, nothing stored.
+assert(!(await listNames(tok.access_token)).some((nm) => nm.startsWith("propose_") || nm === "confirm_action"), "actions off by default → no write tool listed");
+t = await call(tok.access_token, "propose_chat_reply", { conversationId: id("v5"), text: "Hello" });
+assert(t.isError && t.content[0].text.startsWith("AI actions are switched off"), `switched off → refused (${t.content[0].text})`);
+assert((await pendingCount()) === 0, "a refused proposal stores nothing");
+
+// Main switch + the reply switch only.
+await actions.setSwitch(appDb, "actions", true, owner.id);
+await actions.setSwitch(appDb, "chat_reply", true, owner.id);
+let wl = await listNames(tok.access_token);
+assert(wl.includes("propose_chat_reply") && wl.includes("confirm_action") && !wl.includes("propose_conversation_assign") && !wl.includes("propose_contact_note"), `only switched-on actions are listed (${wl.filter((x) => x.startsWith("propose") || x.endsWith("_action")).join()})`);
+t = await call(tok.access_token, "propose_conversation_assign", { conversationId: id("v5"), status: "resolved" });
+assert(t.isError && t.content[0].text.includes("switched off"), "a switched-off action called directly is refused");
+
+// Connect's own rules: the 24-hour window, and only chats this person can see.
+t = await call(tok.access_token, "propose_chat_reply", { conversationId: id("v5"), text: "Hello" });
+assert(t.isError && t.content[0].text.includes("24-hour reply window"), `window closed → refused (${t.content[0].text})`);
+await sql.unsafe(`update connect.conversation set window_expires_at = now() + interval '3 hours' where id in ('${id("v5")}', '${id("v2")}')`);
+t = await call(tok.access_token, "propose_chat_reply", { conversationId: id("v2"), text: "Not my chat" });
+assert(t.isError && t.content[0].text.includes("not one this person can see"), `another department's chat → Connect's own refusal (${t.content[0].text})`);
+assert((await pendingCount()) === 0 && (await outCount(id("v2"))) === 0, "nothing proposed, nothing sent on v2");
+
+// Propose writes nothing; confirm writes once.
+const beforeOut = await outCount(id("v5"));
+t = await call(tok.access_token, "propose_chat_reply", { conversationId: id("v5"), text: "Your sofa arrives on Monday." });
+const prop = J(t);
+assert(!t.isError && /^mcpx_/.test(prop.confirmationId) && prop.summary.includes("Your sofa arrives on Monday.") && prop.summary.includes("Chan Write"), `proposal: exact text + the conversation (${t.content[0].text.slice(0, 300)})`);
+assert((await outCount(id("v5"))) === beforeOut && (await pendingCount()) === 1, "a proposal writes nothing to Connect");
+const ownerTry = await (await oauth.handleToken(appDb, tokenReq({ grant_type: "authorization_code", client_id: client.client_id, code: new URL((await codeFor(owner)).res.headers.get("location")).searchParams.get("code"), code_verifier: verifier }))).json();
+t = await call(ownerTry.access_token, "confirm_action", { confirmationId: prop.confirmationId });
+assert(t.isError && t.content[0].text.includes("not yours") && (await outCount(id("v5"))) === beforeOut, "another person cannot confirm it");
+t = await call(tok.access_token, "confirm_action", { confirmationId: prop.confirmationId });
+assert(!t.isError && t.content[0].text.startsWith("Reply sent"), `confirm sends (${t.content[0].text})`);
+const sent = await sql.unsafe(`select body, sent_by_member_id, is_bot from connect.message where conversation_id = '${id("v5")}' and direction = 'OUT'`);
+assert(sent.length === beforeOut + 1 && sent[0].body === "Your sofa arrives on Monday." && sent[0].sent_by_member_id === id("a") && sent[0].is_bot === false, "exactly one message, as Agent A, through the inbox's own send");
+t = await call(tok.access_token, "confirm_action", { confirmationId: prop.confirmationId });
+assert(t.isError && (await outCount(id("v5"))) === beforeOut + 1, "a confirmation is single use");
+const act = await sql.unsafe(`select action, actor_member_id, detail from connect.activity_log where entity_id = '${id("v5")}' order by created_at desc limit 1`);
+assert(act[0]?.action === "replied" && act[0].actor_member_id === id("a") && JSON.stringify(act[0].detail).includes("AI Connector"), "the reply is in Connect's activity log");
+const logged = await sql.unsafe(`select tool, target, status from connect.mcp_calls where member_id = '${id("a")}' and tool in ('propose_chat_reply', 'confirm_action') order by created_at`);
+assert(logged.some((lg) => lg.tool === "confirm_action" && lg.status === 200) && logged.every((lg) => !String(lg.target).includes("sofa")), "propose / confirm logged in mcp_calls, never with the message text");
+
+// Switched off between proposal and confirm → refused, nothing sent, the confirmation not used up.
+t = await call(tok.access_token, "propose_chat_reply", { conversationId: id("v5"), text: "Second message" });
+const prop2 = J(t);
+await actions.setSwitch(appDb, "chat_reply", false, owner.id);
+t = await call(tok.access_token, "confirm_action", { confirmationId: prop2.confirmationId });
+assert(t.isError && t.content[0].text.includes("switched off") && (await outCount(id("v5"))) === beforeOut + 1, "switched off → confirm refused, nothing sent");
+t = await call(tok.access_token, "cancel_action", { confirmationId: prop2.confirmationId });
+assert(!t.isError && t.content[0].text.startsWith("Cancelled"), "cancel_action");
+
+// Assign / resolve and a contact note, through the inbox's own cores.
+await actions.setSwitch(appDb, "conversation_assign", true, owner.id);
+await actions.setSwitch(appDb, "contact_note", true, owner.id);
+t = await call(tok.access_token, "propose_conversation_assign", { conversationId: id("v5"), assign_to: "Agent B", status: "resolved" });
+assert(!t.isError && J(t).summary.includes("→ Agent B"), `assign proposal (${t.content[0].text.slice(0, 200)})`);
+let cv5 = (await sql.unsafe(`select status, assigned_agent_id from connect.conversation where id = '${id("v5")}'`))[0];
+assert(cv5.status === "OPEN" && cv5.assigned_agent_id === null, "the proposal changed nothing");
+t = await call(tok.access_token, "confirm_action", { confirmationId: J(await call(tok.access_token, "propose_conversation_assign", { conversationId: id("v5"), assign_to: "Agent B", status: "resolved" })).confirmationId });
+cv5 = (await sql.unsafe(`select status, assigned_agent_id from connect.conversation where id = '${id("v5")}'`))[0];
+assert(!t.isError && cv5.status === "CLOSED" && cv5.assigned_agent_id === id("b"), `assigned + resolved (${t.content[0].text})`);
+t = await call(tok.access_token, "propose_contact_note", { conversationId: id("v5"), note: "Prefers weekday mornings" });
+t = await call(tok.access_token, "confirm_action", { confirmationId: J(t).confirmationId });
+const rem = (await sql.unsafe(`select attributes from connect.contact where id = '${id("c5")}'`))[0].attributes;
+assert(!t.isError && rem.remarks.startsWith("Existing remark\n[") && rem.remarks.endsWith("via AI Connector] Prefers weekday mornings"), `remarks appended (${JSON.stringify(rem)})`);
+
+// Back to the default (all off) and remove the extra chat.
+for (const k of ["actions", "chat_reply", "conversation_assign", "contact_note"]) await actions.setSwitch(appDb, k, false, owner.id);
+await sql.unsafe(`delete from connect.message where conversation_id = '${id("v5")}'`);
+await sql.unsafe(`delete from connect.conversation where id = '${id("v5")}'`);
+await sql.unsafe(`delete from connect.contact where id = '${id("c5")}'`);
+await sql.unsafe(`update connect.conversation set window_expires_at = null where id = '${id("v2")}'`);
+
+// Round 4c P4: a heavy summary is reused for 60 s per person (logged as cached); callNow skips the cache reset.
+server.clearAnswerCache();
+await ageCalls();
+await callNow(tok.access_token, "contacts_summary");
+t = await callNow(tok.access_token, "contacts_summary");
+const lastCs = await sql.unsafe(`select note, target from connect.mcp_calls where member_id = '${id("a")}' and tool = 'contacts_summary' order by created_at desc limit 1`);
+assert(!t.isError && t.structuredContent?.link === `${ORIGIN}/contacts` && lastCs[0]?.note === "cached", `second call within 60 s served from the cache, with structuredContent + link (${JSON.stringify(lastCs[0])})`);
+
 const calls = await sql.unsafe(`select count(*)::int as n, count(*) filter (where not ok)::int as refused from connect.mcp_calls where member_id = '${id("a")}'`);
 assert(calls[0].n >= 20 && calls[0].refused >= 6, `every call logged (${calls[0].n}, ${calls[0].refused} refused)`);
 
@@ -388,6 +480,15 @@ const ownerTok = await r.json();
 // The mood scan for a Super Admin: every conversation in the company, phones masked, flags set.
 x = await rpc(ownerTok.access_token, { jsonrpc: "2.0", id: 2, method: "tools/list" });
 assert(x.body.result.tools.some((tl) => tl.name === "customer_mood_scan"), "mood scan listed to a Super Admin");
+{
+  const pr = await rpc(ownerTok.access_token, { jsonrpc: "2.0", id: 2, method: "prompts/list" });
+  const pn = pr.body.result.prompts.map((p) => p.name);
+  assert(pn.includes("supervisor_morning") && pn.includes("weekly_quality_review"), `supervisor prompts listed to a Super Admin (${pn.join()})`);
+  const pg = await rpc(ownerTok.access_token, { jsonrpc: "2.0", id: 2, method: "prompts/get", params: { name: "supervisor_morning" } });
+  assert(pg.body.result.messages[0].content.text.includes("chat_review"), "supervisor_morning expands");
+  const ag = await rpc(tok2.access_token, { jsonrpc: "2.0", id: 2, method: "prompts/get", params: { name: "supervisor_morning" } });
+  assert(ag.body.error?.code === -32602, "an agent cannot open a supervisor prompt");
+}
 // Yesterday + today, so a run just after midnight (Malaysia time) still covers the seeded messages.
 t = await call(ownerTok.access_token, "customer_mood_scan", { from: r3.shiftDay(r3.myToday(), -1), to: r3.myToday() });
 const mood = J(t);

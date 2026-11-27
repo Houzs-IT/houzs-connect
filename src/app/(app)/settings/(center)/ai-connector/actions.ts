@@ -5,6 +5,7 @@ import { getDb } from "@/db/client";
 import { getCurrentMember } from "@/lib/current-member";
 import { isMcpAdminRole } from "@/lib/mcp/core";
 import { runLeakCheck, type LeakReport } from "@/lib/mcp/admin";
+import { isWriteKind, MAIN_SWITCH, setSwitch, WRITE_LABELS } from "@/lib/mcp/actions";
 import { decideRequest, grantAccess, mcpDb, removeAccess, requestAccess, revokeEmailTokens, revokeToken } from "@/lib/mcp/store";
 
 // Settings → AI Connector. Every export here is a POST endpoint reachable by
@@ -83,6 +84,17 @@ export async function disconnectPerson(email: string): Promise<Result> {
   const n = await revokeEmailTokens(s.db, String(email ?? ""));
   revalidatePath(PATH);
   return { ok: true, message: `${n} connection(s) cut.` };
+}
+
+/** Round 4b: the main "Allow AI actions" switch ("actions") or one action's switch. Connector admins only. */
+export async function setMcpActionSwitch(key: string, enabled: boolean): Promise<Result> {
+  const s = await admin();
+  if (!s) return { ok: false, error: "Only the AI Connector admin can do that." };
+  const k = String(key ?? "");
+  if (!(await setSwitch(s.db, k, !!enabled, s.me.id))) return { ok: false, error: "Unknown switch." };
+  revalidatePath(PATH);
+  const label = k === MAIN_SWITCH ? "AI actions" : isWriteKind(k) ? WRITE_LABELS[k].title : k;
+  return { ok: true, message: `${label}: ${enabled ? "on" : "off"}.` };
 }
 
 export async function leakCheck(email: string): Promise<{ ok: boolean; error?: string; report?: LeakReport }> {

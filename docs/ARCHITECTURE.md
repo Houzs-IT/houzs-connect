@@ -62,17 +62,21 @@ department, assigned to a team they're on, or owned by someone who reports up to
 
 ## 6a. AI Connector (MCP) — where the code lives
 
-Read-only Claude / ChatGPT access with each person's own login (details and FAQ:
-`tasks/HANDOFF.md` → "AI Connector").
+Claude / ChatGPT access with each person's own login — read-only, plus (round 4b) three
+write actions that are OFF until a connector admin switches them on and then run only
+after the person confirms the exact proposal (details and FAQ: `tasks/HANDOFF.md` → "AI
+Connector").
 
 | File | What |
 | --- | --- |
 | `src/app/api/mcp/**`, `src/app/.well-known/oauth-*` | routes: JSON-RPC, OAuth, export download, discovery |
-| `src/lib/mcp/server.ts` | tools list, `callTool`, the supervisor gate for chat content, composite tools |
-| `src/lib/mcp/reads.ts` | the catalogue of read endpoints — the ONLY place connector SQL lives, each reusing the page's own predicate |
-| `src/lib/mcp/quick.ts`, `round3.ts`, `round4.ts` | pure summarise logic per round (round 4: `period`, waiting_now, agent_workload, chat_review, customer_chat_summary, data_gaps) |
-| `src/lib/mcp/core.ts`, `store.ts`, `oauth.ts`, `admin.ts` | pure helpers, tables, OAuth, admin page + leak check |
-| `scripts/smoke-mcp.mjs`, `scripts/smoke-mcp-db.mjs` | pure and real-Postgres tests (CI) |
+| `src/lib/mcp/server.ts` | tools list (`toolAllowed` = round 4c role-aware list), `callTool`, the supervisor gate, composite tools, structured output, the 60 s answer cache |
+| `src/lib/mcp/reads.ts` | the catalogue of read endpoints — the ONLY place connector read SQL lives, each reusing the page's own predicate |
+| `src/lib/mcp/quick.ts`, `round3.ts`, `round4.ts`, `round4c.ts` | pure logic per round (round 4: `period`, waiting_now, agent_workload, chat_review, customer_chat_summary, data_gaps; 4c: prompts per role, links, outputSchema, cache) |
+| `src/lib/mcp/actions.ts`, `write-actions.ts`, `write-exec.ts` | round 4b: switches + single-use proposals (tables `mcp_settings`, `mcp_pending_actions`, migration 0028), propose → confirm with the write fence, and the real I/O |
+| `src/lib/inbox-writes.ts` | the inbox's write cores (reply, internal note, assign, status, Remarks) shared by the server actions and the connector's confirmed actions — one write path |
+| `src/lib/mcp/core.ts`, `store.ts`, `oauth.ts`, `admin.ts` | pure helpers, tables, OAuth, admin page (incl. the AI actions switches) + leak check |
+| `scripts/smoke-mcp.mjs`, `scripts/smoke-mcp-actions.mjs`, `scripts/smoke-mcp-db.mjs` | pure, pure (4b / 4c with fakes) and real-Postgres tests (CI) |
 
 ## 7. Build phases
 

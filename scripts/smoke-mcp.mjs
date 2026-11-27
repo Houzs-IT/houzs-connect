@@ -478,17 +478,20 @@ for (const name of ["chat_review", "customer_chat_summary", "customer_mood_scan"
 }
 assert(srv.toolsFor(["contacts", "dashboard"], "MANAGER").every((t) => !["chat_review", "customer_chat_summary", "waiting_now"].includes(t.name)), "chat tools need the inbox module");
 assert(srv.toolsFor(["inbox"], "AGENT").some((t) => t.name === "waiting_now") && !srv.toolsFor(["inbox"], "AGENT").some((t) => t.name === "agent_workload"), "waiting_now follows inbox, agent_workload follows dashboard");
-assert(srv.toolsFor([], "AGENT").some((t) => t.name === "data_gaps"), "data_gaps is listed (each part keeps its own module gate)");
+// Round 4c P1: a composite tool is listed only when at least one of its modules is on (each part still keeps its own gate).
+assert(!srv.toolsFor([], "AGENT").some((t) => t.name === "data_gaps") && srv.toolsFor(["contacts"], "AGENT").some((t) => t.name === "data_gaps"), "data_gaps needs contacts or inbox");
 
-// ── Runtime DDL == migration 0027 ──
+// ── Runtime DDL == migrations 0027 + 0028 ──
 const { MCP_DDL } = await import("../src/db/ensure-mcp.ts");
-const mig = readFileSync(resolve(root, "src/db/migrations/0027_mcp_connector.sql"), "utf8");
-for (const t of ["mcp_access", "mcp_access_requests", "mcp_oauth_clients", "mcp_auth_requests", "mcp_oauth_codes", "mcp_tokens", "mcp_calls"]) {
+const CR = String.fromCharCode(13);
+const mig = ["0027_mcp_connector", "0028_mcp_actions"].map((f) => readFileSync(resolve(root, `src/db/migrations/${f}.sql`), "utf8").split(CR).join("")).join(String.fromCharCode(10));
+for (const t of ["mcp_access", "mcp_access_requests", "mcp_oauth_clients", "mcp_auth_requests", "mcp_oauth_codes", "mcp_tokens", "mcp_calls", "mcp_settings", "mcp_pending_actions"]) {
   assert(MCP_DDL.some((s) => s.startsWith(`CREATE TABLE IF NOT EXISTS "connect"."${t}"`)), `ensure creates ${t}`);
 }
 for (const s of MCP_DDL) assert(mig.includes(s), `migration carries: ${s.slice(0, 60)}`);
 const journal = JSON.parse(readFileSync(resolve(root, "src/db/migrations/meta/_journal.json"), "utf8"));
 assert(journal.entries.some((e) => e.tag === "0027_mcp_connector"), "0027 is in the journal");
+assert(journal.entries.some((e) => e.tag === "0028_mcp_actions"), "0028 is in the journal");
 
 // ── Read-only by construction: nothing reachable from the MCP handlers imports a "use server" module ──
 function resolveImport(from, spec) {
@@ -523,6 +526,10 @@ for (const entry of [
 }
 assert(seen.size > 10, `the import walk found the MCP modules (${seen.size} files)`);
 assert(offenders.length === 0, `no "use server" module is reachable from the connector: ${offenders.join(", ")}`);
+// Round 4b: the connector writes only through lib/inbox-writes.ts; no campaign / broadcast sender or contact import is reachable.
+assert(seen.has(resolve(root, "src/lib/inbox-writes.ts")), "the confirmed actions use the inbox write cores");
+const senders = [...seen].map((f) => f.slice(root.length + 1).split(String.fromCharCode(92)).join("/")).filter((f) => /campaigns\/(send|audience|actions)|broadcast|drip-campaigns|contacts\/(csv|actions)/.test(f));
+assert(senders.length === 0, `no campaign / broadcast / import module reachable: ${senders.join(", ")}`);
 // The app's own auth never accepts a connector token.
 for (const f of ["src/lib/current-member.ts", "src/lib/api-keys.ts"]) {
   const src = readFileSync(resolve(root, f), "utf8");

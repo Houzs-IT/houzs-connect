@@ -190,6 +190,81 @@ works on a phone).
     department; a Super Admin gets the review partition, our reply snippet, the repeat
     complainer and the customer summary with no phone; the leak check shows chat review
     refused for the staff account).
+- **Round 4b — write actions (2026-11-27, branch `feat/mcp-4bc`, owner approved
+  2026-11-26).** Same design as Hookka (hookka-erp-testing PR #1633): `propose_*` stores ONE
+  pending action and writes nothing; the person sees the exact summary; `confirm_action`
+  claims it (single use, 10 minutes, same token + same person) and runs it ONCE as the
+  person; `cancel_action` drops it. **Everything is OFF by default**: the main "Allow AI
+  actions" switch plus one switch per action, set only by a connector admin (SUPER_ADMIN /
+  OWNER) in Settings → AI Connector → "AI actions" (`setMcpActionSwitch`). Daily cap: 30
+  confirmed actions per person (MYT day). No campaigns / broadcasts, deletes or contact
+  imports — `scripts/smoke-mcp.mjs` pins that no campaign / broadcast / import module is
+  reachable from the connector.
+
+  | Tool (args) | What runs on confirm (Connect's own code) | Connect's permission |
+  | --- | --- | --- |
+  | `propose_chat_reply {conversationId \| query, text}` — switch **"Reply to customers — SENDS TO THE CUSTOMER"** | `inbox-writes.sendReplyCore` = the composer's send (`sendOutbound`, `isBot: false`, `sentByMemberId` = the person; blocked contacts refused; LIVE → Meta) | inbox module + the conversation passes the inbox rail's visibility for the person (`/conversations/:id`) + the inbox company rule (`authorizeConversationFor`). Only inside the 24-hour window (the composer's own rule — outside it the answer says to send a template from the inbox; templates are not sent by the AI). Refused at confirm if a colleague (a person, not the bot) replied after the proposal or the window closed meanwhile. |
+  | `propose_conversation_assign {conversationId \| query, assign_to?, department?, status?}` | `assignConversationCore` / `setConversationStatusCore` = the inbox's Assign / Resolve (activity log with `via: AI Connector`) | same as above; `assign_to` = an active member of the company (name / email / "me" / "nobody"), `department` = a company department or "none", `status` open / pending / resolved (= CLOSED) |
+  | `propose_contact_note {conversationId \| query \| contact, note, as?}` | `as: "remarks"` (default) → `saveContactRemarksCore` (the Remarks box; one dated line appended to the Remarks stored AT CONFIRM, ≤ 2,000 chars); `as: "internal_note"` → `addConversationNoteCore` (the composer's Note mode, never sent) | from a chat: as above (the inbox side panel's Remarks box / Note); from `contact`: the contacts module + company scope (`/contacts?q=`, `/contacts/:id`) |
+  | `confirm_action {confirmationId}`, `cancel_action {confirmationId}` | — | listed only while the main switch and at least one usable action are on |
+
+  - **One write path:** the server actions `sendMessage`, `assignConversation`,
+    `setConversationStatus` and `setContactRemarks` now call the same cores in
+    `src/lib/inbox-writes.ts` (not a "use server" module, so the connector can import it
+    without reaching a server action). Behaviour of the inbox is unchanged.
+  - **Write fence** (`write-actions.payloadAllowed`): a pending payload may carry only its
+    kind's keys (reply: conversationId / text / proposedAt; assign: conversationId / agentId /
+    departmentId / status; note: target / contactId / conversationId / text), safe ids, status
+    in open / pending / closed; checked at propose and again at confirm.
+  - **Re-checked at confirm, as the person:** module, visibility (`/conversations/:id`),
+    company rule, contact blocked, 24 h window, colleague replied, assignee still active.
+  - **Logging:** every propose / confirm / cancel is a row in `mcp_calls` (target = kind +
+    record id, never the message or note text); the pending row keeps the outcome and drops
+    the payload once it ran. Connect's activity log gets `replied`, `note_added`,
+    `remarks_updated` (new actions, labelled in `i18n/dict.ts`) and the usual
+    `assigned` / `unassigned` / `status` with `detail.via = "AI Connector"`.
+  - **Migration `0028_mcp_actions.sql`** (`mcp_settings`, `mcp_pending_actions`), additive and
+    idempotent. **How it reaches prod:** self-applied at runtime by `src/db/ensure-mcp.ts`
+    (the same `ensureMcpTables` every connector request already awaits) — nothing to run by
+    hand; `db:migrate` is not run on prod. Until an admin flips a switch, both tables stay
+    empty and the connector behaves exactly as before.
+  - **FAQ (round 4b):** "Reply to Wong that the sofa comes Monday" → `propose_chat_reply`
+    then `confirm_action`; "Give this chat to Agent B and mark it resolved" →
+    `propose_conversation_assign`; "Note on this customer: prefers mornings" →
+    `propose_contact_note`.
+- **Round 4c — platform quality (same branch).** Pure parts: `src/lib/mcp/round4c.ts`.
+  - **P1 role-aware tools/list:** `server.toolAllowed` — module (`module` / new `anyModule` on
+    `daily_brief`, `data_gaps`, `export_excel`, `search`, `fetch`), the supervisor gate, and for
+    write tools the switches + module. `tools/list` and `callTool` ask the same question: a
+    hidden composite tool called directly answers "Not available to your role…" (403); module
+    tools keep `readEndpoint`'s refusal; write tools answer "switched off" / "not available".
+  - **P2 prompts per role:** `supervisor_morning` (waiting_now + yesterday's chat_review),
+    `my_queue` (daily_brief + waiting_now; may offer `propose_chat_reply`, never sends without
+    a yes), `weekly_quality_review` (chat_review + agent_workload, `period: week`). A prompt is
+    listed / openable only when its tool is (`PROMPT_TOOL`), so agents do not get the
+    supervisor prompts.
+  - **P3 structured output:** the 13 quick answers carry an open `outputSchema` in
+    `tools/list` and `structuredContent` in the result; the text keeps the same JSON. An
+    answer too long to parse goes out as `{text, truncated: true}`.
+  - **P4 speed:** heavy summaries (`inbox_overview`, `service_performance`, `reply_speed`,
+    `agent_workload`, `message_delivery`, `contacts_summary`, `campaign_summary`,
+    `customer_mood_scan`, `chat_review`, `data_gaps`) are reused for 60 s per person + role +
+    modules + arguments, in the Worker isolate only (no shared store), AFTER the rate limit and
+    every gate; logged with note `cached`; cleared for the person after any confirmed action.
+    `waiting_now`, `daily_brief`, search / fetch stay live.
+  - **P5 links:** every quick answer gets a top-level `link` to its Connect page; any row with a
+    `conversationId`, `contactId` (or a bare `id` in `inbox_overview.longestWaiting` /
+    `campaign_summary.latest`) gets a `url`. `campaign_summary` rows now carry their `id`.
+  - Tests: `scripts/smoke-mcp-actions.mjs` (new, pure, in CI — 98 assertions: proposal writes
+    nothing, confirm writes once, single use, switched off at propose and at confirm (not used
+    up), invisible chat → Connect's own refusal, other company, module off, window / blocked /
+    colleague replied, expiry / not yours / cancel / daily cap, assign + notes, the fence and a
+    tampered payload, tools/list per role + switches, prompts, links, cache) and
+    `scripts/smoke-mcp-db.mjs` (end to end on Postgres as an AGENT: off by default, only
+    switched-on tools listed, window closed refused, another department's chat refused, one
+    message row as the agent after confirm, single use, another person cannot confirm, switch
+    off between propose and confirm, assign + resolve, remarks appended, activity + call log,
+    cache hit with `structuredContent.link`, supervisor prompts).
 - **Not yet proven on production:** a real Claude / ChatGPT connection, and the
   sign-in → back-to-Allow hop (needs a real ERP login). First production use creates
   the tables through ensure-mcp.

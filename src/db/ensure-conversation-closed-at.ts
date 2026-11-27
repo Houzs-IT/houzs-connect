@@ -49,6 +49,11 @@ export async function ensureConversationClosedAt(db: DB): Promise<void> {
 export async function setConversationClosedAt(db: DB, conversationId: string, closed: boolean): Promise<void> {
   await ensureConversationClosedAt(db);
   await db.execute(
-    sql`UPDATE "connect"."conversation" SET "closed_at" = ${closed ? new Date() : null} WHERE "id" = ${conversationId}`
+    // now() in SQL, not a JS Date parameter: a raw db.execute() hands the Date to
+    // postgres-js unserialised and it throws ERR_INVALID_ARG_TYPE (seen in CI,
+    // smoke-mcp-db.mjs, 2026-11-27 — the inbox's Resolve runs this same line).
+    closed
+      ? sql`UPDATE "connect"."conversation" SET "closed_at" = now() WHERE "id" = ${conversationId}`
+      : sql`UPDATE "connect"."conversation" SET "closed_at" = NULL WHERE "id" = ${conversationId}`
   );
 }

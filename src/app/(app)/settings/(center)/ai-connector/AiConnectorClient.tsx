@@ -11,6 +11,7 @@ import {
   leakCheck,
   removeMcpAccess,
   requestMcpAccess,
+  setMcpActionSwitch,
   turnOnMcp,
 } from "./actions";
 
@@ -117,6 +118,53 @@ export function AiConnectorClient({
           Limits per person: {o.limits.perMinute} lookups a minute and {o.limits.perDay} a day (the leak check is not counted). Excel exports: up to{" "}
           {o.limits.exportRows.toLocaleString("en")} rows, download link valid {o.limits.exportLinkMinutes} minutes.
         </p>
+      )}
+
+      {/* Admin: AI actions (round 4b) — everything OFF until turned on here */}
+      {o && (
+        <SetCard
+          icon="⚑"
+          tone="orange"
+          title="AI actions"
+          sub={`Off by default. When on, the AI can only PROPOSE; nothing happens until the person says yes to the exact summary. Each confirmation is single use and expires after ${o.actions.ttlMinutes} minutes; at most ${o.actions.perDay} confirmed actions per person a day. It always runs as the person, with their own access.`}
+        >
+          <div className={rowCls}>
+            <Person
+              name="Allow AI actions"
+              sub={`Main switch. Off = the connector is read-only for everyone, whatever is ticked below. Confirmed in the last 24 h: ${o.actions.confirmedToday}.`}
+            />
+            <button
+              type="button"
+              role="switch"
+              aria-checked={o.actions.switches.main}
+              disabled={pending}
+              onClick={() => run(() => setMcpActionSwitch("actions", !o.actions.switches.main))}
+              className={o.actions.switches.main ? danger : primary}
+            >
+              {o.actions.switches.main ? "Turn off" : "Turn on"}
+            </button>
+          </div>
+          {o.actions.kinds.map((k) => {
+            const on = o.actions.switches[k.kind];
+            return (
+              <div key={k.kind} className={rowCls}>
+                <Person name={`${on ? "On" : "Off"} · ${k.title}`} sub={o.actions.switches.main ? k.sub : `${k.sub} (needs the main switch on too)`} />
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={on}
+                  aria-label={k.title}
+                  disabled={pending}
+                  onClick={() => run(() => setMcpActionSwitch(k.kind, !on))}
+                  className={on ? danger : soft}
+                >
+                  {on ? "Turn off" : "Turn on"}
+                </button>
+              </div>
+            );
+          })}
+          <div className={empty}>Never possible through the AI: campaigns or broadcasts, deleting anything, importing contacts.</div>
+        </SetCard>
       )}
 
       {/* My status */}
@@ -340,8 +388,9 @@ export function AiConnectorClient({
             </ol>
           </div>
           <p className="text-[12px] text-[var(--color-faint)] md:col-span-2">
-            Use the address of the company you work in (this page shows the right one). Read-only: the AI can never send a message, change a contact or
-            approve a payment. The admin sees every lookup and can disconnect any app.
+            Use the address of the company you work in (this page shows the right one). Read-only unless the admin turns on AI actions — and even then
+            the AI only proposes: nothing is sent or changed until you say yes. It can never approve a payment, send a campaign or delete anything. The admin
+            sees every lookup and can disconnect any app.
           </p>
         </div>
       </SetCard>

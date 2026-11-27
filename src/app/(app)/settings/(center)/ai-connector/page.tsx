@@ -30,7 +30,7 @@ export default async function AiConnectorPage() {
       <div className="flex max-w-[1000px] flex-col gap-4 p-4 md:p-6">
         <SettingsHead
           title="AI Connector"
-          sub="Ask Claude or ChatGPT about Houzs Connect with your own login. Read-only: it sees only what you can see, and can never send or change anything."
+          sub="Ask Claude or ChatGPT about Houzs Connect with your own login. It sees only what you can see. Read-only unless the admin turns on AI actions, and then nothing is sent or changed until you say yes."
         />
         <AiConnectorClient connectorUrl={`${origin}/api/mcp`} me={{ name: me.name, email: me.email }} mine={mine} overview={overview} />
       </div>

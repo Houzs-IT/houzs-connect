@@ -145,7 +145,7 @@ export async function consentPage(db: DB, requestId: string, me: CurrentMember, 
     "Connect an AI app",
     `<h1>Allow ${esc(app)} to read Houzs Connect?</h1>${who}
 <p>${esc(cl?.clientName ?? "This app")} will be able to:</p>
-<ul><li><b>Read only</b> — it can never send, change or delete anything.</li><li>See only what <b>your own login</b> can see.</li><li>Every lookup is recorded; the admin can disconnect it at any time.</li></ul>
+<ul><li><b>Read only</b> unless your admin turns on AI actions — and even then nothing is sent or changed until you say yes. It can never delete anything.</li><li>See only what <b>your own login</b> can see.</li><li>Every lookup is recorded; the admin can disconnect it at any time.</li></ul>
 <p><small>After you allow, you go back to ${esc(host || "the app")}.</small></p>` +
       form(`<div class="row"><button name="decision" value="cancel">Cancel</button><button class="allow" name="decision" value="allow">Allow</button></div>`)
   );

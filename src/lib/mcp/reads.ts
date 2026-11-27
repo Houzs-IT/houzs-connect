@@ -262,7 +262,7 @@ export const ENDPOINTS: Endpoint[] = [
     description: "QUICK ANSWER — broadcast campaigns: how many by status, total audience / sent / failed, and the latest 10 with their numbers.",
     async run({ db, me }) {
       const rows = await db
-        .select({ name: campaign.name, template: campaign.templateName, status: campaign.status, scheduleAt: campaign.scheduleAt, stats: campaign.stats, createdAt: campaign.createdAt })
+        .select({ id: campaign.id, name: campaign.name, template: campaign.templateName, status: campaign.status, scheduleAt: campaign.scheduleAt, stats: campaign.stats, createdAt: campaign.createdAt })
         .from(campaign)
         .where(eq(campaign.companyId, me.companyId))
         .orderBy(desc(campaign.createdAt))
