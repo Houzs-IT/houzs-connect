@@ -27,6 +27,7 @@ import {
 import { can } from "@/lib/permissions";
 import { internalUnreadTotal } from "./internal/data";
 import { itSupportConnected } from "@/lib/it-support/hub";
+import { HighlightFromUrl } from "@/components/shell/HighlightFromUrl";
 
 // This is a live, data-driven console backed by per-request Cloudflare bindings
 // (Hyperdrive). Nothing here is static — force dynamic rendering for the whole
@@ -99,6 +100,8 @@ export default async function AppLayout({
       <NotifyPoller />
       <UpdateBanner />
       <CommandPalette />
+      {/* AI Connector round 5: ?highlight=<label> outlines that button for a few seconds. */}
+      <HighlightFromUrl />
       {/* On :root, so dialogs and menus rendered outside the shell take the colours too. */}
       {theme ? <style>{theme}</style> : null}
       <div data-shell className="flex h-dvh flex-col overflow-hidden">

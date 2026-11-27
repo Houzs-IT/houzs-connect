@@ -185,16 +185,21 @@ assert(x.status === 202, "a notification → 202");
 x = await rpc(tok.access_token, { jsonrpc: "2.0", id: 2, method: "tools/list" });
 assert(
   x.body.result.tools.map((t) => t.name).join() ===
-    "inbox_overview,waiting_now,service_performance,reply_speed,agent_workload,message_delivery,contacts_summary,campaign_summary,daily_brief,data_gaps,export_excel,search,fetch,whoami,list_modules,list_endpoints,connect_get",
+    "inbox_overview,waiting_now,service_performance,reply_speed,agent_workload,message_delivery,contacts_summary,campaign_summary,daily_brief,data_gaps,export_excel,search,fetch,how_to,module_overview,glossary,explain_error,onboarding,whoami,list_modules,list_endpoints,connect_get",
   `quick answers, search / fetch, then the general tools (${x.body.result.tools.map((t) => t.name).join()})`
 );
 assert(x.body.result.tools.every((t) => t.annotations.readOnlyHint === true && !("module" in t)), "all tools read-only; no internal fields sent");
 x = await rpc(tok.access_token, { jsonrpc: "2.0", id: 2, method: "prompts/list" });
-assert(x.body.result.prompts.map((p) => p.name).join() === "daily-brief,inbox_today,service_review,find_customer,my_queue", `prompts/list for an agent: no supervisor prompts (${x.body.result.prompts.map((p) => p.name).join()})`);
+assert(x.body.result.prompts.map((p) => p.name).join() === "daily-brief,inbox_today,service_review,find_customer,my_queue,how_do_i,what_does_it_mean,explain_this_error,my_first_week", `prompts/list for an agent: no supervisor prompts (${x.body.result.prompts.map((p) => p.name).join()})`);
 x = await rpc(tok.access_token, { jsonrpc: "2.0", id: 2, method: "prompts/get", params: { name: "find_customer", arguments: { who: "Wong" } } });
 assert(x.body.result.messages[0].role === "user" && x.body.result.messages[0].content.text.includes('"Wong"'), "prompts/get expands a prompt");
 x = await rpc(tok.access_token, { jsonrpc: "2.0", id: 2, method: "prompts/get", params: { name: "nope" } });
 assert(x.body.error?.code === -32602, "unknown prompt → invalid params");
+// Round 5: process help through the real handler — canDo from the agent's own access, gap log.
+let help = await call(tok.access_token, "how_to", { question: "how do I send a template when the window is closed" });
+assert(!help.isError && JSON.parse(help.content[0].text).guides[0].id === "send-template", `how_to answers through the real handler (${help.content[0].text.slice(0, 120)})`);
+help = await call(tok.access_token, "how_to", { question: "zzqx frobnicate the widget" });
+assert(!help.isError && JSON.parse(help.content[0].text).matched === false, "how_to with no guide says so");
 x = await rpc(tok.access_token, [{ jsonrpc: "2.0", id: 3, method: "ping" }, { jsonrpc: "2.0", id: 4, method: "nope/nope" }]);
 assert(Array.isArray(x.body) && x.body[1].error.code === -32601, "batch + method not found");
 
@@ -555,6 +560,7 @@ await sql.unsafe(`delete from connect.mcp_calls where tool = 'synthetic' and ema
 const ov = await admin.adminOverview(appDb);
 assert(ov.connected.some((k) => k.email === agentA.email) && ov.allowed.some((a) => a.email === agentA.email), "overview lists the connection and the allowed person");
 assert(ov.calls.length > 0 && ov.calls.length <= 100, "recent lookups listed");
+assert(ov.gaps.some((g) => g.tool === "how_to" && g.question.includes("frobnicate")), "the unanswered help question is on the gap log");
 assert(ov.staff.some((p) => p.email === `${tag}-b@example.com`) && !ov.staff.some((p) => p.email === agentA.email), "turn-on list = not yet allowed");
 
 const lc0 = await admin.runLeakCheck(appDb, owner.email, id("co"));

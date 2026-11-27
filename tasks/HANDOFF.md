@@ -309,6 +309,49 @@ works on a phone).
   - **Not yet proven on production:** no real email has been sent (no key set; never sent from
     a test). To try it after deploy + key: Settings → AI Connector → turn on → "Send me a test
     brief".
+- **Round 5 — process help, "how do I …" (branch `feat/mcp-howto`, owner 2026-11-27; Claude
+  only, no "?" button in Connect).** Pure, no Connect data read; every person gets them.
+  - Tools: `how_to {question|topic}` (26 SOPs: agents — reply + 24-hour window, send a
+    template, new conversation, assign / transfer, resolve / pending / queue, private note,
+    contact Remarks, find a conversation, quick replies, contacts; supervisors — queue /
+    overdue, reply-speed dashboard, chat review; admins — campaigns and broadcasts (EXPLAINED
+    ONLY, `explainOnly`), templates, departments, team & roles, roles matrix, module access,
+    AI Connector page, connect an AI app, morning brief; 3 click-by-click flows),
+    `module_overview`, `glossary` (24-hour window, template, HSM, assignment, department,
+    resolved …), `explain_error` (16 real messages), `onboarding {agent|supervisor|admin}`.
+    Four prompts (`how_do_i`, `what_does_it_mean`, `explain_this_error`, `my_first_week`).
+  - Each guide: purpose, prerequisites, who / permission, fields, click-by-click steps with
+    `?highlight=` links, checkBefore, result, warnings, undo, approvals, deadlines, common
+    mistakes, worked example (demo names only), related / next, contact, perCompany.
+  - RBAC = Connect's current rules (`src/lib/mcp/howto-types.ts` `PAGE_GATES` + `needs`):
+    modules (`resolveModules`), `requireAdmin`, Super-Admin-only actions, the company's role
+    matrix (`connect.role_permission` over `DEFAULTS`, read in `server.ts howtoViewer`), the
+    connector-admin rule. `canDo` false comes with a note naming the missing check. The chat
+    review guide is shown to supervisors and admins only (`moodScanAllowed`), like the chat tools.
+  - Business rules only where the code enforces them, each cited in a code comment (30-minute
+    reply SLA `lib/sla.ts`, window = 24 h from the last inbound message `transport.ts`, Remarks
+    max 2000, campaign approvers, Super-Admin-only role / access changes …).
+  - `?highlight=<label>`: `src/components/shell/HighlightFromUrl.tsx` (mounted in the (app)
+    layout) + `src/lib/highlight-match.ts` — outlines the element for ~6 s, also matches the
+    same label in Chinese (dictionary lookup), never clicks.
+  - Gap log: a question no guide answers is logged in `mcp_calls` with note `no-guide`
+    (target = the question with numbers / emails removed) and listed on Settings → AI
+    Connector → "Questions with no guide yet" (admin, last 30 days).
+  - Tests: `scripts/smoke-mcp-howto.mjs` (pure, in CI): every page exists in `src/app`, every
+    quoted label / highlight / field label exists in `src/` outside the help data, page gates
+    equal the app's `requireModule` / `requireAdmin`, errors are the app's own text, flows
+    name a role on every step, supervisor-only + explain-only hold, ranking (EN + 中文).
+    `smoke-mcp-db.mjs` runs `how_to` through the real handler and checks the gap log.
+  - Round 5 findings (app, not fixed here — owner to decide): (1) `/inbox`, `/contacts`,
+    `/internal` and `/settings/auto-assign` have no `requireModule` guard: unticking a module
+    hides the rail entry but the page still opens by URL (a DRIVER can open `/contacts`).
+    (2) The inbox server actions (`app/actions.ts` sendMessage / assignConversation /
+    setConversationStatus, `inbox/actions.ts`) check only the company, not the org-chart
+    visibility, nor the Roles page's "Reply to customers" / "Assign chats" capabilities —
+    those two matrix cells are not enforced anywhere. (3) `templates/actions.ts`
+    submitTemplate / removeTemplate only require a signed-in member (the Templates page needs
+    the settings module). (4) Any member can delete a contact (`contacts/actions.ts
+    deleteContact`, company check only).
 - **Not yet proven on production:** a real Claude / ChatGPT connection, and the
   sign-in → back-to-Allow hop (needs a real ERP login). First production use creates
   the tables through ensure-mcp.

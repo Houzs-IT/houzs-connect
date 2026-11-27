@@ -73,6 +73,13 @@ jobs:
       - name: AI Connector proactive smoke test (pure, no DB, no network)
         run: node scripts/smoke-mcp-proactive.mjs
 
+      # AI Connector round 5 (process help): every guide page exists in src/app,
+      # every quoted label exists in src/, page gates equal requireModule /
+      # requireAdmin, errors are the app's own text, chat-content guides stay
+      # supervisor-only, and how_to / glossary / explain_error / onboarding answer.
+      - name: AI Connector process-help smoke test (pure, no DB)
+        run: node scripts/smoke-mcp-howto.mjs
+
       # AI Connector end to end against the real Postgres: OAuth → token → MCP
       # tools, own visibility + modules, blocked paths, refresh, disconnect, leak check.
       - name: AI Connector smoke test (real Postgres)
