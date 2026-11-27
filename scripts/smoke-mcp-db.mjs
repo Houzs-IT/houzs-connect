@@ -546,6 +546,14 @@ x = await rpc(ownerTok.access_token, { jsonrpc: "2.0", id: 2, method: "tools/lis
 assert(Array.isArray(x.body.result.tools), "tools/list is not counted or refused");
 const limited = await sql.unsafe(`select count(*)::int as n from connect.mcp_calls where email = '${ownerEmail}' and status = 429`);
 assert(limited[0].n === 1 && (await store.countRecentCalls(appDb, owner.email)).minute === r3.RATE_LIMITS.perMinute, "refusal logged as 429 and not counted");
+// A batch counts its own earlier calls: they are not in mcp_calls until after the answer.
+await ageCalls();
+await fill(r3.RATE_LIMITS.perMinute - 2, "4 seconds"); // not "5 seconds": ids derive from it and those rows still exist
+const wb = (i) => ({ jsonrpc: "2.0", id: 40 + i, method: "tools/call", params: { name: "whoami", arguments: {} } });
+x = await rpc(ownerTok.access_token, [wb(0), wb(1), wb(2)]);
+assert(!x.body[0].result.isError && !x.body[1].result.isError && x.body[2].result.content[0].text.startsWith("Too many requests"), "third call in a batch at the limit is refused");
+x = await rpc(ownerTok.access_token, Array.from({ length: server.MAX_BATCH + 1 }, (_, i) => wb(i)));
+assert(x.status === 400 && x.body.error.code === -32600, `a batch over ${server.MAX_BATCH} is refused`);
 await ageCalls();
 assert(!(await callNow(ownerTok.access_token, "whoami")).isError, "a minute later it works again");
 await fill(r3.RATE_LIMITS.perDay, "1 hour");

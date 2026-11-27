@@ -84,16 +84,48 @@ export async function verifySession(token: string, secret: string): Promise<stri
   return memberId;
 }
 
-/** Map an ERP role name to Connect's Role enum (best-effort by keyword). */
-export function roleFromErp(erpRole: string | null | undefined): "OWNER" | "ADMIN" | "MANAGER" | "AGENT" | "SALES" | "DRIVER" | "VIEWER" {
-  const r = (erpRole ?? "").toLowerCase();
-  if (r.includes("owner")) return "OWNER";
-  if (r.includes("admin") || r.includes("it")) return "ADMIN";
-  if (r.includes("manager") || r.includes("director") || r.includes("head")) return "MANAGER";
-  if (r.includes("driver")) return "DRIVER";
-  if (r.includes("sales")) return "SALES";
-  if (r.includes("view")) return "VIEWER";
-  return "AGENT";
+type ConnectRole = "OWNER" | "ADMIN" | "MANAGER" | "AGENT" | "SALES" | "DRIVER" | "VIEWER";
+
+/** ERP role name (lower case) → Connect role. Exact names only: a substring match made
+ *  any role containing "it" (Credit…, Site…, Auditor) an ADMIN. Names from the Houzs ERP
+ *  public.roles [YH, chat, 2026-11-27] plus the staging names (lib/staging-logins.ts). */
+const ERP_ROLES: Record<string, ConnectRole> = {
+  owner: "OWNER",
+  "super admin": "ADMIN", // SUPER_ADMIN is granted in Connect, never from the ERP
+  admin: "ADMIN",
+  "it admin": "ADMIN",
+  "it admin (agreement approver)": "ADMIN",
+  "it admin (with approval)": "ADMIN",
+  "logistic admin": "ADMIN",
+  manager: "MANAGER",
+  "managing director": "MANAGER",
+  "sales director": "MANAGER",
+  "sales director (price approver)": "MANAGER",
+  sales: "SALES",
+  "sales person": "SALES",
+  driver: "DRIVER",
+  viewer: "VIEWER",
+  "calendar viewer": "VIEWER",
+  agent: "AGENT",
+  "bd exec": "AGENT",
+  finance: "AGENT",
+  "finance executive": "AGENT",
+  helper: "AGENT",
+  hr: "AGENT",
+  "hr & operation executive": "AGENT",
+  logistic: "AGENT",
+  marketing: "AGENT",
+  "new member (no access)": "AGENT",
+  "ops exec": "AGENT",
+  "pg wh assistant": "AGENT",
+  purchaser: "AGENT",
+  "senior operation executive": "AGENT",
+  storekeeper: "AGENT",
+};
+
+/** Map an ERP role name to Connect's Role enum. An unlisted name gets the least access (VIEWER). */
+export function roleFromErp(erpRole: string | null | undefined): ConnectRole {
+  return ERP_ROLES[(erpRole ?? "").trim().toLowerCase()] ?? "VIEWER";
 }
 
 export const SESSION_COOKIE = "hc_session";

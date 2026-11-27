@@ -28,9 +28,10 @@ export const CORS_HEADERS: Record<string, string> = {
   "Access-Control-Expose-Headers": "WWW-Authenticate, Mcp-Session-Id",
 };
 
-/** Who manages the connector (approve, disconnect, leak check): Connect's top roles. */
+/** Who manages the connector (approve, disconnect, leak check): Super Admins only. OWNER comes
+ *  from an ERP role name, and connector admin sees every company. */
 export function isMcpAdminRole(role: string | null | undefined): boolean {
-  return role === "SUPER_ADMIN" || role === "OWNER";
+  return role === "SUPER_ADMIN";
 }
 
 // ── crypto ────────────────────────────────────────────────────────────────

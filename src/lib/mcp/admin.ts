@@ -94,7 +94,7 @@ export async function adminOverview(db: DB): Promise<AdminOverview> {
     `),
     q(db, sql`
       select lower(m.email) as email, min(m.name) as name, string_agg(distinct co.name, ', ') as companies,
-        bool_or(m.role::text in ('SUPER_ADMIN', 'OWNER')) as admin
+        bool_or(m.role::text = 'SUPER_ADMIN') as admin
       from connect.member m join connect.company co on co.id = m.company_id
       where m.active and co.active
         and lower(m.email) not in (select email from connect.mcp_access)
