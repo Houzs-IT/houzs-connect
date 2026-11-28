@@ -20,6 +20,7 @@ import {
   campaign as campaignTable,
   channel as channelTable,
   contact as contactTable,
+  contactTag as contactTagTable,
   tag as tagTable,
 } from "@/db/schema";
 import { getCurrentMember } from "@/lib/current-member";
@@ -592,7 +593,14 @@ export async function listBroadcastContacts(): Promise<{
       where: eq(tagTable.companyId, c.companyId),
       columns: { id: true, name: true },
     }),
-    c.db.query.contactTag.findMany({ columns: { contactId: true, tagId: true } }),
+    // Only links to THIS company's tags. Before the 2026-11-28 audit fix this
+    // read every contact-tag link in the database, across all companies, and
+    // dropped the foreign ones afterwards (scripts/smoke-action-guards.mjs).
+    c.db
+      .select({ contactId: contactTagTable.contactId, tagId: contactTagTable.tagId })
+      .from(contactTagTable)
+      .innerJoin(tagTable, eq(tagTable.id, contactTagTable.tagId))
+      .where(eq(tagTable.companyId, c.companyId)),
   ]);
   const tagName = new Map(tags.map((t) => [t.id, t.name]));
   const byContact = new Map<string, string[]>();

@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { getDb } from "@/db/client";
 import { getCurrentMember } from "@/lib/current-member";
+import { myModules } from "@/lib/full-access";
 import { headerFileProblem, isHeaderMediaFormat, type HeaderMediaFormat } from "@/lib/template-media-limits";
 import { saveTemplateMedia } from "@/lib/whatsapp/templateMedia";
 import {
@@ -27,11 +28,20 @@ import { company } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { starterSetForSlug } from "./starterTemplates";
 
-/** Auth gate. Templates steer what every customer receives, so a caller must
- *  be a signed-in member — the same bar settings mutations use. */
+/** Auth gate. Templates steer what every customer receives (and submit /
+ *  delete reach Meta), so a caller needs the SAME bar as the Templates pages:
+ *  signed in AND the company's Settings module (settings/templates/layout.tsx
+ *  requireModule("settings")). Before the 2026-11-28 audit fix this only
+ *  checked the sign-in, so any member — a driver included — could submit or
+ *  delete templates at Meta by calling the action directly. */
 async function requireMember() {
-  return await getCurrentMember();
+  const me = await getCurrentMember();
+  if (!me) return null;
+  if (!(await myModules()).includes("settings")) return null;
+  return me;
 }
+
+const NO_ACCESS = "Not signed in, or Templates is not open to you (it needs the Settings module).";
 
 /** A fallback name for a header file the browser handed over unnamed. */
 function defaultHeaderName(format: HeaderMediaFormat): string {
@@ -63,7 +73,7 @@ export interface SubmitResult {
 
 /** Submit one template to Meta for review. */
 export async function submitTemplate(draft: TemplateDraft): Promise<SubmitResult> {
-  if (!(await requireMember())) return { ok: false, error: "Not signed in." };
+  if (!(await requireMember())) return { ok: false, error: NO_ACCESS };
   const cfg = templateConfig();
   if (!cfg) {
     return {
@@ -130,7 +140,7 @@ export async function submitTemplateWithBinding(
   payload: ComposerPayload
 ): Promise<SubmitResult> {
   const me = await requireMember();
-  if (!me) return { ok: false, error: "Not signed in." };
+  if (!me) return { ok: false, error: NO_ACCESS };
 
   // Keyed by the name Meta will actually store (createTemplate normalises it too).
   await saveComposerBinding(me.companyId, payload);
@@ -147,7 +157,7 @@ export async function submitTemplateWithBinding(
  */
 export async function submitMediaHeaderTemplate(fd: FormData): Promise<SubmitResult> {
   const me = await requireMember();
-  if (!me) return { ok: false, error: "Not signed in." };
+  if (!me) return { ok: false, error: NO_ACCESS };
   const cfg = templateConfig();
   if (!cfg) return { ok: false, error: "WhatsApp is not connected yet — WHATSAPP_WABA_ID and WHATSAPP_TOKEN are not set on the Worker." };
   let payload: ComposerPayload;
@@ -198,7 +208,7 @@ export async function submitMediaHeaderTemplate(fd: FormData): Promise<SubmitRes
  */
 export async function setTemplateHeaderFile(fd: FormData): Promise<{ ok: boolean; error?: string }> {
   const me = await requireMember();
-  if (!me) return { ok: false, error: "Not signed in." };
+  if (!me) return { ok: false, error: NO_ACCESS };
   const name = String(fd.get("name") ?? "").trim();
   const language = String(fd.get("language") ?? "").trim();
   const format = String(fd.get("format") ?? "");
@@ -230,7 +240,7 @@ export async function setTemplateHeaderFile(fd: FormData): Promise<{ ok: boolean
  * access token is never included — the command reads it from $WHATSAPP_TOKEN.
  */
 export async function templateCurl(payload: ComposerPayload): Promise<{ ok: boolean; curl?: string; error?: string }> {
-  if (!(await requireMember())) return { ok: false, error: "Not signed in." };
+  if (!(await requireMember())) return { ok: false, error: NO_ACCESS };
   const req = templateRequest(templateConfig()?.wabaId ?? "<WABA_ID>", {
     name: payload.name,
     language: payload.language,
@@ -268,7 +278,7 @@ export async function saveBindingAction(
   bindings: VarBinding[]
 ): Promise<{ ok: boolean; error?: string }> {
   const me = await requireMember();
-  if (!me) return { ok: false, error: "Not signed in." };
+  if (!me) return { ok: false, error: NO_ACCESS };
   if (!templateName || !language) return { ok: false, error: "Missing template name or language." };
   await saveTemplateBinding(me.companyId, templateName, language, asBindings(bindings));
   revalidatePath("/settings/templates");
@@ -286,7 +296,7 @@ export async function setTemplateOwnerAction(
   owner: string | null
 ): Promise<{ ok: boolean; error?: string }> {
   const me = await requireMember();
-  if (!me) return { ok: false, error: "Not signed in." };
+  if (!me) return { ok: false, error: NO_ACCESS };
   const name = templateName.trim();
   if (!name) return { ok: false, error: "Missing template name." };
   // "" / null → clear the override; otherwise it must be a company we know.
@@ -323,7 +333,7 @@ export async function editTemplateAction(
   payload: EditPayload
 ): Promise<{ ok: boolean; error?: string }> {
   const me = await requireMember();
-  if (!me) return { ok: false, error: "Not signed in." };
+  if (!me) return { ok: false, error: NO_ACCESS };
   const cfg = templateConfig();
   if (!cfg) {
     return {
@@ -448,7 +458,7 @@ export async function syncTemplates(): Promise<void> {
  */
 export async function submitCarouselTemplate(fd: FormData): Promise<SubmitResult> {
   const me = await requireMember();
-  if (!me) return { ok: false, error: "Not signed in." };
+  if (!me) return { ok: false, error: NO_ACCESS };
   const cfg = templateConfig();
   if (!cfg) return { ok: false, error: "WhatsApp is not connected yet — WHATSAPP_WABA_ID and WHATSAPP_TOKEN are not set on the Worker." };
   let payload: ComposerPayload;

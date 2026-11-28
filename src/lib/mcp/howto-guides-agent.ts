@@ -26,7 +26,9 @@ export const AGENT_GUIDES: HowtoGuide[] = [
       "The customer wrote to you in the last 24 hours (the window is open).",
     ],
     who: "Agents, sales, managers and admins — anyone who works the Service inbox.",
-    permission: "Service module. The send is checked against your company only (app/actions.ts authorizeConversation); the reply window is enforced by the composer and by WhatsApp.",
+    // lib/inbox-guard.ts (audit 2026-11-28): company + the rail's visibility + "Reply to customers".
+    needs: { cap: "reply" },
+    permission: "Service module, a chat you can see, and the Roles page's \"Reply to customers\" for your role. The reply window is enforced by the composer and by WhatsApp.",
     page: "/inbox",
     sidebar: "Service",
     fields: [
@@ -93,7 +95,8 @@ export const AGENT_GUIDES: HowtoGuide[] = [
       "WhatsApp is connected for your company (otherwise the list is empty).",
     ],
     who: "Agents, sales, managers and admins working the Service inbox.",
-    permission: "Service module (app/actions.ts sendTemplateMessage checks your company only).",
+    needs: { cap: "reply" },
+    permission: "Service module, a chat you can see, and \"Reply to customers\" for your role (app/actions.ts sendTemplateMessage, lib/inbox-guard.ts).",
     page: "/inbox",
     sidebar: "Service",
     fields: [
@@ -157,7 +160,8 @@ export const AGENT_GUIDES: HowtoGuide[] = [
       "There is an approved template to send.",
     ],
     who: "Agents, sales, managers and admins.",
-    permission: "Service module (conversation-actions.ts startConversation checks the contact is in your company).",
+    needs: { cap: "reply" },
+    permission: "Service module and \"Reply to customers\" for your role (conversation-actions.ts startConversation also checks the contact is in your company).",
     page: "/inbox",
     sidebar: "Service",
     fields: [
@@ -200,9 +204,10 @@ export const AGENT_GUIDES: HowtoGuide[] = [
     keywords: ["assign", "transfer", "reassign", "hand over", "pass chat", "department", "unassign", "指派", "转给", "转交", "分配", "tukar", "serah"],
     purpose: "Hand a chat to the right person or department so it is answered by whoever owns it, and so it shows in their \"Assigned to me\" or department view.",
     prerequisites: ["The Service module is on and you can see the conversation.", "The colleague is an active member of this company; departments come from the Houzs ERP."],
-    who: "Agents, managers and admins.",
-    // app/actions.ts assignConversation: company check only (authorizeConversation). The Roles page's "Assign chats" capability is not checked by this action today.
-    permission: "Service module. The assign action checks the conversation is in your company.",
+    // app/actions.ts assignConversation: company + visibility + the Roles page's "Assign chats" (lib/inbox-guard.ts, audit 2026-11-28).
+    who: "Roles with \"Assign chats\" — managers and admins by default.",
+    needs: { cap: "assign" },
+    permission: "Service module, a chat you can see, and the Roles page's \"Assign chats\" for your role.",
     page: "/inbox",
     sidebar: "Service",
     fields: [
@@ -244,7 +249,7 @@ export const AGENT_GUIDES: HowtoGuide[] = [
     purpose: "Set a chat's status so the inbox shows what still needs work: Open, Pending (waiting on the customer), Queue (waiting for someone to pick it up) or Closed (resolved).",
     prerequisites: ["The Service module is on and you can see the conversation."],
     who: "Agents, managers and admins.",
-    permission: "Service module (app/actions.ts setConversationStatus and inbox/actions.ts check your company only).",
+    permission: "Service module and a chat you can see (app/actions.ts setConversationStatus, lib/inbox-guard.ts).",
     page: "/inbox",
     sidebar: "Service",
     fields: [],
@@ -281,7 +286,7 @@ export const AGENT_GUIDES: HowtoGuide[] = [
     purpose: "Leave a message for colleagues inside the chat. A private note stays in Connect and is never sent to the customer.",
     prerequisites: ["The Service module is on and you can see the conversation."],
     who: "Anyone working the chat.",
-    permission: "Service module (app/actions.ts sendMessage with kind = note; company check only).",
+    permission: "Service module and a chat you can see (app/actions.ts sendMessage with kind = note; no reply switch needed).",
     page: "/inbox",
     sidebar: "Service",
     fields: [{ label: "Write an internal note (not sent to the customer)…", required: true, format: "Free text.", validation: "Cannot be empty.", example: "Customer prefers calls after 6pm. Gate code is with Mei." }],
@@ -454,7 +459,8 @@ export const AGENT_GUIDES: HowtoGuide[] = [
       // whatsapp/transport.ts blockedReason — sends to a blocked contact are refused.
       "A blocked contact gets nothing from Connect until unblocked.",
     ],
-    warnings: ["Delete (in the contact's \"More\" menu) removes the contact and its conversations, messages and payments for good."],
+    // lib/contact-access.ts mayDeleteContacts (audit 2026-11-28).
+    warnings: ["Delete (in the contact's \"More\" menu, shown only to roles with \"Manage settings\") removes the contact and its conversations, messages and payments for good."],
     undo: "Unblock with \"Unblock\". A deleted contact cannot be restored.",
     approvals: [],
     deadlines: [],

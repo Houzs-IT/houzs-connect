@@ -7,12 +7,14 @@ import { PageChrome } from "@/components/PageChrome";
 import { SecondaryMenu } from "@/components/shell/SecondaryMenu";
 import { IconSearch } from "@/components/icons";
 import { getCurrentMember } from "@/lib/current-member";
+import { can } from "@/lib/permissions";
 import { campaignCounts } from "@/lib/campaign-messages";
 import { fmt } from "@/lib/i18n/dict";
 import { getDict } from "@/lib/i18n/server";
 import { resolveAudience } from "./audience";
 import { unpackSpec, type CampaignStats } from "./spec";
 import { CampaignRowMenu } from "./CampaignRowMenu";
+import { ResumeButton } from "./ResumeButton";
 import { DueBanner } from "./DueBanner";
 import { RangePicker } from "./RangePicker";
 import { CampIcon, StatusBadge, campStatus, whenLabel, type CampStatus } from "./ui";
@@ -32,6 +34,12 @@ function one(v: string | string[] | undefined): string {
 const MANAGERS = new Set(["SUPER_ADMIN", "OWNER", "ADMIN", "MANAGER"]);
 
 /** Lifecycle order when sorting by status. */
+/** People a "sending" campaign has not reached yet: everyone it can message minus those already attempted. */
+function leftOf(stats: CampaignStats): number {
+  const reachable = (stats.total ?? 0) - (stats.skippedBlocked ?? 0) - (stats.skippedOptedOut ?? 0);
+  return Math.max(0, reachable - (stats.doneIds?.length ?? 0));
+}
+
 const STATUS_RANK: Record<CampStatus, number> = { draft: 0, scheduled: 1, due: 2, sending: 3, sent: 4, failed: 5 };
 
 export default async function CampaignsPage({
@@ -114,7 +122,7 @@ export default async function CampaignsPage({
   const shown = all.filter((r) => {
     if (!statusFilter) return true;
     if (statusFilter === "approval") return r.waiting;
-    if (statusFilter === "sent") return r.s === "sent" || r.s === "sending";
+    if (statusFilter === "sent") return r.s === "sent";
     return r.s === statusFilter;
   });
   const due = all.filter((r) => r.s === "due");
@@ -160,6 +168,8 @@ export default async function CampaignsPage({
   };
 
   const canApprove = MANAGERS.has(me.role);
+  // Resume runs the same send as Send now (actions.ts ctx: the "Send campaigns" switch).
+  const canSend = await can(me, "campaigns");
 
   const columns: DataColumn[] = [
     { key: "campaign", label: L.colCampaign },
@@ -250,6 +260,14 @@ export default async function CampaignsPage({
         status: (
           <div className="leading-tight">
             <StatusBadge s={r.s} L={L} />
+            {r.s === "sending" && (
+              // Audit 2026-11-28 (X3): a campaign that stopped halfway used to sit
+              // under "Sent" looking finished. Say how many are left and offer Resume.
+              <>
+                <div className="mt-1 text-[11px] text-[var(--color-warning)]">{fmt(L.leftN, { n: leftOf(stats) })}</div>
+                {canSend && <ResumeButton campaignId={r.id} />}
+              </>
+            )}
             {r.requiresApproval && (r.approvedByMemberId || !sentState) && (
               <div className={`mt-1 text-[11px] ${r.approvedByMemberId ? "text-[var(--color-faint)]" : "text-[var(--color-warning)]"}`}>
                 {r.approvedByMemberId ? L.approved : L.waiting}
@@ -284,7 +302,8 @@ export default async function CampaignsPage({
               { href: "?status=draft", label: L.draft, count: n("draft"), dot: "var(--color-border-strong)" },
               { href: "?status=scheduled", label: L.scheduled, count: n("scheduled"), dot: "var(--color-pastel-orange-ink)" },
               { href: "?status=due", label: L.due, count: n("due"), dot: "var(--color-danger)" },
-              { href: "?status=sent", label: L.sent, count: n("sent") + n("sending"), dot: "var(--color-success)" },
+              { href: "?status=sending", label: L.sending, count: n("sending"), dot: "var(--color-accent)" },
+              { href: "?status=sent", label: L.sent, count: n("sent"), dot: "var(--color-success)" },
               { href: "?status=failed", label: L.failed, count: n("failed"), dot: "var(--color-danger)" },
             ],
           },

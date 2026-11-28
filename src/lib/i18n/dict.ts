@@ -369,6 +369,8 @@ const en = {
     tContact: "Send contact",
     closedBanner:
       "The 24-hour reply window is closed. WhatsApp will refuse a typed message to this customer. Send a template, or wait for them to write, which reopens the window for 24 hours.",
+    noReplyBanner:
+      'Your role may not reply to customers (Settings → Roles & permissions: "Reply to customers"). You can still add internal notes.',
     overview: "Overview",
     order: "Order",
     fields: "Fields",
@@ -797,6 +799,10 @@ const en = {
     confirmSend: "Yes — message {n} now",
     sendingNow: "Sending…",
     sentDone: "Sent to {sent} of {n} recipients.",
+    leftN: "{n} left",
+    resume: "Resume",
+    resumeSure: "Send to the rest?",
+    resumeTitle: "This campaign stopped before everyone got it. Resume sends only to the people who have not had it yet.",
     // composer
     stepAudience: "Audience",
     stepMessage: "Message",
@@ -2153,6 +2159,7 @@ const zh: Dict = {
     tContact: "发送联系人",
     closedBanner:
       "24 小时回复窗口已关闭，WhatsApp 会拒收打字消息。请发送模板，或等客户发消息，重新打开 24 小时窗口。",
+    noReplyBanner: "你的角色不能回复客户（设置 → 角色与权限：“回复客户”）。你仍可添加内部备注。",
     overview: "概览",
     order: "订单",
     fields: "字段",
@@ -2581,6 +2588,10 @@ const zh: Dict = {
     confirmSend: "确认 — 现在发给 {n} 人",
     sendingNow: "发送中…",
     sentDone: "已发给 {n} 人中的 {sent} 人。",
+    leftN: "还剩 {n} 人",
+    resume: "继续发送",
+    resumeSure: "发给剩下的人？",
+    resumeTitle: "这个群发在所有人收到前停了。继续发送只会发给还没收到的人。",
     stepAudience: "受众",
     stepMessage: "消息",
     stepReview: "检查并发送",

@@ -12,9 +12,12 @@
 // confirmed proposal for the connector) and calls authorizeConversationFor
 // first, which is the inbox's own company rule.
 
-import { and, eq } from "drizzle-orm";
+import { and, eq, type InferSelectModel } from "drizzle-orm";
 import type { DB } from "@/db/client";
-import { contact, conversation, member, note } from "@/db/schema";
+import { contact, conversation, conversationMember, member, note } from "@/db/schema";
+import { getVisibility } from "@/lib/access";
+import { conversationVisible, inboxWriteRefusal, type InboxWrite } from "@/lib/inbox-guard";
+import { can } from "@/lib/permissions";
 import { logActivity } from "@/lib/activity";
 import { setConversationClosedAt } from "@/db/ensure-conversation-closed-at";
 import { sendOutbound } from "@/lib/whatsapp/transport";
@@ -43,6 +46,46 @@ export async function authorizeConversationFor(db: DB, me: { companyId: string }
 }
 
 export type AuthorizedConversation = NonNullable<Awaited<ReturnType<typeof authorizeConversationFor>>>;
+
+type Actor = Pick<InferSelectModel<typeof member>, "id" | "companyId" | "role" | "departmentId">;
+
+/** Is this person a chat member (conversation_member) of the conversation? A missing table = no. */
+async function isChatMember(db: DB, conversationId: string, memberId: string): Promise<boolean> {
+  try {
+    const r = await db.query.conversationMember.findFirst({
+      where: and(eq(conversationMember.conversationId, conversationId), eq(conversationMember.memberId, memberId)),
+      columns: { id: true },
+    });
+    return !!r;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The full rule for an inbox WRITE (lib/inbox-guard.ts): the company rule
+ * above, then the rail's org-chart visibility for this person, then the Roles
+ * page's "Reply to customers" / "Assign chats" switch the write needs.
+ * Returns the conversation, or the refusal in words.
+ */
+export async function authorizeInboxWrite(
+  db: DB,
+  me: Actor,
+  conversationId: string,
+  write: InboxWrite
+): Promise<{ ok: true; convo: AuthorizedConversation } | { ok: false; error: string }> {
+  const convo = await authorizeConversationFor(db, me, conversationId);
+  if (!convo) return { ok: false, error: "Conversation not found in this company." };
+  const [seeAll, reply, assign] = await Promise.all([can(me, "seeAll"), can(me, "reply"), can(me, "assign")]);
+  const allMembers = await db.query.member.findMany({
+    where: eq(member.companyId, me.companyId),
+    columns: { id: true, managerId: true },
+  });
+  const vis = getVisibility(me, allMembers, seeAll);
+  const visible = conversationVisible(vis, convo) || (await isChatMember(db, convo.id, me.id));
+  const refusal = inboxWriteRefusal(write, visible, { reply, assign });
+  return refusal ? { ok: false, error: refusal } : { ok: true, convo };
+}
 
 /**
  * A typed reply, through sendOutbound — the only path that reaches Meta (it

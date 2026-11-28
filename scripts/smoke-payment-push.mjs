@@ -18,7 +18,7 @@ function assert(cond, msg) {
   if (!cond) throw new Error(`ASSERT FAILED: ${msg}`);
 }
 
-const { buildPaymentBody, interpretErpResponse, resolveMethod, normalizeCurrency, mapBankToErpCode, mapOnlineType, MAX_SLIP_BYTES } =
+const { buildPaymentBody, erpLockReason, interpretErpResponse, resolveMethod, normalizeCurrency, mapBankToErpCode, mapOnlineType, MAX_SLIP_BYTES } =
   await import("../src/lib/sync/erp-payments-core.ts");
 
 const slip = { base64: "AAAA", mime: "image/jpeg", bytes: 1024 };
@@ -136,5 +136,31 @@ assert(interpretErpResponse(503, null).kind === "pending", "503 -> pending (retr
 assert(interpretErpResponse(404, null).kind === "pending", "404 (endpoint not merged yet) -> pending (retry)");
 // A 200 that nonetheless says ok:false is a payload problem, not a success.
 assert(interpretErpResponse(200, { ok: false, reason: "weird" }).kind === "blocked", "200 ok:false -> blocked");
+
+// ── The ERP lock (audit 2026-11-28, X2) ──
+// Before: Reopen moved a VERIFIED payment back to PENDING even after the ERP push,
+// staff could change the amount or reject it, and the ERP silently kept the old one.
+assert(erpLockReason(null) === null, "never pushed -> not locked");
+assert(erpLockReason({ status: "PENDING" }) === null, "push queued / retrying -> not locked");
+assert(erpLockReason({ status: "BLOCKED" }) === null, "push blocked (needs a human) -> not locked");
+const lock = erpLockReason({ status: "SYNCED", soNo: "SO-2990-1001" });
+assert(lock && lock.includes("SO-2990-1001") && lock.includes("in the ERP") && /Reverse or correct it in the ERP first/.test(lock), "SYNCED -> locked, names the SO, says to fix it in the ERP");
+assert(erpLockReason({ status: "SYNCED", erpPaymentRef: "PAY-9" }).includes("PAY-9"), "falls back to the ERP payment ref");
+{
+  const fs = await import("node:fs");
+  const src = (p) => fs.readFileSync(new URL(`../${p}`, import.meta.url), "utf8");
+  const bodyOf = (text, fn) => {
+    const from = text.indexOf(`export async function ${fn}`);
+    assert(from >= 0, `${fn} exists`);
+    const next = text.indexOf("\nexport ", from + 10);
+    return text.slice(from, next < 0 ? undefined : next);
+  };
+  const pay = src("src/app/(app)/payments/actions.ts");
+  assert(bodyOf(pay, "reviewPayment").includes("paymentErpLock("), "reviewPayment checks the ERP lock before reopen / reject");
+  assert(bodyOf(pay, "updatePaymentFields").includes("paymentErpLock("), "updatePaymentFields checks the ERP lock");
+  const sps = bodyOf(src("src/app/actions.ts"), "setPaymentStatus");
+  assert(sps.includes("paymentErpLock(") && sps.includes('can(me, "payments")'), "the inbox's setPaymentStatus has the same lock and the Confirm payments switch");
+  assert(src("src/app/(app)/payments/PaymentReview.tsx").includes("if (!res.ok) return setMsg"), "PaymentReview shows a refused review instead of moving on");
+}
 
 console.log("smoke-payment-push: all assertions passed");

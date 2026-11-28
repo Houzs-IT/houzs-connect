@@ -3,6 +3,8 @@
 import { revalidatePath } from "next/cache";
 import { and, desc, eq, gt, inArray, isNotNull, or, sql, type SQL } from "drizzle-orm";
 import { getCurrentMember } from "@/lib/current-member";
+import { authorizeInboxWrite } from "@/lib/inbox-writes";
+import type { InboxWrite } from "@/lib/inbox-guard";
 import { getDb, type DB } from "@/db/client";
 import { automationRun, contact, conversation, conversationMember, member, message } from "@/db/schema";
 import { senderForChannel } from "@/lib/whatsapp/channels";
@@ -25,17 +27,16 @@ import { logActivity } from "@/lib/activity";
  * conversation by id, and an id from another tenant is not this member's to
  * touch either.
  */
-async function authorizeConversation(conversationId: string) {
+async function authorizeConversation(conversationId: string, write: InboxWrite = "other") {
   if (!conversationId) return null;
   const me = await getCurrentMember();
   if (!me) return null;
   const db = getDb();
-  const convo = await db.query.conversation.findFirst({
-    where: eq(conversation.id, conversationId),
-    with: { contact: true },
-  });
-  if (!convo || convo.contact.companyId !== me.companyId) return null;
-  return { me, db, convo };
+  // Company rule + the rail's visibility + the Roles switch the write needs
+  // (lib/inbox-guard.ts) — not just the company, as before the 2026-11-28 audit.
+  const r = await authorizeInboxWrite(db, me, conversationId, write);
+  if (!r.ok) return null;
+  return { me, db, convo: r.convo };
 }
 
 /** How many conversations the rail loads per page — newest first. */
@@ -458,7 +459,7 @@ export async function removeChatMember(formData: FormData) {
  */
 export async function unassignConversation(formData: FormData) {
   const conversationId = String(formData.get("conversationId") ?? "");
-  const auth = await authorizeConversation(conversationId);
+  const auth = await authorizeConversation(conversationId, "assign");
   if (!auth) return;
 
   await auth.db

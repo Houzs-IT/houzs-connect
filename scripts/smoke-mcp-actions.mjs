@@ -159,11 +159,12 @@ function fakeConnect() {
 
 const ALL_ON = { main: true, chat_reply: true, conversation_assign: true, contact_note: true };
 let clock = NOW;
+let caps = { reply: true, assign: true };
 function setup(sw = ALL_ON, modules = [...MODULES]) {
   store = fakeStore({ ...sw });
   store.now = () => clock;
   const cx = fakeConnect();
-  const deps = { store, tokenId: "t1", me: { id: "a", email: "a@x", name: "Agent A" }, modules, read: cx.read, exec: cx.exec, now: () => clock };
+  const deps = { store, tokenId: "t1", me: { id: "a", email: "a@x", name: "Agent A" }, modules, read: cx.read, exec: cx.exec, caps: async () => ({ ...caps }), now: () => clock };
   return { deps, cx };
 }
 const realWrites = (cx) => cx.writes.filter((w) => w[0] !== "audit");
@@ -229,6 +230,28 @@ deps.read = origRead;
 ({ deps, cx } = setup(ALL_ON, ["contacts", "dashboard"]));
 p = await W.proposeWrite(deps, "chat_reply", { conversationId: "v1", text: "hi" });
 assert(!p.ok && p.status === 403 && p.text.startsWith("Not available to your role"), "no inbox module → refused");
+
+// ── 3b. The Roles page's "Reply to customers" / "Assign chats" (audit 2026-11-28) ──
+// Before: the connector (like the inbox buttons) checked visibility + company only,
+// so a role with "Reply to customers" switched off could still send.
+({ deps, cx } = setup());
+caps = { reply: false, assign: true };
+p = await W.proposeWrite(deps, "chat_reply", { conversationId: "v1", text: "hi" });
+assert(!p.ok && p.status === 403 && p.text.includes("Reply to customers"), `no "Reply to customers" → reply refused (${p.text})`);
+p = await W.proposeWrite(deps, "contact_note", { conversationId: "v1", as: "internal_note", note: "staff only" });
+assert(p.ok, "an internal note needs no reply switch");
+caps = { reply: true, assign: false };
+p = await W.proposeWrite(deps, "conversation_assign", { conversationId: "v1", assign_to: "me" });
+assert(!p.ok && p.status === 403 && p.text.includes("Assign chats"), `no "Assign chats" → assign refused (${p.text})`);
+p = await W.proposeWrite(deps, "conversation_assign", { conversationId: "v1", status: "resolved" });
+assert(p.ok, "a status-only change needs no assign switch");
+// Switched off between proposal and confirm: refused at confirm, nothing sent.
+caps = { reply: true, assign: true };
+p = await W.proposeWrite(deps, "chat_reply", { conversationId: "v1", text: "hello" });
+caps = { reply: false, assign: true };
+c1 = await W.confirmWrite(deps, p.confirmationId);
+assert(!c1.ok && c1.status === 403 && realWrites(cx).length === 0, "reply switch re-checked at confirm");
+caps = { reply: true, assign: true };
 
 // ── 4. Connect's send rules: 24 h window, blocked, colleague replied ──
 ({ deps, cx } = setup());

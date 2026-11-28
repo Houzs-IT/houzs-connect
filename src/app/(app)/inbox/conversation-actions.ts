@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { and, asc, desc, eq } from "drizzle-orm";
 import { getCurrentMember } from "@/lib/current-member";
+import { can } from "@/lib/permissions";
 import { getDb } from "@/db/client";
 import { channel, contact, conversation } from "@/db/schema";
 import { getOrCreateConversation, sendOutbound } from "@/lib/whatsapp/transport";
@@ -16,6 +17,9 @@ import { getOrCreateConversation, sendOutbound } from "@/lib/whatsapp/transport"
 export async function startConversation(formData: FormData): Promise<{ ok: true; id: string } | { ok: false; error: string }> {
   const me = await getCurrentMember();
   if (!me) return { ok: false, error: "forbidden" };
+  // It sends a template to the customer: the Roles page's "Reply to customers"
+  // (lib/inbox-guard.ts), like every other send from the inbox.
+  if (!(await can(me, "reply"))) return { ok: false, error: "forbidden" };
   const contactId = String(formData.get("contactId") ?? "");
   const templateName = String(formData.get("templateName") ?? "").trim();
   const language = String(formData.get("language") ?? "en").trim() || "en";

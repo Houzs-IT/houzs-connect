@@ -7,6 +7,7 @@ import { useShell } from "@/components/shell/ShellProvider";
 import { displayName, formatPhone, initials, tint } from "@/lib/format";
 import { fmt } from "@/lib/i18n/dict";
 import { reviewPayment, updatePaymentFields } from "./actions";
+import { erpLockReason } from "@/lib/sync/erp-payments-core";
 import { money } from "./util";
 import type { ErpSyncState } from "@/lib/sync/erp-payments";
 
@@ -60,6 +61,7 @@ export function PaymentReview({
   });
   const [dirty, setDirty] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const erpLock = erpLockReason(erpSync);
   const [pending, start] = useTransition();
   const [turn, setTurn] = useState(0);
   const [notImage, setNotImage] = useState(false);
@@ -86,7 +88,9 @@ export function PaymentReview({
         const res = await updatePaymentFields(p.id, f);
         if (!res.ok) return setMsg({ ok: false, text: res.error ?? "Could not save." });
       }
-      await reviewPayment(p.id, status);
+      const res = await reviewPayment(p.id, status);
+      // A refusal (e.g. already in the ERP) must be shown, not skipped past.
+      if (!res.ok) return setMsg({ ok: false, text: res.error ?? "Could not save." });
       router.push(status === "PENDING" ? backHref : nextHref);
       router.refresh();
     });
@@ -361,6 +365,9 @@ export function PaymentReview({
               ✓ {L.confirm}
             </button>
           </div>
+        ) : erpLock ? (
+          // Already in the ERP (erp-payments-core.ts erpLockReason): no Reopen here.
+          <p className="max-w-[420px] text-[12px] leading-relaxed text-[var(--color-muted)]">{erpLock}</p>
         ) : (
           <button
             type="button"

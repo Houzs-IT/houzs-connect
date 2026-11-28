@@ -1,6 +1,6 @@
 # Houzs Connect — Handoff / current state
 
-_Last updated: 2026-09-14 (§0). Sections 1–7 are the 2026-08-01 state and are kept as
+_Last updated: 2026-11-28 (audit fixes, top). 2026-09-14 (§0). Sections 1–7 are the 2026-08-01 state and are kept as
 history; where they disagree with §0, §0 is current._
 
 Houzs Connect (`chat.houzscentury.com`) is the in-house replacement for **Seampify**
@@ -11,6 +11,49 @@ a dedicated `connect` pgSchema.
 
 **Scope of the current engagement: get WhatsApp connected. Everything after that is handed
 to the next owner** — see §7.
+
+---
+
+## Audit fixes — 2026-11-28, branch `fix/audit-2026-11-28`
+
+Owner approved fixing every Connect item of the 2026-11-28 audit (X1–X5) plus the four
+findings logged under "Round 5 findings" below. Each has a root cause, a fix and a test
+that fails on the old code. **No data was changed**; nothing was deployed.
+
+| Item | Root cause | Fix | Test |
+|---|---|---|---|
+| X1 duplicate campaign send | `send.ts` claim also accepted rows already `sending` with no owner, and read `stats.doneIds` BEFORE the claim, so the cron + "Send now" (or two tabs) both sent the same 20 people | `claimCampaign` takes a **lease** (`stats.lease = {id, until}`, DB clock, 300 s) in one conditional UPDATE; progress is read from the claimed row; `releaseCampaign` writes only while the lease is ours. A second caller gets `busy` + a plain message | `scripts/smoke-campaign-lease.mjs` (real Postgres, CI): two simultaneous claims → one wins; expired lease taken over; stale write dropped |
+| X2 reopened ERP-synced payment | Reopen / reject / edit had no idea the ERP already had the payment; `onPaymentVerified` stops at SYNCED and never reverses | `erpLockReason` (erp-payments-core.ts) + `paymentErpLock`: once `erp_sync.status = SYNCED`, reopen / reject / edit are refused with "reverse or correct it in the ERP first"; the Reopen button is replaced by that text; the UI now shows a refused review instead of moving on. Re-confirming stays allowed (it only realigns Connect with the ERP). No two-way reversal (owner) | `smoke-payment-push.mjs` (lock rule + source pins) |
+| X3 campaign stops halfway | cron only picked `scheduled`; a `sending` campaign was filed under Sent with no Resume | cron (`sweeper.ts campaignsToSend`) also resumes `sending` campaigns with a free lease **started within 6 h** (`RESUME_WITHIN_HOURS`) — older ones never wake up by themselves; list has its own **Sending** filter, "N left" and a **Resume** button (needs "Send campaigns") | `smoke-campaign-lease.mjs` (recent resumed; old / held / unapproved not) |
+| X4 + round-5 #3 templates | `templates/actions.ts requireMember()` checked sign-in only | needs the Settings module, the same as the Templates pages | `smoke-action-guards.mjs` |
+| X5 broadcast picker | `listBroadcastContacts` read every company's `contact_tag` rows | joined to this company's tags | `smoke-action-guards.mjs` |
+| Round-5 #1 module guards | `/inbox`, `/contacts`, `/internal`, `/settings/auto-assign` had no `requireModule` | layouts now call it; a typed-in URL redirects (checked live: agent with Contacts / Internal unticked → `/dashboard`) | `smoke-mcp-howto.mjs` now fails when a PAGE_GATES module is not enforced in `src/app` |
+| Round-5 #2 inbox writes | actions checked the company only | `lib/inbox-guard.ts` + `inbox-writes.ts authorizeInboxWrite`: the rail's org-chart visibility (or being a chat member), **"Reply to customers"** for every send (reply, template, attachment, voice, contact card, start conversation), **"Assign chats"** for assign / unassign; notes / status / tags need visibility only. The AI Connector applies the same switches at propose and confirm. The UI hides Assign / Unassign and turns the composer into notes-only with a banner when the role lacks the switch | `smoke-inbox-guard.mjs`, `smoke-mcp-actions.mjs` §3b, `smoke-mcp-db.mjs` |
+| Round-5 #4 contact delete | `deleteContact` checked the company only | `lib/contact-access.ts mayDeleteContacts`: Contacts module + "Manage settings" (owners / admins by default); Delete is hidden for others | `smoke-action-guards.mjs` |
+
+**Decisions that look odd but are deliberate**
+
+- **DRIVER now has "Reply to customers" by default** (`permissions.ts`). Drivers start with
+  the Service module to talk to customers about their jobs and could always reply; the cell
+  was simply never checked. Enforcing it without this would have silenced every driver on
+  deploy. A company can untick it on Settings → Roles.
+- **Agents / sales lose Assign by default** — that is what the matrix always said
+  (`assign: S, A, M`). If the owner wants agents to keep reassigning, tick "Assign chats"
+  for AGENT on Settings → Roles (one click per company).
+- The thread page itself still OPENS for a chat outside your visibility (read was not in
+  scope); every write on it is refused.
+- The inbox `setPaymentStatus` action (no UI uses it) now needs "Confirm payments" too.
+- **X5 contact list is not capped/paged:** the picker filters in the browser, so a cap would
+  silently hide older contacts. Server-side search is the real fix — deferred.
+- A Worker killed mid-chunk can still re-send that chunk's already-sent people on resume
+  (progress is written once per chunk) — pre-existing, unchanged.
+
+**Verified locally** on a throwaway Postgres with the invented `help-shots-demo` data
+(localhost only): agent sees no Assign; Resolve on a colleague's chat is refused (status
+unchanged in the DB) while their own chat closes; "Reply to customers" off → notes-only
+banner (desktop + 375 px); Delete hidden for the agent, shown for the Super Admin; Sending
+row shows "30 left" + Resume; SYNCED payment shows the lock text and no Reopen (desktop +
+375 px), an unsynced one keeps "Move back to To check".
 
 ---
 
@@ -363,7 +406,7 @@ works on a phone).
     dependencies: `npm install --prefix .verify/tools --no-save playwright sharp esbuild`;
     needs PostgreSQL binaries (`PG_BIN`). Re-run after a UI change — the smoke fails on a
     stale box (a label that is no longer a target or no longer in `src/`).
-  - Round 5 findings (app, not fixed here — owner to decide): (1) `/inbox`, `/contacts`,
+  - Round 5 findings (app) — **all four FIXED 2026-11-28, see "Audit fixes" at the top**: (1) `/inbox`, `/contacts`,
     `/internal` and `/settings/auto-assign` have no `requireModule` guard: unticking a module
     hides the rail entry but the page still opens by URL (a DRIVER can open `/contacts`).
     (2) The inbox server actions (`app/actions.ts` sendMessage / assignConversation /

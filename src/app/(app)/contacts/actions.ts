@@ -18,6 +18,7 @@ import {
   tag,
 } from "@/db/schema";
 import { getCurrentMember } from "@/lib/current-member";
+import { mayDeleteContacts } from "@/lib/contact-access";
 import { logActivity } from "@/lib/activity";
 import { saveContactRemarksCore } from "@/lib/inbox-writes";
 import { saveMemberContactCols } from "@/lib/member-prefs";
@@ -163,6 +164,11 @@ export async function setContactBlocked(formData: FormData): Promise<void> {
  * hidden, because a campaign audience reads the contact table directly.
  */
 export async function deleteContact(formData: FormData) {
+  // Deleting a contact wipes their chats, messages, notes and payments with no
+  // undo, so it needs more than a sign-in (before the 2026-11-28 audit fix any
+  // member could do it by calling this action): see mayDeleteContacts.
+  const me = await getCurrentMember();
+  if (!(await mayDeleteContacts(me))) return;
   const c = await ctx();
   if (!c) return;
   const id = String(formData.get("id") ?? "");

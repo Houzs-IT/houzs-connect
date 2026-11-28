@@ -1,6 +1,7 @@
 import { Suspense } from "react";
 import { getDb } from "@/db/client";
 import { getCurrentMember } from "@/lib/current-member";
+import { requireModule } from "@/lib/full-access";
 import { companyChoices, isSuperAdmin } from "@/lib/companies";
 import { getDict } from "@/lib/i18n/server";
 import { Topbar } from "@/components/Topbar";
@@ -48,6 +49,9 @@ export default async function InboxLayout({
 }: {
   children: React.ReactNode;
 }) {
+  // Only for people with the Inbox module (Settings → Access, lib/full-access.ts).
+  // Covers /inbox and /inbox/[id] typed in by URL, not just the rail entry.
+  await requireModule("inbox");
   const me = await getCurrentMember();
   if (!me) return null; // the (app) layout redirects unauthenticated users to /login
 

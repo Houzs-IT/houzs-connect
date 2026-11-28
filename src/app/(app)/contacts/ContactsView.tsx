@@ -135,6 +135,7 @@ export function ContactsView({
   duplicates,
   activeId,
   initialColsRaw,
+  canDelete = false,
 }: {
   rows: ContactRow[];
   total: number;
@@ -151,6 +152,8 @@ export function ContactsView({
   /** The `hc_contacts_cols` cookie, read server-side, so the first paint already
    *  has this browser's chosen columns (no hydration jump). */
   initialColsRaw: string;
+  /** contacts/actions.ts mayDeleteContacts — the server refuses anyway. */
+  canDelete?: boolean;
 }) {
   const { t } = useShell();
   const s = t.contacts;
@@ -512,7 +515,7 @@ export function ContactsView({
                     })}
                     {cw.fixed && <td className="p-0" />}
                     <td className="px-2" onClick={(e) => e.stopPropagation()}>
-                      <ContactRowMenu row={r} onMerge={() => setMergeKeep(r)} />
+                      <ContactRowMenu row={r} onMerge={() => setMergeKeep(r)} canDelete={canDelete} />
                     </td>
                   </tr>
                 );
@@ -566,7 +569,7 @@ export function ContactsView({
 }
 
 /** Row ⋯ menu: Block / Unblock, Merge…, Delete. */
-function ContactRowMenu({ row, onMerge }: { row: ContactRow; onMerge: () => void }) {
+function ContactRowMenu({ row, onMerge, canDelete }: { row: ContactRow; onMerge: () => void; canDelete: boolean }) {
   const { t } = useShell();
   const s = t.contacts;
   return (
@@ -590,9 +593,11 @@ function ContactRowMenu({ row, onMerge }: { row: ContactRow; onMerge: () => void
           >
             {s.merge}
           </button>
-          <div className="px-1.5 py-1">
-            <DeleteContactButton contactId={row.id} name={row.name} />
-          </div>
+          {canDelete && (
+            <div className="px-1.5 py-1">
+              <DeleteContactButton contactId={row.id} name={row.name} />
+            </div>
+          )}
         </>
       )}
     </RowMenu>

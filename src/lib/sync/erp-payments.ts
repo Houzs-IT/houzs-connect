@@ -44,6 +44,7 @@ import { downloadMedia, mediaIdOf } from "@/lib/whatsapp/download";
 import { readReceipt, receiptVisionConfigured, type ReceiptReading } from "@/lib/receipt-vision";
 import {
   buildPaymentBody,
+  erpLockReason,
   interpretErpResponse,
   type ErpPaymentBody,
   type ErpResponseJson,
@@ -59,7 +60,7 @@ export type {
   ErpOutcome,
   ResolvedMethod,
 } from "./erp-payments-core";
-export { buildPaymentBody, interpretErpResponse, resolveMethod, normalizeCurrency, mapBankToErpCode, mapOnlineType, ALLOWED_SLIP_MIME, MAX_SLIP_BYTES } from "./erp-payments-core";
+export { buildPaymentBody, erpLockReason, interpretErpResponse, resolveMethod, normalizeCurrency, mapBankToErpCode, mapOnlineType, ALLOWED_SLIP_MIME, MAX_SLIP_BYTES } from "./erp-payments-core";
 
 const DEFAULT_ERP_BASE = "https://erp.houzscentury.com";
 const PUSH_PATH = "/api/connect/payments";
@@ -290,6 +291,22 @@ export async function pushPaymentToErp(paymentId: string): Promise<PushResult> {
   }
   if (outcome.kind === "blocked") return block(outcome.reason);
   return pend(outcome.reason);
+}
+
+/**
+ * The ERP lock for one payment (erp-payments-core.ts erpLockReason): the refusal
+ * text when the ERP already has it, else null. A missing erp_sync column (before
+ * ensurePaymentErpColumns ran) means never pushed, so not locked.
+ */
+export async function paymentErpLock(db: DB, paymentId: string): Promise<string | null> {
+  try {
+    const rows = (await db.execute(sql`select erp_sync from connect.payment where id = ${paymentId}`)) as unknown as {
+      erp_sync: ErpSyncState | null;
+    }[];
+    return erpLockReason(rows[0]?.erp_sync ?? null);
+  } catch {
+    return null;
+  }
 }
 
 /**

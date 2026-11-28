@@ -51,6 +51,25 @@ export interface ErpSyncState {
   reason?: string | null;
 }
 
+/**
+ * Why a payment may no longer be reopened, edited or rejected in Connect, or
+ * null when it may (audit 2026-11-28, X2).
+ *
+ * Once the ERP has the payment (erp_sync SYNCED), Connect is no longer the
+ * record: the push runs once (onPaymentVerified stops at SYNCED) and Connect
+ * never sends a reversal. Reopening it used to let staff change the amount and
+ * confirm again, or reject it, while the ERP silently kept the old payment.
+ * Owner decision: block it and send people to the ERP — no two-way reversal.
+ */
+export function erpLockReason(sync: Pick<ErpSyncState, "status" | "soNo" | "erpPaymentRef"> | null | undefined): string | null {
+  if (sync?.status !== "SYNCED") return null;
+  const ref = sync.soNo || sync.erpPaymentRef;
+  return (
+    `This payment is already in the ERP${ref ? ` (${ref})` : ""}, so it cannot be reopened, changed or rejected here. ` +
+    "Reverse or correct it in the ERP first; Connect does not send changes back to the ERP."
+  );
+}
+
 /** Currency the ERP accepts, or undefined to omit the optional field. */
 export function normalizeCurrency(cur: string | null | undefined): "MYR" | "RM" | undefined {
   const c = (cur ?? "").trim().toUpperCase();

@@ -21,6 +21,7 @@ export async function ContactDetail({
   s,
   statusLabel,
   yesterday,
+  canDelete = false,
 }: {
   companyId: string;
   id: string;
@@ -28,6 +29,8 @@ export async function ContactDetail({
   s: Dict["contacts"];
   statusLabel: Record<string, string>;
   yesterday: string;
+  /** contacts/actions.ts mayDeleteContacts — the server refuses anyway. */
+  canDelete?: boolean;
 }) {
   const d = await contactDetail(companyId, id);
   if (!d) return null;
@@ -88,6 +91,7 @@ export async function ContactDetail({
         >
           {s.edit}
         </Link>
+        {canDelete && (
         <details className="relative">
           <summary
             aria-label={s.more}
@@ -99,6 +103,7 @@ export async function ContactDetail({
             <DeleteContactButton contactId={c.id} name={name} />
           </div>
         </details>
+        )}
       </div>
 
       <div className="flex flex-col gap-4 border-t border-[var(--color-border-subtle)] px-4 py-4">

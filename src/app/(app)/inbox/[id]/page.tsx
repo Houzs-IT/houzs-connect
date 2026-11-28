@@ -15,6 +15,7 @@ import { ContactNameToggle } from "@/components/inbox/ContactNameToggle";
 import { DemoReplyBar } from "@/components/inbox/DemoReplyBar";
 import { WindowTimer } from "@/components/inbox/WindowTimer";
 import { getCurrentMember } from "@/lib/current-member";
+import { can } from "@/lib/permissions";
 import { photoSrcs } from "@/lib/member-photo";
 import { PersonAvatar } from "@/components/PersonAvatar";
 import { ensureConversationMemberTable } from "@/db/ensure-conversation-member";
@@ -89,6 +90,9 @@ export default async function ConversationPage({
   // "HOUZS · 011-6155 6133" when the inbox spans companies; just the number when
   // the company alone has several (8822 delivery, 6133 after-sales service); nothing when
   // there is only one number and the chip would say nothing new.
+  // The Roles page's switches decide which controls show; the server actions
+  // refuse the write anyway (lib/inbox-guard.ts).
+  const [canReply, canAssign] = await Promise.all([can(me, "reply"), can(me, "assign")]);
   const ownScope = scopes.find((sc) => sc.companyId === convo.channel.companyId);
   const lineCount = (await scopeChannels(db, scopes)).length;
   const origin =
@@ -361,6 +365,7 @@ export default async function ConversationPage({
             <div className="hidden md:block">
               <WindowTimer expiresAt={convo.windowExpiresAt?.toISOString() ?? null} />
             </div>
+            {canAssign && (
             <div className="hidden md:block">
               <AssignButton
                 conversationId={convo.id}
@@ -370,6 +375,7 @@ export default async function ConversationPage({
                 departments={departments.map((d) => ({ id: d.id, name: d.name }))}
               />
             </div>
+            )}
             {/* A phone keeps the header to name + menu, like the design. */}
             <div className="hidden md:block">
               <ResolveButton conversationId={convo.id} closed={convo.status === "CLOSED"} />
@@ -378,7 +384,7 @@ export default async function ConversationPage({
             <PanelToggle />
             {/* The panel (and its menu) is hidden below xl or when put away; keep the actions. */}
             <MenuWithoutPanel>
-              <ConversationMenu conversationId={convo.id} drips={liveDrips} />
+              <ConversationMenu conversationId={convo.id} drips={liveDrips} canAssign={canAssign} />
             </MenuWithoutPanel>
           </div>
         </div>
@@ -416,6 +422,7 @@ export default async function ConversationPage({
           // so a composer left open past the deadline would still invite a reply.
           windowExpiresAt={convo.windowExpiresAt?.toISOString() ?? null}
           templateVars={templateVars}
+          canReply={canReply}
         />
       </div>
 
@@ -451,6 +458,7 @@ export default async function ConversationPage({
           createdAt: stamp(p.createdAt),
         }))}
         automation={automation}
+        canAssign={canAssign}
       />
       </PanelGate>
     </div>

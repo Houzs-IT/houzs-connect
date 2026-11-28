@@ -118,8 +118,14 @@ export function Composer({
   conversationId,
   windowExpiresAt = null,
   templateVars = [],
+  canReply = true,
 }: {
   conversationId: string;
+  /**
+   * The Roles page's "Reply to customers" for this person. Without it the box
+   * is notes only; the server refuses a send anyway (lib/inbox-guard.ts).
+   */
+  canReply?: boolean;
   /**
    * When Meta's 24-hour customer-service window shuts, ISO, or null if the
    * customer has never written to us.
@@ -150,7 +156,7 @@ export function Composer({
     );
     return () => clearInterval(id);
   }, [windowExpiresAt]);
-  const [kind, setKind] = useState<"reply" | "note">("reply");
+  const [kind, setKind] = useState<"reply" | "note">(canReply ? "reply" : "note");
   // Phone layout: the tool row is behind "+", and the placeholder is short.
   const [tools, setTools] = useState(false);
   const isPhone = useSyncExternalStore(subscribeNarrow, () => window.matchMedia("(max-width: 767px)").matches, () => false);
@@ -197,13 +203,14 @@ export function Composer({
   }, [file, isImage]);
   useEffect(() => {
     const onReply = (e: Event) => {
+      if (!canReply) return;
       setReplyTarget((e as CustomEvent<ReplyTarget>).detail);
       setKind("reply");
       textRef.current?.focus();
     };
     window.addEventListener(REPLY_EVENT, onReply);
     return () => window.removeEventListener(REPLY_EVENT, onReply);
-  }, []);
+  }, [canReply]);
   const { t } = useShell();
   const s = t.service;
 
@@ -994,6 +1001,11 @@ export function Composer({
         className="hidden"
       />
 
+      {!canReply && (
+        <div className="mb-2 rounded-[8px] border border-[var(--color-border)] bg-[var(--color-surface-dim)] px-3 py-2 text-[12px] leading-relaxed text-[var(--color-ink)]">
+          {s.noReplyBanner}
+        </div>
+      )}
       {/* An internal note is ours, so the window never applies to it. */}
       {!windowOpen && !note && (
         <div className="mb-2 rounded-[8px] border border-[rgba(110,77,18,0.35)] bg-[var(--color-warning-soft)] px-3 py-2 text-[12px] leading-relaxed text-[var(--color-ink)]">
@@ -1033,7 +1045,7 @@ export function Composer({
         {/* type="button" is load-bearing: inside a form an untyped button
             defaults to submit. */}
         <div className="hidden items-center gap-4 px-3 pt-2 text-[12px] font-semibold md:flex">
-          {(["reply", "note"] as const).map((k) => (
+          {(canReply ? (["reply", "note"] as const) : (["note"] as const)).map((k) => (
             <button
               key={k}
               type="button"

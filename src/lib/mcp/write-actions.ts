@@ -35,6 +35,7 @@
 // Postgres (scripts/smoke-mcp-db.mjs).
 
 import type { Module } from "@/lib/module-access";
+import { inboxWriteRefusal, type InboxCaps } from "@/lib/inbox-guard";
 import { ACTIONS_PER_DAY, CONFIRMATION_ID, kindRefusal, myDayStartIso, type ActionStore, type WriteKind } from "./actions";
 
 type Obj = Record<string, unknown>;
@@ -99,8 +100,22 @@ export type WriteDeps = {
   /** A catalogue read as the person (server.ts readEndpoint). */
   read: (path: string, query?: Obj) => Promise<ReadReply>;
   exec: ExecPort;
+  /** The Roles page's "Reply to customers" / "Assign chats" for the person — the inbox's own switches (lib/inbox-guard.ts). */
+  caps: () => Promise<InboxCaps>;
   now?: () => number;
 };
+
+/**
+ * The Roles switch a chat write needs, as the inbox buttons apply it: a reply
+ * needs "Reply to customers"; changing who or which department holds a chat
+ * needs "Assign chats" (a status-only change does not). Visibility was already
+ * checked by the caller (conversationAsPerson / the confirm re-read).
+ */
+async function capRefusal(deps: WriteDeps, kind: WriteKind, payload: Obj): Promise<string | null> {
+  if (kind === "chat_reply") return inboxWriteRefusal("reply", true, await deps.caps());
+  if (kind === "conversation_assign" && ("agentId" in payload || "departmentId" in payload)) return inboxWriteRefusal("assign", true, await deps.caps());
+  return null;
+}
 
 export type Outcome = { ok: boolean; text: string; status: number; target: string };
 export type ProposeOutcome = Outcome & { confirmationId?: string; summary?: string; warnings?: string[] };
@@ -398,6 +413,8 @@ export async function proposeWrite(deps: WriteDeps, kind: WriteKind, args: Obj):
   }
   if (!p.ok) return fail(p.error, p.status);
   if (!payloadAllowed(kind, p.payload)) return fail("That action is not allowed.", 400);
+  const capOff = await capRefusal(deps, kind, p.payload);
+  if (capOff) return fail(`Not available to your role: ${capOff}`, 403);
   target = writeTarget(kind, p.payload);
   const id = await deps.store.create({ tokenId: deps.tokenId, memberId: deps.me.id, email: deps.me.email, kind, payload: p.payload, summary: p.summary });
   return { ok: true, text: "", status: 200, target, confirmationId: id, summary: p.summary, warnings: p.warnings };
@@ -435,6 +452,9 @@ export async function confirmWrite(deps: WriteDeps, raw: unknown): Promise<Outco
   };
   if (!payloadAllowed(act.kind, p)) return done("Not done — the request was blocked by the AI connector's write fence.", 400);
   if (!modulesOk(deps, act.kind)) return done(`Not done — ${NO_MODULE[act.kind]}`, 403);
+  // Re-checked now: the role's switch may have been turned off since the proposal.
+  const capOff = await capRefusal(deps, act.kind, p);
+  if (capOff) return done(`Not done — ${capOff}`, 403);
 
   // Re-check the conversation as the person now: access may have changed in the last 10 minutes.
   const convId = s(p.conversationId);

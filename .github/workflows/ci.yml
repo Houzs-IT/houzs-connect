@@ -85,6 +85,21 @@ jobs:
       - name: AI Connector smoke test (real Postgres)
         run: node scripts/smoke-mcp-db.mjs
 
+      # Audit 2026-11-28: two senders can never send the same campaign chunk
+      # (lease), and a campaign left "sending" is resumed by the cron only while
+      # recent — the real claim / release / cron query on the real Postgres.
+      - name: Campaign send lease smoke test (real Postgres)
+        run: node scripts/smoke-campaign-lease.mjs
+
+      # Audit 2026-11-28: inbox writes need the rail's visibility + the Roles
+      # page's "Reply to customers" / "Assign chats"; templates need Settings;
+      # contact delete needs Manage settings; pages are module-gated by URL.
+      - name: Inbox write guard smoke test (pure, no DB)
+        run: node scripts/smoke-inbox-guard.mjs
+
+      - name: Server-action guard smoke test (pure, no DB)
+        run: node scripts/smoke-action-guards.mjs
+
       - name: Org-sync planner smoke test (pure, no DB)
         run: node scripts/smoke-org-sync.mjs
 
