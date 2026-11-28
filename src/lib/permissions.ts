@@ -39,7 +39,10 @@ export const DEFAULTS: Record<Capability, MatrixRole[]> = {
   // was not checked. Keeping them in the default means nobody loses a reply
   // they had; a company can untick it on Settings → Roles.
   reply: [S, A, M, G, SL, D],
-  assign: [S, A, M],
+  // AGENT and SALES added 2026-11-28 (owner) when "Assign chats" started being
+  // enforced (lib/inbox-guard.ts): they could always reassign, and the owner wants
+  // them to keep it. A company's saved choice (connect.role_permission) still wins.
+  assign: [S, A, M, G, SL],
   campaigns: [S, A, M],
   automations: [S, A],
   payments: [S, A, M],

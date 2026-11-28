@@ -79,4 +79,13 @@ assert(body(app, "assignConversation").includes('authorizeConversation(conversat
 assert(body(inbox, "unassignConversation").includes('authorizeConversation(conversationId, "assign")'), "unassignConversation needs Assign chats");
 assert(/authorizeInboxWrite\(db, me, conversationId, "reply"\)/.test(media), "attachments / voice notes / contact cards need Reply to customers");
 
+// ── Role defaults (owner 2026-11-28): agents and sales KEEP "Assign chats" ──
+const { DEFAULTS } = await import("../src/lib/permissions.ts");
+for (const r of ["SUPER_ADMIN", "ADMIN", "MANAGER", "AGENT", "SALES"]) assert(DEFAULTS.assign.includes(r), `${r} has "Assign chats" by default`);
+assert(!DEFAULTS.assign.includes("VIEWER") && !DEFAULTS.assign.includes("DRIVER"), "viewers and drivers do not assign by default");
+for (const r of ["AGENT", "SALES", "DRIVER"]) assert(DEFAULTS.reply.includes(r), `${r} has "Reply to customers" by default`);
+// A saved choice on Settings → Roles still wins over the default (companyMatrix lays rows over DEFAULTS).
+const permSrc = read("src/lib/permissions.ts");
+assert(/m\[r\.role as MatrixRole\]\[r\.capability as Capability\] = r\.allowed/.test(permSrc), "a company's saved role_permission row overrides the code default");
+
 console.log(`smoke-inbox-guard: ok (${n} assertions)`);

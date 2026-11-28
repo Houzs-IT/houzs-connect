@@ -205,7 +205,7 @@ export const AGENT_GUIDES: HowtoGuide[] = [
     purpose: "Hand a chat to the right person or department so it is answered by whoever owns it, and so it shows in their \"Assigned to me\" or department view.",
     prerequisites: ["The Service module is on and you can see the conversation.", "The colleague is an active member of this company; departments come from the Houzs ERP."],
     // app/actions.ts assignConversation: company + visibility + the Roles page's "Assign chats" (lib/inbox-guard.ts, audit 2026-11-28).
-    who: "Roles with \"Assign chats\" — managers and admins by default.",
+    who: "Roles with \"Assign chats\" — agents, sales, managers and admins by default (owner 2026-11-28).",
     needs: { cap: "assign" },
     permission: "Service module, a chat you can see, and the Roles page's \"Assign chats\" for your role.",
     page: "/inbox",

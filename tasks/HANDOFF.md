@@ -37,9 +37,10 @@ that fails on the old code. **No data was changed**; nothing was deployed.
   the Service module to talk to customers about their jobs and could always reply; the cell
   was simply never checked. Enforcing it without this would have silenced every driver on
   deploy. A company can untick it on Settings → Roles.
-- **Agents / sales lose Assign by default** — that is what the matrix always said
-  (`assign: S, A, M`). If the owner wants agents to keep reassigning, tick "Assign chats"
-  for AGENT on Settings → Roles (one click per company).
+- **AGENT and SALES keep Assign by default (owner 2026-11-28)** — `permissions.ts` DEFAULTS
+  `assign: S, A, M, G, SL`, so nobody loses reassigning on deploy. Defaults live in code; a
+  company's saved choice on Settings → Roles (`connect.role_permission`, per cell) overrides them,
+  so an admin's earlier edit is never overwritten. The owner can untick it per role later.
 - The thread page itself still OPENS for a chat outside your visibility (read was not in
   scope); every write on it is refused.
 - The inbox `setPaymentStatus` action (no UI uses it) now needs "Confirm payments" too.
@@ -49,7 +50,7 @@ that fails on the old code. **No data was changed**; nothing was deployed.
   (progress is written once per chunk) — pre-existing, unchanged.
 
 **Verified locally** on a throwaway Postgres with the invented `help-shots-demo` data
-(localhost only): agent sees no Assign; Resolve on a colleague's chat is refused (status
+(localhost only): agent without "Assign chats" sees no Assign (checked under the old default; the switch now starts ON for agents); Resolve on a colleague's chat is refused (status
 unchanged in the DB) while their own chat closes; "Reply to customers" off → notes-only
 banner (desktop + 375 px); Delete hidden for the agent, shown for the Super Admin; Sending
 row shows "30 left" + Resume; SYNCED payment shows the lock text and no Reopen (desktop +
