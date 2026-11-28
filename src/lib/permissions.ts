@@ -33,8 +33,16 @@ export type MatrixRole = (typeof MATRIX_ROLES)[number];
 const S = "SUPER_ADMIN", A = "ADMIN", M = "MANAGER", G = "AGENT", SL = "SALES", V = "VIEWER", D = "DRIVER";
 export const DEFAULTS: Record<Capability, MatrixRole[]> = {
   seeAll: [S, A, M, V],
-  reply: [S, A, M, G, SL],
-  assign: [S, A, M],
+  // DRIVER added 2026-11-28 when "Reply to customers" started being enforced
+  // (lib/inbox-guard.ts): drivers start with the Service module to talk to
+  // customers about their jobs, and could always reply — the matrix cell just
+  // was not checked. Keeping them in the default means nobody loses a reply
+  // they had; a company can untick it on Settings → Roles.
+  reply: [S, A, M, G, SL, D],
+  // AGENT and SALES added 2026-11-28 (owner) when "Assign chats" started being
+  // enforced (lib/inbox-guard.ts): they could always reassign, and the owner wants
+  // them to keep it. A company's saved choice (connect.role_permission) still wins.
+  assign: [S, A, M, G, SL],
   campaigns: [S, A, M],
   automations: [S, A],
   payments: [S, A, M],

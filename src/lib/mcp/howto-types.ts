@@ -143,7 +143,6 @@ export const PAGE_GATES: Record<string, HowtoGate> = {
   "/settings/access": { admin: true },
   "/settings/departments": { module: "settings" },
   "/settings/auto-replies": { module: "settings" },
-  // No layout guard; the Settings menu lists it only with the settings module (SettingsMenu.tsx).
   "/settings/auto-assign": { module: "settings" },
   "/settings/library": { module: "settings" },
   "/settings/templates": { module: "settings" },

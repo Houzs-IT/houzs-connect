@@ -36,6 +36,7 @@ import { member } from "@/db/schema";
 import { bypassReadCache } from "@/db/fresh";
 import { ensureAccessTables } from "@/db/ensure-access";
 import { resolveModules, type Module } from "@/lib/module-access";
+import { can } from "@/lib/permissions";
 import { CORS_HEADERS, classifyPath, fitReply, isMcpAdminRole, MAX_RESULT_CHARS, MCP_PROTOCOL_VERSIONS, MCP_BLOCKED_PREFIXES, redactSecrets } from "./core";
 import { conversationDoc, contactDoc, parseFetchId, PROMPTS, promptText, recordUrl } from "./quick";
 import { ENDPOINTS, ReadError, companyName, findEndpoint, moduleCatalog, searchRecords, type McpMember, type ReadCtx } from "./reads";
@@ -419,6 +420,10 @@ function writeDeps(db: DB, id: Identity): WriteDeps {
       return { status: r.status, body: r.body, message: r.result.content[0]?.text ?? "" };
     },
     exec: connectExec(db, id.me),
+    caps: async () => {
+      const [reply, assign] = await Promise.all([can(id.me, "reply"), can(id.me, "assign")]);
+      return { reply, assign };
+    },
   };
 }
 

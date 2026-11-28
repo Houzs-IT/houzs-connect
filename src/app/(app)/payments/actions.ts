@@ -6,7 +6,7 @@ import { getDb } from "@/db/client";
 import { contact, conversation, payment } from "@/db/schema";
 import { getCurrentMember } from "@/lib/current-member";
 import { can } from "@/lib/permissions";
-import { onPaymentVerified } from "@/lib/sync/erp-payments";
+import { onPaymentVerified, paymentErpLock } from "@/lib/sync/erp-payments";
 
 /** The member, and the payment must belong to a contact in their company. */
 async function authorize(paymentId: string) {
@@ -30,6 +30,9 @@ export async function updatePaymentFields(
   const auth = await authorize(paymentId);
   if (!auth) return { ok: false, error: "Not found." };
   if (auth.row.status !== "PENDING") return { ok: false, error: "Only a receipt that is still to check can be changed." };
+  // A payment reopened after it reached the ERP (before this lock existed) stays read-only.
+  const locked = await paymentErpLock(auth.db, paymentId);
+  if (locked) return { ok: false, error: locked };
   const raw = fields.amount.replace(/[^\d.]/g, "");
   const amount = raw ? Number(raw) : null;
   if (amount != null && (!Number.isFinite(amount) || amount < 0)) return { ok: false, error: "That amount is not a number." };
@@ -50,9 +53,15 @@ export async function updatePaymentFields(
 export async function reviewPayment(
   paymentId: string,
   status: "VERIFIED" | "REJECTED" | "PENDING"
-): Promise<{ ok: boolean }> {
+): Promise<{ ok: boolean; error?: string }> {
   const auth = await authorize(paymentId);
-  if (!auth) return { ok: false };
+  if (!auth) return { ok: false, error: "Not found." };
+  // Already in the ERP: no reopen / reject here (erpLockReason). Confirming is
+  // still allowed — it only puts Connect back in line with what the ERP holds.
+  if (status !== "VERIFIED" && status !== auth.row.status) {
+    const locked = await paymentErpLock(auth.db, paymentId);
+    if (locked) return { ok: false, error: locked };
+  }
   await auth.db.update(payment).set({ status }).where(eq(payment.id, paymentId));
   // Confirming is the point a payment flows into the ERP (onto its Sales Order).
   if (status === "VERIFIED") await onPaymentVerified(auth.db, paymentId);

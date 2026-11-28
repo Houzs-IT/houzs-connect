@@ -18,11 +18,12 @@ import { recordInbound, sendOutbound } from "@/lib/whatsapp/transport";
 import {
   addConversationNoteCore,
   assignConversationCore,
-  authorizeConversationFor,
+  authorizeInboxWrite,
   sendReplyCore,
   setConversationStatusCore,
   type ConversationStatus,
 } from "@/lib/inbox-writes";
+import type { InboxWrite } from "@/lib/inbox-guard";
 import { countPlaceholders, listTemplates, templateConfig } from "@/lib/whatsapp/templates";
 import {
   handleCustomerReply,
@@ -31,7 +32,8 @@ import {
   handleTagAdded,
 } from "@/lib/automation/dispatch";
 import { isLive } from "@/lib/whatsapp/cloud-api";
-import { onPaymentVerified } from "@/lib/sync/erp-payments";
+import { onPaymentVerified, paymentErpLock } from "@/lib/sync/erp-payments";
+import { can } from "@/lib/permissions";
 
 /**
  * A signed-in member, and the conversation must be in THEIR company.
@@ -43,15 +45,16 @@ import { onPaymentVerified } from "@/lib/sync/erp-payments";
  * or mark a payment verified. The company check matters too: an id from another
  * tenant is not this member's to touch.
  */
-async function authorizeConversation(conversationId: string) {
+async function authorizeConversation(conversationId: string, write: InboxWrite = "other") {
   if (!conversationId) return null;
   const me = await getCurrentMember();
   if (!me) return null;
   const db = getDb();
-  // The rule itself is shared with the AI Connector's confirmed actions (lib/inbox-writes.ts).
-  const convo = await authorizeConversationFor(db, me, conversationId);
-  if (!convo) return null;
-  return { me, db, convo };
+  // The company rule (shared with the AI Connector, lib/inbox-writes.ts), then
+  // the rail's visibility and the Roles switch the write needs (lib/inbox-guard.ts).
+  const r = await authorizeInboxWrite(db, me, conversationId, write);
+  if (!r.ok) return null;
+  return { me, db, convo: r.convo };
 }
 
 /** Demo-mode send: records an outbound agent message on the conversation. */
@@ -62,7 +65,8 @@ export async function sendMessage(formData: FormData) {
   const replyTo = String(formData.get("replyTo") ?? "").trim();
   if (!conversationId || !body) return;
 
-  const auth = await authorizeConversation(conversationId);
+  // A note stays inside the team; anything else goes to the customer.
+  const auth = await authorizeConversation(conversationId, kind === "note" ? "other" : "reply");
   if (!auth) return;
   const { me, db } = auth;
 
@@ -109,7 +113,7 @@ export async function sendTemplateMessage(formData: FormData): Promise<void> {
   const paramsRaw = String(formData.get("params") ?? "");
   if (!conversationId || !templateName) return;
 
-  const auth = await authorizeConversation(conversationId);
+  const auth = await authorizeConversation(conversationId, "reply");
   if (!auth) return;
 
   const params = paramsRaw
@@ -172,7 +176,7 @@ export async function assignConversation(formData: FormData) {
   if (formData.has("assignedDepartmentId")) set.assignedDepartmentId = departmentId || null;
   if (!Object.keys(set).length) return;
 
-  const auth = await authorizeConversation(conversationId);
+  const auth = await authorizeConversation(conversationId, "assign");
   if (!auth) return;
   await assignConversationCore(auth.db, auth.me, auth.convo, set);
   revalidatePath(`/inbox/${conversationId}`);
@@ -300,14 +304,18 @@ export async function setPaymentStatus(formData: FormData) {
 
   // Marking money received is exactly the action that must not be reachable
   // without a session — and only for a payment in the member's own company.
+  // Same bar as the Payments page (payments/actions.ts authorize): the
+  // "Confirm payments" switch, not just a session.
   const me = await getCurrentMember();
-  if (!me) return;
+  if (!me || !(await can(me, "payments"))) return;
   const db = getDb();
   const row = await db.query.payment.findFirst({
     where: eq(payment.id, paymentId),
     with: { contact: true },
   });
   if (!row || row.contact.companyId !== me.companyId) return;
+  // Already in the ERP: no reopen / reject here (erp-payments-core.ts erpLockReason).
+  if (status !== "VERIFIED" && status !== row.status && (await paymentErpLock(db, paymentId))) return;
 
   await db
     .update(payment)

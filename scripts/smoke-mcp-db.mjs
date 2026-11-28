@@ -436,8 +436,14 @@ assert(!t.isError && t.content[0].text.startsWith("Cancelled"), "cancel_action")
 // Assign / resolve and a contact note, through the inbox's own cores.
 await actions.setSwitch(appDb, "conversation_assign", true, owner.id);
 await actions.setSwitch(appDb, "contact_note", true, owner.id);
+// Audit 2026-11-28: the Roles page's "Assign chats" is enforced. AGENT has it by default
+// (owner 2026-11-28); a company that unticks it on Settings → Roles takes it away.
+await sql.unsafe(`insert into connect.role_permission (company_id, role, capability, allowed) values ('${id("co")}', 'AGENT', 'assign', false)`);
 t = await call(tok.access_token, "propose_conversation_assign", { conversationId: id("v5"), assign_to: "Agent B", status: "resolved" });
-assert(!t.isError && J(t).summary.includes("→ Agent B"), `assign proposal (${t.content[0].text.slice(0, 200)})`);
+assert(t.isError && t.content[0].text.includes("Assign chats"), `an AGENT whose company unticked "Assign chats" cannot propose an assignment (${t.content[0].text.slice(0, 200)})`);
+await sql.unsafe(`delete from connect.role_permission where company_id = '${id("co")}'`);
+t = await call(tok.access_token, "propose_conversation_assign", { conversationId: id("v5"), assign_to: "Agent B", status: "resolved" });
+assert(!t.isError && J(t).summary.includes("→ Agent B"), `assign proposal once the Roles page allows it (${t.content[0].text.slice(0, 200)})`);
 let cv5 = (await sql.unsafe(`select status, assigned_agent_id from connect.conversation where id = '${id("v5")}'`))[0];
 assert(cv5.status === "OPEN" && cv5.assigned_agent_id === null, "the proposal changed nothing");
 t = await call(tok.access_token, "confirm_action", { confirmationId: J(await call(tok.access_token, "propose_conversation_assign", { conversationId: id("v5"), assign_to: "Agent B", status: "resolved" })).confirmationId });
@@ -449,6 +455,7 @@ const rem = (await sql.unsafe(`select attributes from connect.contact where id =
 assert(!t.isError && rem.remarks.startsWith("Existing remark\n[") && rem.remarks.endsWith("via AI Connector] Prefers weekday mornings"), `remarks appended (${JSON.stringify(rem)})`);
 
 // Back to the default (all off) and remove the extra chat.
+await sql.unsafe(`delete from connect.role_permission where company_id = '${id("co")}'`);
 for (const k of ["actions", "chat_reply", "conversation_assign", "contact_note"]) await actions.setSwitch(appDb, k, false, owner.id);
 await sql.unsafe(`delete from connect.message where conversation_id = '${id("v5")}'`);
 await sql.unsafe(`delete from connect.conversation where id = '${id("v5")}'`);

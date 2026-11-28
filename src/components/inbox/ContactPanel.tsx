@@ -92,6 +92,7 @@ export async function ContactPanel({
   proposedDates,
   payments,
   automation,
+  canAssign = true,
 }: {
   conversationId: string;
   contactName: string;
@@ -116,6 +117,8 @@ export async function ContactPanel({
   proposedDates: { date: string; at: string; source: "erp" | "customer" }[];
   payments: Payment[];
   automation: AutomationProgress | null;
+  /** The Roles page's "Assign chats"; without it the agent / department show as text (lib/inbox-guard.ts). */
+  canAssign?: boolean;
 }) {
   const t = await getDict();
   const s = t.service;
@@ -138,6 +141,9 @@ export async function ContactPanel({
         </div>
         <div className="grid grid-cols-[84px_minmax(0,1fr)] items-center gap-y-[9px] px-3 py-2.5 text-[12.5px]">
           <span className="text-[var(--color-muted)]">{s.agent}</span>
+          {!canAssign ? (
+            <span className="truncate">{members.find((m) => m.id === agentId)?.name ?? s.unassignedOpt}</span>
+          ) : (
           <form action={assignConversation}>
             <input type="hidden" name="conversationId" value={conversationId} />
             <SubmitSelect name="assignedAgentId" defaultValue={agentId ?? ""} className={SELECT} aria-label={s.agent}>
@@ -147,8 +153,12 @@ export async function ContactPanel({
               ))}
             </SubmitSelect>
           </form>
+          )}
 
           <span className="text-[var(--color-muted)]">{s.department}</span>
+          {!canAssign ? (
+            <span className="truncate">{departments.find((d) => d.id === departmentId)?.name ?? s.none}</span>
+          ) : (
           <form action={assignConversation}>
             <input type="hidden" name="conversationId" value={conversationId} />
             <SubmitSelect name="assignedDepartmentId" defaultValue={departmentId ?? ""} className={SELECT} aria-label={s.department}>
@@ -158,6 +168,7 @@ export async function ContactPanel({
               ))}
             </SubmitSelect>
           </form>
+          )}
 
           <span className="text-[var(--color-muted)]">{s.firstReply}</span>
           <span className="flex items-center gap-1.5 tabular-nums">
@@ -464,7 +475,7 @@ export async function ContactPanel({
           </div>
           {!id.isPhone && <div className="text-[10.5px] text-[var(--color-faint)]">{s.usernameOnly}</div>}
         </div>
-        <ConversationMenu conversationId={conversationId} />
+        <ConversationMenu conversationId={conversationId} canAssign={canAssign} />
       </div>
 
       <PanelTabs

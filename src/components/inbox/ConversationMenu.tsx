@@ -26,8 +26,11 @@ async function markPending(fd: FormData) {
 export function ConversationMenu({
   conversationId,
   drips = [],
+  canAssign = true,
 }: {
   conversationId: string;
+  /** The Roles page's "Assign chats": without it there is no Unassign (lib/inbox-guard.ts). */
+  canAssign?: boolean;
   /** Live drips the agent can enrol this contact into (inbox menu). */
   drips?: { id: string; name: string }[];
 }) {
@@ -39,7 +42,7 @@ export function ConversationMenu({
     { label: s.markUnread, run: markConversationUnread },
     { label: s.markPending, run: markPending },
     { label: s.pushQueue, run: pushConversationToQueue },
-    { label: s.unassign, run: unassignConversation },
+    ...(canAssign ? [{ label: s.unassign, run: unassignConversation }] : []),
   ];
 
   return (

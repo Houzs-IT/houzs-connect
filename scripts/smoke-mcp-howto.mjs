@@ -99,6 +99,14 @@ for (const g of HOWTO_GUIDES.filter((x) => /campaign|broadcast/.test(x.id) && x.
   // Every guarded page a guide could send people to is in PAGE_GATES.
   for (const [route, g] of Object.entries(guards)) if ((g.module || g.admin) && !T.PAGE_GATES[route] && !route.includes(":") && HOWTO_GUIDES.some((x) => x.page === route)) bad.push(`${route}: guarded but no gate`);
   none(bad, "page gates equal the requireModule / requireAdmin guards in src/app");
+  // Regression (audit 2026-11-28): /inbox, /contacts, /internal and /settings/auto-assign
+  // had a module in PAGE_GATES but no requireModule in src/app, so unticking the module
+  // only hid the menu entry — the page still opened by URL. Every module gate must be
+  // enforced by the app itself, not just described here.
+  const unguarded = Object.entries(T.PAGE_GATES)
+    .filter(([route, gate]) => gate.module && guards[route]?.module !== gate.module)
+    .map(([route, gate]) => `${route}: gate needs "${gate.module}" but the page has no requireModule("${gate.module}")`);
+  none(unguarded, "every module gate is enforced by requireModule in the page or its layout");
 }
 {
   const allMods = [...ALL_MODULES];

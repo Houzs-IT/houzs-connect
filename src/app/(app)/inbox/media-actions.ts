@@ -14,6 +14,7 @@
 import { revalidatePath } from "next/cache";
 import { and, asc, eq, ilike, or } from "drizzle-orm";
 import { getCurrentMember } from "@/lib/current-member";
+import { authorizeInboxWrite } from "@/lib/inbox-writes";
 import { getDb } from "@/db/client";
 import { contact, conversation, message } from "@/db/schema";
 import { isLive } from "@/lib/whatsapp/cloud-api";
@@ -43,16 +44,15 @@ import { senderForChannel, UNASSIGNED_SENDER } from "@/lib/whatsapp/channels";
  * signed-in user could push a file into another tenant's customer thread.
  */
 async function authorizeConversation(conversationId: string) {
-  if (!conversationId) return null;
+  if (!conversationId) return { error: NOT_YOURS } as const;
   const me = await getCurrentMember();
-  if (!me) return null;
+  if (!me) return { error: NOT_YOURS } as const;
   const db = getDb();
-  const convo = await db.query.conversation.findFirst({
-    where: eq(conversation.id, conversationId),
-    with: { contact: true },
-  });
-  if (!convo || convo.contact.companyId !== me.companyId) return null;
-  return { me, db, convo };
+  // Every action here SENDS to the customer: the company rule, the rail's
+  // visibility and "Reply to customers" (lib/inbox-guard.ts).
+  const r = await authorizeInboxWrite(db, me, conversationId, "reply");
+  if (!r.ok) return { error: r.error } as const;
+  return { me, db, convo: r.convo, error: null };
 }
 
 const NOT_YOURS =
@@ -86,7 +86,7 @@ export async function sendAttachment(
   const originalName = typeof (file as File).name === "string" ? (file as File).name : "attachment";
 
   const auth = await authorizeConversation(conversationId);
-  if (!auth) return { ok: false, error: NOT_YOURS };
+  if (auth.error !== null) return { ok: false, error: auth.error };
 
   // Re-run the browser's check server-side: it is the only one that counts.
   const mimeType = resolveMimeType(originalName, file.type);
@@ -159,7 +159,7 @@ export async function sendVoiceNote(
   const durationMs = Number.isFinite(rawDuration) && rawDuration > 0 ? Math.round(rawDuration) : 0;
 
   const auth = await authorizeConversation(conversationId);
-  if (!auth) return { ok: false, error: NOT_YOURS };
+  if (auth.error !== null) return { ok: false, error: auth.error };
 
   // The same gate every other send passes: a blocked contact must leave no
   // trace of a message that was never meant to exist.
@@ -282,7 +282,7 @@ export async function sendContactCard(
   if (!contactId) return { ok: false, error: "No contact was chosen." };
 
   const auth = await authorizeConversation(conversationId);
-  if (!auth) return { ok: false, error: NOT_YOURS };
+  if (auth.error !== null) return { ok: false, error: auth.error };
 
   // The conversation being theirs does not make the CONTACT theirs: the id
   // comes from the browser, so it gets its own company check.

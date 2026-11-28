@@ -86,7 +86,8 @@ export function appGuards() {
   const guardOf = (file) => {
     const src = fs.readFileSync(file, "utf8");
     const g = {};
-    const m = /requireModule\("([a-z]+)"\)/.exec(src);
+    // requireModule("x"), or the hand-written form `(await myModules()).includes("x")` + redirect.
+    const m = /requireModule\("([a-z]+)"\)/.exec(src) ?? /myModules\(\)\)\.includes\("([a-z]+)"\)/.exec(src);
     if (m) g.module = m[1];
     if (/\brequireAdmin\(\)/.test(src) && !/function requireAdmin/.test(src)) g.admin = true;
     return g;

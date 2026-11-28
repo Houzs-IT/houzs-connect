@@ -7,6 +7,7 @@ import { attrs, formatPhone, previewText, waIdentifier } from "@/lib/format";
 import { getContactsColsRaw, getDict } from "@/lib/i18n/server";
 import { getMemberContactCols } from "@/lib/member-prefs";
 import { ensureContactColumns, normalisePhone } from "./actions";
+import { mayDeleteContacts } from "@/lib/contact-access";
 import { ContactDetail } from "./ContactDetail";
 import { PhoneList } from "./PhoneList";
 import { ContactsView, type ContactRow } from "./ContactsView";
@@ -35,6 +36,7 @@ const one = (v: string | string[] | undefined) => ((Array.isArray(v) ? v[0] : v)
 export default async function ContactsPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const me = await getCurrentMember();
   if (!me) return null;
+  const canDelete = await mayDeleteContacts(me);
   const db = getDb();
   const sp = await searchParams;
   const t = await getDict();
@@ -145,6 +147,7 @@ export default async function ContactsPage({ searchParams }: { searchParams: Pro
           duplicates={dups}
           activeId={activeId}
           initialColsRaw={(await getMemberContactCols(db, me.email)) ?? (await getContactsColsRaw())}
+          canDelete={canDelete}
         />
         </div>
         {activeId && (
@@ -155,6 +158,7 @@ export default async function ContactsPage({ searchParams }: { searchParams: Pro
             s={s}
             statusLabel={t.service.statusLabel}
             yesterday={t.service.yesterday}
+            canDelete={canDelete}
           />
         )}
       </div>

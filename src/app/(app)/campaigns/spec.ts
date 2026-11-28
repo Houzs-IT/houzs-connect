@@ -301,6 +301,8 @@ export interface SendResult {
   recipients?: number;
   /** Recipients still unsent after this chunk. The caller loops while > 0. */
   remaining?: number;
+  /** Another send holds this campaign right now (send.ts lease) — not a failure. */
+  busy?: boolean;
   error?: string;
 }
 

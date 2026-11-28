@@ -7,12 +7,12 @@
 // claims each item atomically (a conditional UPDATE) so two overlapping ticks
 // can never double-fire the same run or campaign.
 
-import { and, eq, isNotNull, lte, or } from "drizzle-orm";
+import { and, eq, isNotNull, lte, or, sql } from "drizzle-orm";
 import { getDb } from "@/db/client";
 import { automationRun, campaign as campaignTable } from "@/db/schema";
 import { ensureAutomationRunColumns } from "@/db/ensure-automation-run";
 import { resumeDelayRun } from "./engine";
-import { sendCampaignChunk } from "@/app/(app)/campaigns/send";
+import { leaseFree, sendCampaignChunk, type Db } from "@/app/(app)/campaigns/send";
 
 /** Delayed runs resumed per tick. One `advance()` each; the 2-min cron catches
  *  the rest. */
@@ -22,6 +22,13 @@ const DELAY_BATCH = 100;
  *  campaign (each chunk is SEND_CHUNK recipients). */
 const CAMPAIGN_LIMIT = 10;
 const CAMPAIGN_MAX_CHUNKS = 500;
+/** A campaign left "sending" (tab closed, a tick's chunk cap, a killed Worker)
+ *  is resumed by the cron only while it is this fresh — counted from
+ *  stats.startedAt. Older ones wait for a person to press Resume on the
+ *  Campaigns page, so a campaign that stalled long ago (including any stuck
+ *  before the 2026-11-28 fix) never wakes up by itself and reaches customers
+ *  days late. */
+export const RESUME_WITHIN_HOURS = 6;
 
 /**
  * Wake automation runs that paused on a Delay node whose time is up. Claims each
@@ -62,32 +69,41 @@ export async function resumeDueDelays(): Promise<{ resumed: number }> {
   return { resumed };
 }
 
-/**
- * Send SCHEDULED campaigns whose time has arrived (and that are approved, or need
- * no approval). The atomic draft/scheduled→sending claim lives inside
- * sendCampaignChunk, so this never races a manual "Send now"; each due campaign
- * is driven to completion here, bounded by the chunk cap to protect the tick's
- * budget. A campaign too large for one tick is left "sending" for an operator to
- * finish — the same ceiling the manual loop already lives with.
- */
-export async function sendDueScheduledCampaigns(): Promise<{ campaigns: number; sent: number }> {
-  const db = getDb();
-  const now = new Date();
-  const due = await db
+/** The campaigns a tick should send: due scheduled ones, and recent ones left "sending" with a free lease. */
+export async function campaignsToSend(db: Db, now: Date): Promise<{ id: string; companyId: string }[]> {
+  const approved = or(eq(campaignTable.requiresApproval, false), isNotNull(campaignTable.approvedByMemberId));
+  return db
     .select({ id: campaignTable.id, companyId: campaignTable.companyId })
     .from(campaignTable)
     .where(
-      and(
-        eq(campaignTable.status, "scheduled"),
-        isNotNull(campaignTable.scheduleAt),
-        lte(campaignTable.scheduleAt, now),
-        or(
-          eq(campaignTable.requiresApproval, false),
-          isNotNull(campaignTable.approvedByMemberId)
+      or(
+        and(eq(campaignTable.status, "scheduled"), isNotNull(campaignTable.scheduleAt), lte(campaignTable.scheduleAt, now), approved),
+        // Audit 2026-11-28 (X3): a campaign that stopped halfway used to stay
+        // "sending" forever — the cron only looked at "scheduled". Resume it
+        // when nobody holds its lease (send.ts) and it started recently.
+        and(
+          eq(campaignTable.status, "sending"),
+          approved,
+          leaseFree,
+          sql`(${campaignTable.stats} ->> 'startedAt')::timestamptz > now() - make_interval(hours => ${RESUME_WITHIN_HOURS})`
         )
       )
     )
     .limit(CAMPAIGN_LIMIT);
+}
+
+/**
+ * Send SCHEDULED campaigns whose time has arrived (and that are approved, or need
+ * no approval), and resume recent ones left "sending". The claim + lease live
+ * inside sendCampaignChunk, so this never races a manual "Send now" (the loser
+ * gets `busy` and stops); each campaign is driven to completion here, bounded
+ * by the chunk cap to protect the tick's budget. A campaign too large for one
+ * tick stays "sending" and the next tick carries on.
+ */
+export async function sendDueScheduledCampaigns(): Promise<{ campaigns: number; sent: number }> {
+  const db = getDb();
+  const now = new Date();
+  const due = await campaignsToSend(db, now);
 
   let campaigns = 0;
   let sent = 0;
